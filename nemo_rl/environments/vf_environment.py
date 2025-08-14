@@ -59,9 +59,23 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         for messages, meta in zip(message_log_batch, metadata):
-            # If state is None, initialize an empty state.
+            # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
-                meta["state"] = {}
+                # Find last user message index.
+                last_user_index = 0
+                for i, m in enumerate(messages):
+                    if m.get("role") == "user":
+                        last_user_index = i
+                
+                meta["state"] = self.env.setup_state({
+                    "prompt": messages[:last_user_index+1],
+                    "completion": messages[last_user_index+1:],
+                    "answer": meta.get("answer", None),
+                    "task": meta.get("task", "default"),
+                    "info": meta.get("info", None),
+                    "responses": messages[last_user_index+1:],
+                    "turn": sum(1 for m in messages if m.get("role") == "assistant"),
+                })
             
             if self.env.is_completed(messages, meta["state"]):
                 # Rollout marked complete - calculate rewards and finalize.
@@ -69,8 +83,8 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 # TODO: Make some affordance for Kimi-style group-relative judgement here.
                 # We're using standard verifiers-style reward functions, which evaluate in a vacuum.
                 results: vf.RolloutScore = await self.env.rubric.score_rollout(
-                    messages[-1:],
-                    messages[-1:],
+                    meta["state"]["prompt"],
+                    meta["state"]["completion"],
                     meta.get("answer", None),
                     meta["state"],
                     meta.get("task", None),
