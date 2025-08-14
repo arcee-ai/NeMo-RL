@@ -2,7 +2,7 @@
 grpo:
   num_prompts_per_step: 8
   num_generations_per_prompt: 16
-  max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
+  max_rollout_turns: 2
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
@@ -39,7 +39,7 @@ policy:
   train_micro_batch_size: 4
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
-  max_total_sequence_length: 2048
+  max_total_sequence_length: 1024
   precision: "bfloat16"
 
   dtensor_cfg:
