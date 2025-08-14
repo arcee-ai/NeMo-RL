@@ -1,3 +1,9 @@
+"""
+This file was originally created for Prime Intellect's prime-rl.
+
+https://github.com/PrimeIntellect-ai/prime-rl/blob/main/environments/vf_alphabet_sort/vf_alphabet_sort.py
+"""
+
 import difflib
 import json
 import random
