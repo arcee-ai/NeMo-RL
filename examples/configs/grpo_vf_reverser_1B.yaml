@@ -6,7 +6,7 @@ grpo:
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
-  val_period: 10
+  val_period: 0
   val_at_start: false
   max_val_samples: 256
   val_batch_size: 256
