@@ -129,7 +129,7 @@ data:
 
 env:
   vf:
-    environment_name: "nemo_rl.environments.verifiers.vf_smolagents_math_tools"
+    environment_name: "nemo_rl.environments.verifiers.vf_smolagents_math_tools.vf_smolagents_math_tools"
 
 logger:
   log_dir: "logs"  # Base directory for all logs
