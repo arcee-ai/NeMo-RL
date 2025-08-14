@@ -111,7 +111,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             next_stop_strings=next_stop_strings,
             rewards=torch.tensor(rewards).cpu(),
             terminateds=torch.tensor(terminated).cpu(),
-            answers=[None] * len(message_log_batch),
+            answers=answers,
         )
         
     def global_post_process_and_metrics(self, batch: BatchedDataDict[Any]) -> tuple[BatchedDataDict[Any], dict[str, float | int]]:
