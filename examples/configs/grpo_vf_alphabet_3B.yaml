@@ -24,7 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo"
+  checkpoint_dir: "results/grpo_vf_alphabet_3B"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
