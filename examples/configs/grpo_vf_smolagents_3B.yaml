@@ -32,7 +32,7 @@ checkpointing:
   checkpoint_must_save_by: null
 
 policy:
-  model_name: "Qwen/Qwen2.5-3B-Instruct"
+  model_name: "Qwen/Qwen3-4B-Instruct-2507"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 128
@@ -101,9 +101,10 @@ policy:
   generation:
     backend: "vllm"
     max_new_tokens: ${policy.max_total_sequence_length}
-    temperature: 1.0
-    top_p: 1.0
-    top_k: null
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    min_p: 0.0
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
