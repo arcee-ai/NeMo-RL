@@ -59,6 +59,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         for messages, meta in zip(message_log_batch, metadata):
+            # If state is None, initialize an empty state.
             if meta["state"] is None:
                 meta["state"] = {}
             
@@ -70,10 +71,10 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 results: vf.RolloutScore = await self.env.rubric.score_rollout(
                     messages[-1:],
                     messages[-1:],
-                    meta["answer"],
+                    meta.get("answer", None),
                     meta["state"],
-                    meta["task"],
-                    meta["info"],
+                    meta.get("task", None),
+                    meta.get("info", None),
                 )
                 
                 # There isn't another rollout after this one, so the model doesn't actually see this.
@@ -100,10 +101,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 terminated.append(False)
             
             # Use verifiers answer field if present.
-            if "answer" in meta and meta["answer"] is not None:
-                answers.append(meta["answer"])
-            else:
-                answers.append(None)
+            answers.append(meta.get("answer", None))
         
         return EnvironmentReturn(
             observations=observations,
