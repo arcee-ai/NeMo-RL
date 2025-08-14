@@ -125,7 +125,11 @@ def setup_data(
     print("\n▶ Loading verifiers environment dataset...")
     
     # Load the verifiers environment, just to get the dataset. This is not used for grading.
-    vf_env_loaded = vf.load_environment(env_configs["vf"]["environment_name"])
+    try:
+        vf_env_loaded = vf.load_environment(env_configs["vf"]["environment_name"])
+    except ValueError as e:
+        raise ValueError(f"Failed to load verifiers environment {env_configs['vf']['environment_name']}. Make sure it is installed (`uv pip install -e examples/vf-envs/your-environment`).") from e
+    
     # Fixes up stuff like "question" to normal message log prompts.
     data = vf_env_loaded.format_dataset(vf_env_loaded.dataset)
 

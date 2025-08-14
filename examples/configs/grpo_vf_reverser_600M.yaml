@@ -129,7 +129,7 @@ data:
 
 env:
   vf:
-    environment_name: "nemo_rl.environments.verifiers.alphabet_env"
+    environment_name: "vf_reverse_text"
 
 logger:
   log_dir: "logs"  # Base directory for all logs

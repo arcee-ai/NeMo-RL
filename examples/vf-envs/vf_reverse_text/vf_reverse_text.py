@@ -1,9 +1,3 @@
-"""
-This file was originally created for Prime Intellect's prime-rl.
-
-https://github.com/PrimeIntellect-ai/prime-rl/blob/main/environments/vf_reverse_text/vf_reverse_text.py
-"""
-
 import verifiers as vf
 from datasets import load_dataset
 
