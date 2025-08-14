@@ -1,0 +1,254 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import argparse
+import os
+import pprint
+from collections import defaultdict
+from typing import Any, Optional
+
+from omegaconf import OmegaConf
+from transformers import PreTrainedTokenizerBase
+
+from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
+from nemo_rl.algorithms.utils import get_tokenizer
+from nemo_rl.data import DataConfig
+from nemo_rl.data.datasets import AllTaskProcessedDataset
+from nemo_rl.data.interfaces import (
+    DatumSpec,
+    LLMMessageLogType,
+    TaskDataProcessFnCallable,
+    TaskDataSpec,
+)
+from nemo_rl.distributed.ray_actor_environment_registry import (
+    get_actor_python_env,
+)
+from nemo_rl.distributed.virtual_cluster import init_ray
+from nemo_rl.environments.interfaces import EnvironmentInterface
+from nemo_rl.models.generation import configure_generation_config
+from nemo_rl.utils.config import load_config, parse_hydra_overrides
+from nemo_rl.utils.logger import get_next_experiment_dir
+
+import verifiers as vf
+
+OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
+
+
+def parse_args() -> tuple[argparse.Namespace, list[str]]:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Run GRPO training with configuration")
+    parser.add_argument(
+        "--config", type=str, default=None, help="Path to YAML config file"
+    )
+
+    # Parse known args for the script
+    args, overrides = parser.parse_known_args()
+
+    return args, overrides
+
+
+# ===============================================================================
+#                             Math Data Processor
+# ===============================================================================
+TokenizerType = PreTrainedTokenizerBase
+
+
+# TaskDataProcessFnCallable
+def vf_data_processor(
+    datum_dict: dict[str, Any],
+    task_data_spec: TaskDataSpec,
+    tokenizer: TokenizerType,
+    max_seq_length: int,
+    idx: int,
+) -> DatumSpec:
+    """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""
+    if "question" in datum_dict:
+        # TODO: Add support for this in the main body.
+        raise NotImplementedError("Question datasets are not supported yet.")
+    
+    prompt_messages = datum_dict["prompt"]
+    extra_env_info = {key: datum_dict[key] for key in datum_dict if key not in ["prompt", "question"]}
+    
+    if not("answer" in extra_env_info or "info" in extra_env_info):
+        raise ValueError("One of 'answer' or 'info' must be present in each datapoint. Found neither.", datum_dict)
+
+    message_log: LLMMessageLogType = []
+    # NeMo-RL expects an odd format with a standard message log alongside token IDs.
+    # Go through and convert each message.
+    for message in prompt_messages:
+        message: list[str] = tokenizer.apply_chat_template(  # type: ignore
+            [message],
+            tokenize=False,
+            add_generation_prompt=True,
+            add_special_tokens=False,
+        )
+
+        message["token_ids"] = tokenizer(
+            message,
+            return_tensors="pt",
+            add_special_tokens=False,
+        )["input_ids"][0]
+        message["content"] = message
+        message_log.append(message)
+
+    length = sum(len(m["token_ids"]) for m in message_log)
+
+    if length > max_seq_length:
+        raise ValueError(f"Prompt length {length} exceeds max_seq_length {max_seq_length}.", datum_dict)
+
+    output: DatumSpec = {
+        "message_log": message_log,
+        "length": length,
+        "extra_env_info": extra_env_info,
+        "loss_multiplier": 1.0,
+        "idx": idx,
+        "task_name": datum_dict["task_name"],
+    }
+    return output
+
+
+def setup_data(
+    tokenizer: TokenizerType,
+    data_config: DataConfig,
+    env_configs: dict[str, Any],
+    seed: int,
+) -> tuple[
+    AllTaskProcessedDataset,
+    Optional[AllTaskProcessedDataset],
+    dict[str, EnvironmentInterface],
+    dict[str, EnvironmentInterface],
+]:
+    print("\n▶ Loading verifiers environment dataset...")
+    
+    # Load the verifiers environment, just to get the dataset. This is not used for grading.
+    vf_env_loaded = vf.load_environment(env_configs["vf"]["environment_name"])
+    data = vf_env_loaded.get_dataset()
+
+    # This is the Ray worker that actually runs the environment.
+    vf_env = VfEnvironment.options(  # type: ignore # it's wrapped with ray.remote
+        runtime_env={
+            "py_executable": get_actor_python_env(
+                "nemo_rl.environments.vf_environment.VfEnvironment"
+            ),
+            "env_vars": dict(os.environ),  # Pass thru all user environment variables
+        }
+    ).remote(env_configs["vf"])
+    
+    dataset = AllTaskProcessedDataset(
+        data,
+        tokenizer,
+        TaskDataSpec("vf"),
+        vf_data_processor,
+        max_seq_length=data_config["max_input_seq_length"],
+    )
+
+    val_dataset: Optional[AllTaskProcessedDataset] = None
+    if vf_env_loaded.eval_dataset:
+        val_dataset = AllTaskProcessedDataset(
+            vf_env_loaded.eval_dataset,
+            tokenizer,
+            TaskDataSpec("vf"),
+            vf_data_processor,
+            max_seq_length=data_config["max_input_seq_length"],
+        )
+    else:
+        val_dataset = None
+
+    task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: vf_env)
+    task_to_env["vf"] = vf_env
+    return dataset, val_dataset, task_to_env, task_to_env
+
+
+def main() -> None:
+    """Main entry point."""
+    # Parse arguments
+    args, overrides = parse_args()
+
+    if not args.config:
+        args.config = os.path.join(
+            os.path.dirname(__file__), "configs", "grpo_math_1B.yaml"
+        )
+
+    config = load_config(args.config)
+    print(f"Loaded configuration from: {args.config}")
+
+    if overrides:
+        print(f"Overrides: {overrides}")
+        config = parse_hydra_overrides(config, overrides)
+
+    config: MasterConfig = OmegaConf.to_container(config, resolve=True)
+    print("Applied CLI overrides")
+
+    # Print config
+    print("Final config:")
+    pprint.pprint(config)
+
+    # Get the next experiment directory with incremented ID
+    config["logger"]["log_dir"] = get_next_experiment_dir(config["logger"]["log_dir"])
+    print(f"📊 Using log directory: {config['logger']['log_dir']}")
+    if config["checkpointing"]["enabled"]:
+        print(
+            f"📊 Using checkpoint directory: {config['checkpointing']['checkpoint_dir']}"
+        )
+
+    init_ray()
+
+    # setup tokenizer
+    tokenizer = get_tokenizer(config["policy"]["tokenizer"])
+    assert config["policy"]["generation"] is not None, (
+        "A generation config is required for GRPO"
+    )
+    config["policy"]["generation"] = configure_generation_config(
+        config["policy"]["generation"], tokenizer
+    )
+
+    # setup data
+    (
+        dataset,
+        val_dataset,
+        task_to_env,
+        val_task_to_env,
+    ) = setup_data(tokenizer, config["data"], config["env"], config["grpo"]["seed"])
+
+    (
+        policy,
+        policy_generation,
+        cluster,
+        dataloader,
+        val_dataloader,
+        loss_fn,
+        logger,
+        checkpointer,
+        grpo_state,
+        master_config,
+    ) = setup(config, tokenizer, dataset, val_dataset)
+
+    grpo_train(
+        policy,
+        policy_generation,
+        dataloader,
+        val_dataloader,
+        tokenizer,
+        loss_fn,
+        task_to_env,
+        val_task_to_env,
+        logger,
+        checkpointer,
+        grpo_state,
+        master_config,
+    )
+
+
+if __name__ == "__main__":
+    main()
