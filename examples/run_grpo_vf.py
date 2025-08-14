@@ -68,13 +68,9 @@ def vf_data_processor(
     max_seq_length: int,
     idx: int,
 ) -> DatumSpec:
-    """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""
-    if "question" in datum_dict:
-        # TODO: Add support for this in the main body.
-        raise NotImplementedError("Question datasets are not supported yet.")
-    
+    """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""    
     prompt_messages = datum_dict["prompt"]
-    extra_env_info = {key: datum_dict[key] for key in datum_dict if key not in ["prompt", "question"]}
+    extra_env_info = {key: datum_dict[key] for key in datum_dict if key != "prompt"}
     
     if not("answer" in extra_env_info or "info" in extra_env_info):
         raise ValueError("One of 'answer' or 'info' must be present in each datapoint. Found neither.", datum_dict)
@@ -130,7 +126,8 @@ def setup_data(
     
     # Load the verifiers environment, just to get the dataset. This is not used for grading.
     vf_env_loaded = vf.load_environment(env_configs["vf"]["environment_name"])
-    data = vf_env_loaded.get_dataset()
+    # Fixes up stuff like "question" to normal message log prompts.
+    data = vf_env_loaded.format_dataset()
 
     # This is the Ray worker that actually runs the environment.
     vf_env = VfEnvironment.options(  # type: ignore # it's wrapped with ray.remote
