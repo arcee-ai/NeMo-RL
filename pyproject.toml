@@ -46,7 +46,8 @@ dependencies = [
     "matplotlib",
     "plotly",
     "mlflow",
-    "verifiers"
+    "verifiers",
+    "vllm==0.10.0",
 ]
 
 [project.optional-dependencies]
