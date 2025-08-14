@@ -139,8 +139,8 @@ logger:
   mlflow_enabled: false  # Disable MLflow logging
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
-    project: "grpo-dev"
-    name: "grpo-dev-logger"
+    project: "nemo-grpo-dev"
+    name: "grpo-vf-alphabet-3B"
   tensorboard: {}
   mlflow:
     experiment_name: "grpo-vf-alphabet-3B"
