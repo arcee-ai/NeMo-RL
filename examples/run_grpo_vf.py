@@ -97,7 +97,7 @@ def vf_data_processor(
     length = sum(len(m["token_ids"]) for m in message_log)
 
     if length > max_seq_length:
-        raise ValueError(f"Prompt length {length} exceeds max_seq_length {max_seq_length}.", datum_dict)
+        raise ValueError(f"Prompt length {length} exceeds specified maximum input length {max_seq_length}.", datum_dict)
 
     output: DatumSpec = {
         "message_log": message_log,
