@@ -49,8 +49,7 @@ class PY_EXECUTABLES:
     AUTOMODEL = "uv run --locked --extra automodel"
 
     # Use NeMo-RL direct dependencies and vllm.
-    # TODO: this is a hack and hard-deps us on vLLM
-    VLLM = "uv run --locked"
+    VLLM = "uv run --locked --extra vllm"
 
     # Megatron-core (and nemo dependencies)
     # We always run with --reinstall to avoid issues where someone runs "uv run ... --extra mcore ..."
