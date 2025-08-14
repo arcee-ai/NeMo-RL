@@ -143,7 +143,7 @@ logger:
     name: "grpo-dev-logger"
   tensorboard: {}
   mlflow:
-    experiment_name: "grpo-dev"
+    experiment_name: "grpo-vf-reverser-0.6B"
     run_name: "grpo-dev-logger"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)

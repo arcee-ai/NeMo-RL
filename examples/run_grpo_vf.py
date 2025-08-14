@@ -171,7 +171,7 @@ def main() -> None:
 
     if not args.config:
         args.config = os.path.join(
-            os.path.dirname(__file__), "configs", "grpo_vf_reverser_1B.yaml"
+            os.path.dirname(__file__), "configs", "grpo_vf_reverser_600M.yaml"
         )
 
     config = load_config(args.config)
