@@ -35,12 +35,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     def __init__(self, cfg: VfEnvironmentConfig):
         self.cfg = cfg
         
-        # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup.
-        # TODO: Work out a replacement for EnvGroup with proper MultiTurnEnv support.
-        if not isinstance(self.env, vf.MultiTurnEnv):
-            raise TypeError("VfEnvironment only supports MultiTurnEnv environments (this includes SingleTurnEnv and ToolEnv but not EnvGroup).")
-        
-        if cfg["environment_config"] is None:
+        if "environment_config" not in cfg or cfg["environment_config"] is None:
             env_cfg = {}
         else:
             env_cfg = cfg["environment_config"]
@@ -50,12 +45,19 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             **env_cfg,
         )
         
+        # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup.
+        # TODO: Work out a replacement for EnvGroup with proper MultiTurnEnv support.
+        if not isinstance(self.env, vf.MultiTurnEnv):
+            raise TypeError("VfEnvironment only supports MultiTurnEnv environments (this includes SingleTurnEnv and ToolEnv but not EnvGroup).")
+        
+        
     async def step(self, message_log_batch: list[LLMMessageLogType], metadata: list[VfEnvironmentMetadata]) -> EnvironmentReturn[VfEnvironmentMetadata]:
         observations = []
         next_metadata = []
         next_stop_strings = []
         rewards = []  # Gets converted to tensor at the end.
         terminated = []  # Also gets converted to tensor.
+        answers = []
         for messages, meta in zip(message_log_batch, metadata):
             if meta["state"] is None:
                 meta["state"] = {}
@@ -96,6 +98,12 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 next_stop_strings.append([])
                 rewards.append(0)
                 terminated.append(False)
+            
+            # Use verifiers answer field if present.
+            if "answer" in meta and meta["answer"] is not None:
+                answers.append(meta["answer"])
+            else:
+                answers.append(None)
         
         return EnvironmentReturn(
             observations=observations,
@@ -103,6 +111,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             next_stop_strings=next_stop_strings,
             rewards=torch.tensor(rewards).cpu(),
             terminateds=torch.tensor(terminated).cpu(),
+            answers=[None] * len(message_log_batch),
         )
         
     def global_post_process_and_metrics(self, batch: BatchedDataDict[Any]) -> tuple[BatchedDataDict[Any], dict[str, float | int]]:

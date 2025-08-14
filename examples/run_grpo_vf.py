@@ -21,6 +21,7 @@ from typing import Any, Optional
 from omegaconf import OmegaConf
 from transformers import PreTrainedTokenizerBase
 
+from nemo_rl.environments.vf_environment import VfEnvironment
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import DataConfig
@@ -28,7 +29,6 @@ from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.data.interfaces import (
     DatumSpec,
     LLMMessageLogType,
-    TaskDataProcessFnCallable,
     TaskDataSpec,
 )
 from nemo_rl.distributed.ray_actor_environment_registry import (
@@ -58,11 +58,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     return args, overrides
 
 
-# ===============================================================================
-#                             Math Data Processor
-# ===============================================================================
 TokenizerType = PreTrainedTokenizerBase
-
 
 # TaskDataProcessFnCallable
 def vf_data_processor(
@@ -87,7 +83,7 @@ def vf_data_processor(
     # NeMo-RL expects an odd format with a standard message log alongside token IDs.
     # Go through and convert each message.
     for message in prompt_messages:
-        message: list[str] = tokenizer.apply_chat_template(  # type: ignore
+        raw_message: list[str] = tokenizer.apply_chat_template(  # type: ignore
             [message],
             tokenize=False,
             add_generation_prompt=True,
@@ -95,11 +91,13 @@ def vf_data_processor(
         )
 
         message["token_ids"] = tokenizer(
-            message,
+            raw_message,
             return_tensors="pt",
             add_special_tokens=False,
         )["input_ids"][0]
-        message["content"] = message
+        
+        # TODO: what? is this right? it wants the raw chat-formatted message as the content?
+        message["content"] = raw_message
         message_log.append(message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
@@ -113,7 +111,8 @@ def vf_data_processor(
         "extra_env_info": extra_env_info,
         "loss_multiplier": 1.0,
         "idx": idx,
-        "task_name": datum_dict["task_name"],
+        # TODO: see if I can get the verifiers task name into the datapoints
+        "task_name": "vf",
     }
     return output
 
@@ -177,7 +176,7 @@ def main() -> None:
 
     if not args.config:
         args.config = os.path.join(
-            os.path.dirname(__file__), "configs", "grpo_math_1B.yaml"
+            os.path.dirname(__file__), "configs", "grpo_vf_reverser_1B.yaml"
         )
 
     config = load_config(args.config)
