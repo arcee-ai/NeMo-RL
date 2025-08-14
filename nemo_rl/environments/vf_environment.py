@@ -60,7 +60,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         answers = []
         for messages, meta in zip(message_log_batch, metadata):
             # If state is None, initialize an empty state.
-            if meta["state"] is None:
+            if meta.get("state", None) is None:
                 meta["state"] = {}
             
             if self.env.is_completed(messages, meta["state"]):
