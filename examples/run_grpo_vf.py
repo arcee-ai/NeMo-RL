@@ -83,7 +83,7 @@ def vf_data_processor(
     # NeMo-RL expects an odd format with a standard message log alongside token IDs.
     # Go through and convert each message.
     for message in prompt_messages:
-        raw_message: list[str] = tokenizer.apply_chat_template(  # type: ignore
+        raw_message: str = tokenizer.apply_chat_template(  # type: ignore
             [message],
             tokenize=False,
             add_generation_prompt=True,
@@ -96,8 +96,6 @@ def vf_data_processor(
             add_special_tokens=False,
         )["input_ids"][0]
         
-        # TODO: what? is this right? it wants the raw chat-formatted message as the content?
-        message["content"] = raw_message
         message_log.append(message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
