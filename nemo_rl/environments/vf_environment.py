@@ -100,7 +100,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             else:
                 # Additional step required.
                 responses, new_state = self.env.env_response(messages, meta["state"])
-                meta["state"] = new_state
+                meta["state"].update(new_state)
                 # TODO: Untangle whatever NVIDIA spaghetti code limits us to only one feedback message.
                 # For now, concatenate and warn.
                 if len(responses) > 1:
