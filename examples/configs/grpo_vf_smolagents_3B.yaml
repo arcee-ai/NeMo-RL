@@ -24,7 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_vf_alphabet_3B"
+  checkpoint_dir: "results/grpo_vf_smolagents_3B"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 4
@@ -129,7 +129,7 @@ data:
 
 env:
   vf:
-    environment_name: "nemo_rl.environments.verifiers.vf_smolagents_math_tools.vf_smolagents_math_tools"
+    environment_name: "vf_smolagents_math_tools"
 
 logger:
   log_dir: "logs"  # Base directory for all logs
