@@ -127,7 +127,7 @@ def setup_data(
     # Load the verifiers environment, just to get the dataset. This is not used for grading.
     vf_env_loaded = vf.load_environment(env_configs["vf"]["environment_name"])
     # Fixes up stuff like "question" to normal message log prompts.
-    data = vf_env_loaded.format_dataset()
+    data = vf_env_loaded.format_dataset(vf_env_loaded.dataset)
 
     # This is the Ray worker that actually runs the environment.
     vf_env = VfEnvironment.options(  # type: ignore # it's wrapped with ray.remote
