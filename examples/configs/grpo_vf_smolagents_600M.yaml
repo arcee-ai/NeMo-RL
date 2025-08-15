@@ -1,6 +1,6 @@
 # GRPO Algorithm Configuration
 grpo:
-  num_prompts_per_step: 1
+  num_prompts_per_step: 4
   num_generations_per_prompt: 16
   max_rollout_turns: 2
   max_num_steps: 1000000
@@ -32,10 +32,10 @@ checkpointing:
   checkpoint_must_save_by: null
 
 policy:
-  model_name: "Qwen/Qwen3-4B-Instruct-2507"
+  model_name: "Qwen/Qwen3-0.6B"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 16
+  train_global_batch_size: 64
   train_micro_batch_size: 4
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
@@ -141,10 +141,10 @@ logger:
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "nemo-grpo-dev"
-    name: "grpo-vf-smolagents-3B"
+    name: "grpo-vf-smolagents-0.6B"
   tensorboard: {}
   mlflow:
-    experiment_name: "grpo-vf-smolagents-3B"
+    experiment_name: "grpo-vf-smolagents-0.6B"
     run_name: "grpo-dev-logger"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
