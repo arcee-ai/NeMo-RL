@@ -72,10 +72,16 @@ def tool_call_reward_func(completion, info):
     print(f"(reward) tool calls: {tool_calls}")
     called_tool_names = sorted([call.function.name for call in tool_calls])
     expected_tool_names = sorted(info["tool_names"])
-    if called_tool_names == expected_tool_names:
-        return 1.0
-    else:
-        return 0.0
+    
+    reward = 0.0
+    
+    for call in called_tool_names:
+        if call in expected_tool_names:
+            reward += 1.0 / len(called_tool_names)
+        else:
+            reward -= 1.0 / len(called_tool_names)
+    
+    return reward
 
 
 def load_environment(
