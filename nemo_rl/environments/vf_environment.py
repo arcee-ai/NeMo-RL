@@ -107,6 +107,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 # For now, concatenate and warn.
                 if len(responses) > 1:
                     logging.warning("VfEnvironment currently only supports one feedback message per step. Concatenating responses.")
+                    print(f"VF Environment step: {responses}")
                 concat_message = {"role": "environment", "content": "\n\n".join([r["content"] for r in responses])}
                 
                 observations.append(concat_message)
