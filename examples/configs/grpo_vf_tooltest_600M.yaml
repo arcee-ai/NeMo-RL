@@ -24,7 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_vf_smolagents_0.6B"
+  checkpoint_dir: "results/grpo_vf_tooltest_600M"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 4
@@ -141,10 +141,10 @@ logger:
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "nemo-grpo-dev"
-    name: "grpo-vf-smolagents-0.6B"
+    name: "grpo-vf-tooltest-600M"
   tensorboard: {}
   mlflow:
-    experiment_name: "grpo-vf-smolagents-0.6B"
+    experiment_name: "grpo-vf-tooltest-600M"
     run_name: "grpo-dev-logger"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
