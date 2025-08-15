@@ -330,7 +330,6 @@ class CalculatorTool(Tool):
             "3 * (17 + 4)" -> "63"
             "100 / 5" -> "20.0"
         """
-        raise Exception(f"Expression: {expression}")
         if not all(c in self.allowed for c in expression):
             return "Error: Invalid characters in expression"
 
