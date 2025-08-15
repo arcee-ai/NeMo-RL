@@ -16,6 +16,7 @@ def tool_A(x: int) -> int:
     Returns:
         The integer plus 1.
     """
+    print(f"Model called tool_A({x})")
     return x + 1
 
 
@@ -29,6 +30,7 @@ def tool_B(x: str) -> str:
     Returns:
         The string concatenated with "2".
     """
+    print(f"Model called tool_B({x})")
     return x + "2"
 
 
@@ -42,6 +44,7 @@ def tool_C(x: float) -> float:
     Returns:
         The float plus 3.0.
     """
+    print(f"Model called tool_C({x})")
     return x + 3.0
 
 
@@ -55,6 +58,7 @@ def tool_D(x: bool) -> bool:
     Returns:
         The negated boolean.
     """
+    print(f"Model called tool_D({x})")
     return not x
 
 
