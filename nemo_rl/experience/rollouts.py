@@ -192,7 +192,6 @@ async def generate_responses_async(
             "tool_calls": generation_outputs["tool_calls"][i],
         }
         
-        print(f"from generation: {generation_outputs['tool_calls'][i]}")
 
         if include_logprobs and "logprobs" in generation_outputs:
             assistant_message["generation_logprobs"] = generation_outputs["logprobs"][
@@ -229,7 +228,6 @@ def calculate_rewards(
             - terminateds: Tensor of booleans indicating if an episode ended naturally.
     """
     # Extract message logs for environment (most recent interaction)
-    print(f"Batch message log: {batch['message_log']}")
     to_env = [
         get_keys_from_message_log(batch["message_log"][i], ["role", "content", "tool_calls"])
         for i in range(len(batch["message_log"]))
