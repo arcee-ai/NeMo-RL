@@ -1,7 +1,7 @@
 # GRPO Algorithm Configuration
 grpo:
   num_prompts_per_step: 1
-  num_generations_per_prompt: 8
+  num_generations_per_prompt: 16
   max_rollout_turns: 6
   max_num_steps: 1000000
   normalize_rewards: true
