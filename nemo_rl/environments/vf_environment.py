@@ -79,7 +79,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             # Step verifiers environment.
             responses, new_state = self.env.env_response(messages, meta["state"])
             meta["state"].update(new_state)
-            observations.extend(responses)
+            observations.append(responses)
             
             if len(responses) == 0:
                 observations.append({"role": "environment", "content": "generic termination feedback"})
@@ -103,14 +103,14 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 
                 # There isn't another rollout after this one, so the model doesn't actually see this.
                 next_metadata.append(meta)
-                next_stop_strings.append([])
+                next_stop_strings.append(None)
                 rewards.append(results.reward)
                 terminated.append(True)
             else:
                 # Largely placeholders to indicate a follow-up step is required.
                 next_metadata.append(meta)
                 # TODO: Add support for this kind of stop-string-based rollout interruption.
-                next_stop_strings.append([])
+                next_stop_strings.append(None)
                 rewards.append(0)
                 terminated.append(False)
             
