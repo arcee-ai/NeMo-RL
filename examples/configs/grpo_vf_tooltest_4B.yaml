@@ -108,6 +108,8 @@ policy:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
+      # Tool calling parser for this model.
+      tool_parser: "hermes"
       async_engine: false
       precision: ${policy.precision}
       tensor_parallel_size: 2
