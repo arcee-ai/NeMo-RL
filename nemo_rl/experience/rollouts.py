@@ -188,6 +188,7 @@ async def generate_responses_async(
             "role": "assistant",
             "content": text,
             "token_ids": output_ids[i, input_length:total_length],
+            "tool_calls": generation_outputs["tool_calls"][i],
         }
 
         if include_logprobs and "logprobs" in generation_outputs:

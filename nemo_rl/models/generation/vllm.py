@@ -55,6 +55,9 @@ from nemo_rl.models.huggingface.common import ModelFlag
 from nemo_rl.models.policy.utils import is_vllm_v1_engine_enabled
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
+from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+
 
 class VllmSpecificArgs(TypedDict):
     tensor_parallel_size: int
@@ -449,6 +452,47 @@ class VllmGenerationWorker:
             include_stop_str_in_output=True,
         )
 
+    def _maybe_parse_tool_calls(self, texts: list[str]) -> list[dict[str, Any] | None]:
+        """Parse tool calls from generated texts if a parser is configured.
+
+        Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
+        """
+        parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
+        if parser_name is None:
+            return [None for _ in texts]
+
+        try:
+            ParserCls = ToolParserManager.get_tool_parser(parser_name)
+        except Exception:
+            return [None for _ in texts]
+
+        try:
+            tokenizer = self.llm.get_tokenizer()
+        except Exception:
+            tokenizer = None
+
+        if tokenizer is None:
+            return [None for _ in texts]
+
+        try:
+            parser: ToolParser = ParserCls(tokenizer)
+            # Dummy request for parser shim.
+            req = ChatCompletionRequest(
+                messages=[{"role": "user", "content": ""}],
+                tool_choice="auto",
+                tools=[],
+            )
+            results: list[dict[str, Any] | None] = []
+            for text in texts:
+                try:
+                    info = parser.extract_tool_calls(text, req)
+                    results.append(info.model_dump())
+                except Exception:
+                    results.append(None)
+            return results
+        except Exception:
+            return [None for _ in texts]
+
     @wrap_with_nvtx_name("vllm_genertion_worker/generate")
     def generate(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
@@ -519,6 +563,7 @@ class VllmGenerationWorker:
         logprobs_list = []
         generation_lengths = []
         unpadded_sequence_lengths = []
+        generated_texts: list[str] = []
         max_length = 0
         for output in outputs:
             max_length = max(max_length, len(output.outputs[0].token_ids))
@@ -569,9 +614,19 @@ class VllmGenerationWorker:
                 f"response_length={response_length} > max_model_len={self.llm.llm_engine.model_config.max_model_len}, which should not happen. Please check this behavior in isolation by running `uv run --extra vllm tools/model_diagnostics/1.max_model_len_respected.py {self.llm.llm_engine.model_config.model}` and raise this issue with the vllm team."
             )
 
+            # decode generated tokens to text for optional tool parsing
+            try:
+                tokenizer = self.llm.get_tokenizer()
+                generated_texts.append(tokenizer.decode(generated_tokens, skip_special_tokens=True))
+            except Exception:
+                generated_texts.append("")
+
         # Create return data conforming to GenerationOutputSpec
         output_ids = torch.stack(output_ids_list)
         logprobs = torch.stack(logprobs_list)
+
+        # optional tool call parsing
+        tool_calls_extracted = self._maybe_parse_tool_calls(generated_texts)
 
         return_data = BatchedDataDict[GenerationOutputSpec](
             {
@@ -583,6 +638,7 @@ class VllmGenerationWorker:
                 "unpadded_sequence_lengths": torch.tensor(
                     unpadded_sequence_lengths, dtype=torch.long
                 ),
+                "tool_calls": tool_calls_extracted,
             }
         )
 
@@ -784,12 +840,21 @@ class VllmGenerationWorker:
                 device=original_input_ids_single_row.device,
             )
 
+            # Optional tool call parsing on the text path for this single item
+            try:
+                tokenizer = self.llm.get_tokenizer()
+                generated_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True)
+            except Exception:
+                generated_text = ""
+            parsed_tool_calls = self._maybe_parse_tool_calls([generated_text])
+
             result_batch = BatchedDataDict[GenerationOutputSpec](
                 {
                     "output_ids": output_ids_single_item_batched,
                     "logprobs": logprobs_single_item,
                     "generation_lengths": generation_lengths_tensor,
                     "unpadded_sequence_lengths": unpadded_sequence_lengths_tensor,
+                    "tool_calls": parsed_tool_calls,
                 }
             )
 
@@ -869,9 +934,12 @@ class VllmGenerationWorker:
         outputs = self.llm.generate(data["prompts"], sampling_params)
         texts = [output.outputs[0].text for output in outputs]
 
+        # If a tool call parser is specified, extract tool calls from the outputs
+        tool_calls_extracted = self._maybe_parse_tool_calls(texts)
+
         # Convert to BatchedDataDict
         return_data: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict(
-            {"texts": texts}
+            {"texts": texts, "tool_calls": tool_calls_extracted}
         )
         return return_data
 
@@ -951,9 +1019,12 @@ class VllmGenerationWorker:
             # Extract the generated text
             generated_text = final_request_output.outputs[0].text
 
+            # Optional tool call parsing
+            parsed_tool_calls = self._maybe_parse_tool_calls([generated_text])
+
             # Create result in BatchedDataDict format
             result_batch = BatchedDataDict[GenerationOutputSpec](
-                {"texts": [generated_text]}
+                {"texts": [generated_text], "tool_calls": parsed_tool_calls}
             )
 
             return (prompt_idx, result_batch)

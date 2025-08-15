@@ -59,6 +59,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         for messages, meta in zip(message_log_batch, metadata):
+            logging.info(f"VF Environment step: {messages}")
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
                 # Find last user message index.
