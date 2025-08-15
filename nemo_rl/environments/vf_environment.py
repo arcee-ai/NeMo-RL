@@ -70,17 +70,17 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 if call_info is None:
                     continue
                 
+                oai_calls: list[ChatCompletionMessageToolCall] = []
+                
                 # TODO: investigate edge cases and harden this
                 if call_info.get("tools_called", False):
                     calls = call_info.get("tool_calls", [])
-                    
-                    oai_calls: list[ChatCompletionMessageToolCall] = []
                     
                     for call in calls:
                         oai_call = ChatCompletionMessageToolCall.model_validate(call)
                         oai_calls.append(oai_call)
                     
-                    msg["tool_calls"] = oai_calls
+                msg["tool_calls"] = oai_calls
                         
                         
             
