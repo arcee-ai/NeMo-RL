@@ -11,7 +11,6 @@ from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentRet
 import verifiers as vf
 
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
-from openai.types.chat.chat_completion_message import ChatCompletionMessageToolCallFunction
 
 class VfEnvironmentMetadata(TypedDict):
     """Persistent state of the environment across steps."""
