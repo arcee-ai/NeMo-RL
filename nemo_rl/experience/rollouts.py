@@ -43,8 +43,14 @@ from nemo_rl.models.generation.interfaces import (
     GenerationOutputSpec,
 )
 
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
+
 TokenizerType = PreTrainedTokenizerBase
 
+def extract_oai_tool_calls(calls_info: dict) -> list[ChatCompletionMessageToolCall]:
+    """Extract tool calls from a list of dictionaries."""
+    calls = calls_info.get("tool_calls", [])
+    return [ChatCompletionMessageToolCall.model_validate(call) for call in calls]
 
 def generate_responses(
     policy_generation: GenerationInterface,
@@ -92,7 +98,7 @@ def generate_responses(
             "role": "assistant",
             "content": text,
             "token_ids": output_ids[i, input_length:total_length],
-            "tool_calls": generation_outputs["tool_calls"][i],
+            "tool_calls": extract_oai_tool_calls(generation_outputs["tool_calls"][i]),
         }
 
         if include_logprobs and "logprobs" in generation_outputs:
@@ -189,9 +195,8 @@ async def generate_responses_async(
             "role": "assistant",
             "content": text,
             "token_ids": output_ids[i, input_length:total_length],
-            "tool_calls": generation_outputs["tool_calls"][i],
+            "tool_calls": extract_oai_tool_calls(generation_outputs["tool_calls"][i]),
         }
-        
 
         if include_logprobs and "logprobs" in generation_outputs:
             assistant_message["generation_logprobs"] = generation_outputs["logprobs"][

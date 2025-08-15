@@ -10,8 +10,6 @@ from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentRet
 
 import verifiers as vf
 
-from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
-
 class VfEnvironmentMetadata(TypedDict):
     """Persistent state of the environment across steps."""
     answer: str | None
@@ -60,30 +58,6 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         for messages, meta in zip(message_log_batch, metadata):
-            print(f"VF Environment step: {messages}")
-            # Process vLLM tool calls to verifiers tool calls.
-            for msg in messages:
-                if "tool_calls" not in msg:
-                    continue
-                
-                call_info: dict | None = msg["tool_calls"]
-                if call_info is None:
-                    continue
-                
-                oai_calls: list[ChatCompletionMessageToolCall] = []
-                
-                # TODO: investigate edge cases and harden this
-                if call_info.get("tools_called", False):
-                    calls = call_info.get("tool_calls", [])
-                    
-                    for call in calls:
-                        oai_call = ChatCompletionMessageToolCall.model_validate(call)
-                        oai_calls.append(oai_call)
-                    
-                msg["tool_calls"] = oai_calls
-                        
-                        
-            
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
                 # Find last user message index.
