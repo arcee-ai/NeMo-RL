@@ -614,6 +614,7 @@ class LegacyToolRubric(Rubric):
             test_cases = json.loads(answer)["test_cases"]
         except Exception:
             return 0.0
+        
         # strip ```python and ``` if present at the beginning and end of the code
         code_str = code_str.strip()
         if code_str.startswith("```python"):
@@ -623,6 +624,9 @@ class LegacyToolRubric(Rubric):
         if code_str.endswith("```"):
             code_str = code_str[:-3]
         code_str = code_str.strip()
+        
+        import logging
+        logging.info(f"Code: {code_str}")
 
         def timeout_handler(signum, frame):
             raise TimeoutError("Code execution timed out")
