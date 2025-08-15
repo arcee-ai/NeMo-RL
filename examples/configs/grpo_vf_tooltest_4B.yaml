@@ -2,7 +2,7 @@
 grpo:
   num_prompts_per_step: 1
   num_generations_per_prompt: 16
-  max_rollout_turns: 1
+  max_rollout_turns: 10 # prefer to use verifiers to set turn limits
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
