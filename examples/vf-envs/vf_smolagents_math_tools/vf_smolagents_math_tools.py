@@ -625,8 +625,8 @@ class LegacyToolRubric(Rubric):
             code_str = code_str[:-3]
         code_str = code_str.strip()
         
-        import logging
-        logging.info(f"Code: {code_str}")
+        # TODO: weird debugging while i get proper metrics working
+        raise Exception(f"Code: {code_str}")
 
         def timeout_handler(signum, frame):
             raise TimeoutError("Code execution timed out")
