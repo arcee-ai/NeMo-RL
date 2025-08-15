@@ -91,9 +91,12 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                     meta.get("info", None),
                 )
                 
+                # This gets integrated into the rollout metrics.
+                meta["metrics"] = results.metrics
+                
                 # There isn't another rollout after this one, so the model doesn't actually see this.
                 observations.append({"role": "environment", "content": "generic termination feedback"})
-                next_metadata.append(None)
+                next_metadata.append(meta)
                 next_stop_strings.append([])
                 rewards.append(results.reward)
                 terminated.append(True)

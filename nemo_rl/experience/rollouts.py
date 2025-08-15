@@ -359,6 +359,10 @@ def run_multi_turn_rollout(
     total_gen_tokens_per_turn = []
     active_samples_per_turn = []
 
+    # Aggregate environment-provided per-sample metrics if present under metadata[i]["metrics"]
+    env_metric_sums: dict[str, float] = {}
+    env_metric_counts: dict[str, int] = {}
+
     for turn in range(max_rollout_turns):
         if len(active_indices) == 0:
             break
@@ -455,6 +459,15 @@ def run_multi_turn_rollout(
             # Increment turn count
             sample_turn_counts[global_idx] += 1
 
+        # Before filtering, aggregate any environment metrics reported in metadata
+        for i in range(len(active_indices)):
+            meta_i = env_output.metadata[i] if env_output.metadata is not None else None
+            if isinstance(meta_i, dict) and "metrics" in meta_i and isinstance(meta_i["metrics"], dict):
+                for k, v in meta_i["metrics"].items():
+                    if isinstance(v, (int, float)):
+                        env_metric_sums[k] = env_metric_sums.get(k, 0.0) + float(v)
+                        env_metric_counts[k] = env_metric_counts.get(k, 0) + 1
+
         # Determine done samples and update active set
         terminateds = env_output.terminateds.bool()
         done = truncation_mask | terminateds
@@ -506,6 +519,11 @@ def run_multi_turn_rollout(
             sample_env_token_counts.float().mean().item()
         ),
     }
+
+    # Add aggregated environment metrics (averaged over samples that reported them)
+    for k, total in env_metric_sums.items():
+        count = max(env_metric_counts.get(k, 1), 1)
+        rollout_metrics[f"env/{k}"] = total / count
     return current_batch, rollout_metrics
 
 
