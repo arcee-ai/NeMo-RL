@@ -60,6 +60,19 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         answers = []
         for messages, meta in zip(message_log_batch, metadata):
             print(f"VF Environment step: {messages}")
+            # Process vLLM tool calls to verifiers tool calls.
+            for msg in messages:
+                if "tool_calls" not in msg:
+                    continue
+                
+                call_info: dict | None = msg["tool_calls"]
+                if call_info is None:
+                    continue
+                
+                # TODO: investigate edge cases and harden this
+                if call_info.get("tools_called", False):
+                    msg["tool_calls"] = call_info.get("tool_calls", [])
+            
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
                 # Find last user message index.
