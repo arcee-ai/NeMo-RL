@@ -16,7 +16,7 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from omegaconf import OmegaConf
 from transformers import PreTrainedTokenizerBase
@@ -60,55 +60,66 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 
 TokenizerType = PreTrainedTokenizerBase
 
-# TaskDataProcessFnCallable
-def vf_data_processor(
-    datum_dict: dict[str, Any],
-    task_data_spec: TaskDataSpec,
-    tokenizer: TokenizerType,
-    max_seq_length: int,
-    idx: int,
-) -> DatumSpec:
-    """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""    
-    prompt_messages = datum_dict["prompt"]
-    extra_env_info = {key: datum_dict[key] for key in datum_dict if key != "prompt"}
+# Slightly odd closure for verifiers env in the data processor, which needs a specific signature.
+def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
+    if isinstance(vf_env, vf.ToolEnv):
+        vf_tools: list[Callable] = vf_env.tools
+    else:
+        vf_tools = []
     
-    if not("answer" in extra_env_info or "info" in extra_env_info):
-        raise ValueError("One of 'answer' or 'info' must be present in each datapoint. Found neither.", datum_dict)
-
-    message_log: LLMMessageLogType = []
-    # NeMo-RL expects an odd format with a standard message log alongside token IDs.
-    # Go through and convert each message.
-    for message in prompt_messages:
-        raw_message: str = tokenizer.apply_chat_template(  # type: ignore
-            [message],
-            tokenize=False,
-            add_generation_prompt=True,
-            add_special_tokens=False,
-        )
-
-        message["token_ids"] = tokenizer(
-            raw_message,
-            return_tensors="pt",
-            add_special_tokens=False,
-        )["input_ids"][0]
+    # TaskDataProcessFnCallable
+    def vf_data_processor(
+        datum_dict: dict[str, Any],
+        task_data_spec: TaskDataSpec,
+        tokenizer: TokenizerType,
+        max_seq_length: int,
+        idx: int,
+    ) -> DatumSpec:
+        """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""    
+        prompt_messages = datum_dict["prompt"]
+        extra_env_info = {key: datum_dict[key] for key in datum_dict if key != "prompt"}
         
-        message_log.append(message)
+        if not("answer" in extra_env_info or "info" in extra_env_info):
+            raise ValueError("One of 'answer' or 'info' must be present in each datapoint. Found neither.", datum_dict)
 
-    length = sum(len(m["token_ids"]) for m in message_log)
+        message_log: LLMMessageLogType = []
+        
+        # NeMo-RL expects a format with a standard message log alongside token IDs.
+        # Go through and convert each message.
+        for message in prompt_messages:
+            raw_message: str = tokenizer.apply_chat_template(  # type: ignore
+                [message],
+                tokenize=False,
+                add_generation_prompt=False,
+                add_special_tokens=True,
+                # TODO: Is this type error right or just HF transformers oddness?
+                tools=vf_tools # type: ignore
+            )
 
-    if length > max_seq_length:
-        raise ValueError(f"Prompt length {length} exceeds specified maximum input length {max_seq_length}.", datum_dict)
+            message["token_ids"] = tokenizer(
+                raw_message,
+                return_tensors="pt",
+                add_special_tokens=False,
+            )["input_ids"][0]
+            
+            message_log.append(message)
 
-    output: DatumSpec = {
-        "message_log": message_log,
-        "length": length,
-        "extra_env_info": extra_env_info,
-        "loss_multiplier": 1.0,
-        "idx": idx,
-        # TODO: see if I can get the verifiers task name into the datapoints
-        "task_name": "vf",
-    }
-    return output
+        length = sum(len(m["token_ids"]) for m in message_log)
+
+        if length > max_seq_length:
+            raise ValueError(f"Prompt length {length} exceeds specified maximum input length {max_seq_length}.", datum_dict)
+
+        output: DatumSpec = {
+            "message_log": message_log,
+            "length": length,
+            "extra_env_info": extra_env_info,
+            "loss_multiplier": 1.0,
+            "idx": idx,
+            "task_name": "vf",
+        }
+        return output
+
+    return vf_data_processor
 
 
 def setup_data(
@@ -130,6 +141,11 @@ def setup_data(
     except ValueError as e:
         raise ValueError(f"Failed to load verifiers environment {env_configs['vf']['environment_name']}. Make sure it is installed (`uv pip install -e examples/vf-envs/your-environment`).") from e
     
+    # This same requirement is also in the environment worker.
+    assert isinstance(vf_env_loaded, vf.MultiTurnEnv), "Verifiers environment must be a MultiTurnEnv or subclass"
+    
+    assert vf_env_loaded.dataset is not None, "Verifiers environment must have an associated dataset"
+    
     # Fixes up stuff like "question" to normal message log prompts.
     data = vf_env_loaded.format_dataset(vf_env_loaded.dataset)
 
@@ -142,6 +158,8 @@ def setup_data(
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }
     ).remote(env_configs["vf"])
+    
+    vf_data_processor = create_data_processor(vf_env_loaded)
     
     dataset = AllTaskProcessedDataset(
         data,
