@@ -423,48 +423,56 @@ def run_multi_turn_rollout(
 
         total_rewards[active_indices] += env_output.rewards
 
-        # Update message log for ALL active samples with env observation
+        # Update message log for ALL active samples with env observation(s)
         # This must happen BEFORE filtering based on done flags
         truncation_mask = torch.zeros_like(env_output.terminateds, dtype=torch.bool)
         for i, global_idx in enumerate(active_indices.tolist()):
-            env_obs_content = env_output.observations[i]["content"]
-            # Tokenize the raw content from the environment
-            # TODO @sahilj: handle if we want these subsequent messages to have a chat template
-            tokenized_obs = tokenizer(
-                env_obs_content, return_tensors="pt", add_special_tokens=False
-            ).input_ids[0]
-            # tokenizer returns torch.float32 when env_obs_content is empty
-            tokenized_obs = tokenized_obs.to(dtype=torch.int64)
+            obs_item = env_output.observations[i]
+            # Normalize to a list of messages for uniform handling
+            messages = obs_item if isinstance(obs_item, list) else [obs_item]
 
-            # check if new message overflows max_seq_len
-            if (
-                len(tokenized_obs) + len(generated_ids[i]) + active_input_lengths[i]
-                >= max_seq_len
-            ):
-                tokens_left_for_obs = max_seq_len - (
-                    len(generated_ids[i]) + active_input_lengths[i]
+            env_tokens_so_far = 0
+            for msg in messages:
+                env_obs_content = msg.get("content", "")
+                # Tokenize the raw content from the environment
+                tokenized_obs = tokenizer(
+                    env_obs_content, return_tensors="pt", add_special_tokens=False
+                ).input_ids[0]
+                # tokenizer returns torch.float32 when env_obs_content is empty
+                tokenized_obs = tokenized_obs.to(dtype=torch.int64)
+
+                # Check if adding this message would overflow max_seq_len
+                used_tokens = (
+                    int(active_input_lengths[i]) + len(generated_ids[i]) + env_tokens_so_far
                 )
-                assert tokens_left_for_obs >= 0, (
-                    f"tokens_left_for_obs={tokens_left_for_obs} should not be negative. This should not happen if the inference engine respects the max sequence length."
-                )
-                # truncate
-                tokenized_obs = tokenized_obs[:tokens_left_for_obs]
-                truncation_mask[i] = True
-                # Record truncation
-                sample_truncated[active_indices[i]] = True
+                if used_tokens + len(tokenized_obs) >= max_seq_len:
+                    tokens_left_for_obs = max_seq_len - used_tokens
+                    assert tokens_left_for_obs >= 0, (
+                        f"tokens_left_for_obs={tokens_left_for_obs} should not be negative. This should not happen if the inference engine respects the max sequence length."
+                    )
+                    # Truncate to fit
+                    tokenized_obs = tokenized_obs[:tokens_left_for_obs]
+                    truncation_mask[i] = True
+                    sample_truncated[active_indices[i]] = True
 
-            tokenized_env_obs_message = {
-                "role": env_output.observations[i]["role"],
-                "content": env_obs_content,
-                "token_ids": tokenized_obs,
-            }
-            current_batch["message_log"][global_idx].append(tokenized_env_obs_message)
+                tokenized_env_obs_message = {
+                    "role": msg.get("role", "environment"),
+                    "content": env_obs_content,
+                    "token_ids": tokenized_obs,
+                }
+                current_batch["message_log"][global_idx].append(tokenized_env_obs_message)
 
-            # Record token usage - environment
-            sample_env_token_counts[global_idx] += len(tokenized_obs)
-            sample_token_counts[global_idx] += len(tokenized_obs)
+                # Record token usage - environment
+                env_msg_tokens = len(tokenized_obs)
+                env_tokens_so_far += env_msg_tokens
+                sample_env_token_counts[global_idx] += env_msg_tokens
+                sample_token_counts[global_idx] += env_msg_tokens
 
-            # Increment turn count
+                # If truncated, stop adding further env messages for this sample
+                if truncation_mask[i]:
+                    break
+
+            # Increment turn count once per environment step
             sample_turn_counts[global_idx] += 1
 
         # Before filtering, aggregate any environment metrics reported in metadata
@@ -697,32 +705,44 @@ async def run_sample_multi_turn_rollout(
         total_reward += float(env_output.rewards[0].item())
         # Check termination
         terminated = env_output.terminateds[0].item()
-        env_obs_content = env_output.observations[0]["content"]
-        # Tokenize environment response
-        tokenized_obs = tokenizer(
-            env_obs_content, return_tensors="pt", add_special_tokens=False
-        ).input_ids[0]
 
-        # Check for sequence length overflow
-        if input_lengths + gen_token_count + len(tokenized_obs) >= max_seq_len:
-            # Truncate environment observation
-            max_env_tokens = max_seq_len - input_lengths - gen_token_count
-            if max_env_tokens > 0:
-                tokenized_obs = tokenized_obs[:max_env_tokens]
-            else:
-                tokenized_obs = torch.empty(0, dtype=tokenized_obs.dtype)
-            truncated = True
+        # Normalize to a list of messages
+        obs_item = env_output.observations[0]
+        messages = obs_item if isinstance(obs_item, list) else [obs_item]
 
-        env_message = {
-            "role": env_output.observations[0]["role"],
-            "content": env_obs_content,
-            "token_ids": tokenized_obs,
-        }
-        current_message_log.append(env_message)
+        env_tokens_so_far = 0
+        for msg in messages:
+            env_obs_content = msg.get("content", "")
+            # Tokenize environment response
+            tokenized_obs = tokenizer(
+                env_obs_content, return_tensors="pt", add_special_tokens=False
+            ).input_ids[0]
 
-        # Update token counts
-        env_token_count += len(tokenized_obs)
-        token_count += len(tokenized_obs)
+            used_tokens = int(input_lengths) + int(gen_token_count) + env_tokens_so_far
+            if used_tokens + len(tokenized_obs) >= max_seq_len:
+                # Truncate environment observation
+                max_env_tokens = max_seq_len - used_tokens
+                if max_env_tokens > 0:
+                    tokenized_obs = tokenized_obs[:max_env_tokens]
+                else:
+                    tokenized_obs = torch.empty(0, dtype=tokenized_obs.dtype)
+                truncated = True
+
+            env_message = {
+                "role": msg.get("role", "environment"),
+                "content": env_obs_content,
+                "token_ids": tokenized_obs,
+            }
+            current_message_log.append(env_message)
+
+            # Update token counts
+            env_msg_tokens = len(tokenized_obs)
+            env_tokens_so_far += env_msg_tokens
+            env_token_count += env_msg_tokens
+            token_count += env_msg_tokens
+
+            if truncated:
+                break
 
         # Update sample state for next turn
         if not terminated and not truncated:

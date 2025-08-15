@@ -103,14 +103,8 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 # Additional step required.
                 responses, new_state = self.env.env_response(messages, meta["state"])
                 meta["state"].update(new_state)
-                # TODO: Untangle whatever NVIDIA spaghetti code limits us to only one feedback message.
-                # For now, concatenate and warn.
-                if len(responses) > 1:
-                    logging.warning("VfEnvironment currently only supports one feedback message per step. Concatenating responses.")
-                    print(f"VF Environment step: {responses}")
-                concat_message = {"role": "environment", "content": "\n\n".join([r["content"] for r in responses])}
                 
-                observations.append(concat_message)
+                observations.extend(responses)
                 next_metadata.append(meta)
                 # TODO: Add support for this kind of stop-string-based rollout interruption.
                 next_stop_strings.append([])
