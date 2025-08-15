@@ -330,6 +330,7 @@ class CalculatorTool(Tool):
             "3 * (17 + 4)" -> "63"
             "100 / 5" -> "20.0"
         """
+        raise Exception(f"Expression: {expression}")
         if not all(c in self.allowed for c in expression):
             return "Error: Invalid characters in expression"
 
@@ -624,9 +625,6 @@ class LegacyToolRubric(Rubric):
         if code_str.endswith("```"):
             code_str = code_str[:-3]
         code_str = code_str.strip()
-        
-        # TODO: weird debugging while i get proper metrics working
-        raise Exception(f"Code: {code_str}")
 
         def timeout_handler(signum, frame):
             raise TimeoutError("Code execution timed out")
