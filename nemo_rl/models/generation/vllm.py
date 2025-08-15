@@ -457,8 +457,6 @@ class VllmGenerationWorker:
 
         Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
         """
-        #TODO: remove debug code
-        print(f"Parsing tool calls for {texts}, parser {self.cfg['vllm_cfg'].get('tool_parser', None)}")
         parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
         if parser_name is None:
             return [None for _ in texts]
@@ -492,7 +490,6 @@ class VllmGenerationWorker:
                 except Exception:
                     results.append(None)
             
-            print("success")
             return results
         except Exception:
             return [None for _ in texts]
