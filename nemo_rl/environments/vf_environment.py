@@ -76,6 +76,10 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                     "turn": sum(1 for m in messages if m.get("role") == "assistant"),
                 })
             
+            # Step verifiers environment.
+            responses, new_state = self.env.env_response(messages, meta["state"])
+            meta["state"].update(new_state)
+            
             if self.env.is_completed(messages, meta["state"]):
                 # Rollout marked complete - calculate rewards and finalize.
                 
@@ -100,10 +104,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 rewards.append(results.reward)
                 terminated.append(True)
             else:
-                # Additional step required.
-                responses, new_state = self.env.env_response(messages, meta["state"])
-                meta["state"].update(new_state)
-                
+                # Largely placeholders to indicate a follow-up step is required.
                 observations.extend(responses)
                 next_metadata.append(meta)
                 # TODO: Add support for this kind of stop-string-based rollout interruption.
