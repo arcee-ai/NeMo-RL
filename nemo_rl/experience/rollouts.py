@@ -190,6 +190,8 @@ async def generate_responses_async(
             "token_ids": output_ids[i, input_length:total_length],
             "tool_calls": generation_outputs["tool_calls"][i],
         }
+        
+        print(f"from generation: {generation_outputs['tool_calls'][i]}")
 
         if include_logprobs and "logprobs" in generation_outputs:
             assistant_message["generation_logprobs"] = generation_outputs["logprobs"][
