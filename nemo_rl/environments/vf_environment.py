@@ -84,7 +84,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             if len(responses) == 0:
                 observations.append({"role": "environment", "content": "generic termination feedback"})
             
-            if self.env.is_completed(messages, meta["state"]):
+            if self.env.is_completed(messages, meta["state"]) or meta["state"]["turn"] >= self.env.max_turns:
                 # Rollout marked complete - calculate rewards and finalize.
                 
                 # TODO: Make some affordance for Kimi-style group-relative judgement here.
