@@ -20,6 +20,7 @@ from typing import Any, NotRequired, Optional, TypedDict, TypeVar, cast
 import numpy as np
 import ray
 import torch
+import wandb
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
@@ -779,6 +780,24 @@ def grpo_train(
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
+
+        if getattr(logger, "wandb_logger", None) is not None:
+            try:
+                sanitized = {
+                    "content": flat_messages["content"],
+                    "rewards": rewards.tolist(),
+                    "input_lengths": input_lengths.tolist(),
+                }
+                sanitized_filename = f"train_completions_step{step}.jsonl"
+                logger.log_batched_dict_as_jsonl(sanitized, sanitized_filename)
+                sanitized_path = os.path.join(logger.base_log_dir, sanitized_filename)
+                artifact = wandb.Artifact(
+                    name=f"train-completions-step-{step}", type="completions"
+                )
+                artifact.add_file(sanitized_path)
+                logger.wandb_logger.run.log_artifact(artifact)
+            except Exception as e:
+                print(f"Warning: failed to log completions to wandb: {e}")
 
         metrics = {
             "loss": train_results["loss"].numpy(),
