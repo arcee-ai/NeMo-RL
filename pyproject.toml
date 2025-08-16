@@ -47,6 +47,7 @@ dependencies = [
     "plotly",
     "mlflow",
     "verifiers",
+    "vf-exts",
 ]
 
 [project.optional-dependencies]
@@ -141,11 +142,13 @@ triton = [
 ]
 causal-conv1d = { git = "https://github.com/Dao-AILab/causal-conv1d", tag = "v1.5.0.post8" }
 mamba-ssm = { git = "https://github.com/state-spaces/mamba.git", rev = "2e16fc3062cdcd4ebef27a9aa4442676e1c7edf4" }
+vf-exts = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "3rdparty/Megatron-LM-workspace",
     "3rdparty/NeMo-workspace",
+    "env_api/vf_exts",
 ]
 
 [[tool.uv.index]]
