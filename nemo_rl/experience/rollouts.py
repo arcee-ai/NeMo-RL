@@ -258,7 +258,11 @@ def calculate_rewards(
         messages = [msg for _, msg in group]
 
         # Get corresponding environment info
-        env_info = [batch["extra_env_info"][i] for i in indices]
+        env_info = [
+            # Add GRPO group ID to the environment info.
+            {**batch["extra_env_info"][i], "_grpo_gid": int(batch["idx"][i])}
+            for i in indices
+        ]
 
         # Submit task to environment and store future
         future = task_to_env[task_name].step.remote(messages, env_info)  # type: ignore # ray actor call
