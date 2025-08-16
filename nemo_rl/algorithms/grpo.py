@@ -77,7 +77,7 @@ class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
     max_num_steps: int
-    max_rollout_turns: int
+    max_rollout_turns: NotRequired[int]
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
@@ -512,6 +512,7 @@ def grpo_train(
     val_period = master_config["grpo"]["val_period"]
     val_at_start = master_config["grpo"]["val_at_start"]
     colocated_inference = master_config["policy"]["generation"]["colocated"]["enabled"]
+    grpo_max_rollout_turns = master_config["grpo"].get("max_rollout_turns", 999999)
 
     # Run validation at the start if configured
     if val_at_start and step == 0:
@@ -584,7 +585,7 @@ def grpo_train(
                         max_seq_len=master_config["policy"][
                             "max_total_sequence_length"
                         ],
-                        max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                        max_rollout_turns=grpo_max_rollout_turns,
                         greedy=False,
                     )
                 else:
@@ -596,7 +597,7 @@ def grpo_train(
                         max_seq_len=master_config["policy"][
                             "max_total_sequence_length"
                         ],
-                        max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                        max_rollout_turns=grpo_max_rollout_turns,
                         greedy=False,
                     )
                 policy_generation.finish_generation()
@@ -913,7 +914,7 @@ def validate(
                     tokenizer,
                     val_task_to_env,
                     max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                    max_rollout_turns=master_config["grpo"].get("max_rollout_turns", 999999),
                     greedy=False,
                 )
             else:
@@ -923,7 +924,7 @@ def validate(
                     tokenizer,
                     val_task_to_env,
                     max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                    max_rollout_turns=master_config["grpo"].get("max_rollout_turns", 999999),
                     greedy=False,
                 )
             rewards = val_batch["total_reward"]
