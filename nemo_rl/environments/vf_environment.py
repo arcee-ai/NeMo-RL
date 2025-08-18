@@ -75,7 +75,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         
-        print(self.query_vllm([{"role": "user", "content": "Hello, how are you?"}]))
+        print(self.query_vllm(["a dog is a kind of "]))
         
         for messages, meta in zip(message_log_batch, metadata):
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
