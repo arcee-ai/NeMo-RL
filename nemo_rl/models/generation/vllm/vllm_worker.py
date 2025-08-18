@@ -33,9 +33,6 @@ from nemo_rl.models.huggingface.common import ModelFlag
 from nemo_rl.models.policy.utils import is_vllm_v1_engine_enabled
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
-from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-
 # Use a base class to share some functions to avoid code duplication.
 class BaseVllmGenerationWorker:
     def __repr__(self) -> str:
@@ -388,6 +385,12 @@ class BaseVllmGenerationWorker:
 
         Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
         """
+        
+        # For some reason, this file is imported in contexts outside of the vLLM worker.
+        # As such, this import needs to be here rather than at the top level.
+        from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
+        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+        
         parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
         if parser_name is None:
             return [None for _ in texts]
