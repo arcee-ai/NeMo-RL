@@ -42,6 +42,7 @@ from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 
 import verifiers as vf
+import vf_exts as vfe
 
 OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
 
@@ -63,10 +64,20 @@ TokenizerType = PreTrainedTokenizerBase
 
 # Slightly odd closure for verifiers env in the data processor, which needs a specific signature.
 def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
-    if isinstance(vf_env, vf.ToolEnv):
-        vf_tools: list[Callable] = vf_env.tools
+    vf_tools: dict[str, list[Callable]]
+    if isinstance(vf_env, vfe.MultiTurnEnvGroup):
+        env_map = vf_env.env_map
+        vf_tools = {}
+        for env_id in env_map:
+            sub_env = env_map[env_id]
+            if isinstance(sub_env, vf.ToolEnv):
+                vf_tools[env_id] = sub_env.tools
+            else:
+                vf_tools[env_id] = []
+    elif isinstance(vf_env, vf.ToolEnv):
+        vf_tools = {"env_0": vf_env.tools}
     else:
-        vf_tools = []
+        vf_tools = {"env_0": []}
     
     # TaskDataProcessFnCallable
     def vf_data_processor(
@@ -77,6 +88,7 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
         idx: int,
     ) -> DatumSpec:
         """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""    
+        vf_task = datum_dict.get("task", "env_0")
         prompt_messages = datum_dict["prompt"]
         extra_env_info = {key: datum_dict[key] for key in datum_dict if key != "prompt"}
         
@@ -93,8 +105,7 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
                 tokenize=False,
                 add_generation_prompt=False,
                 add_special_tokens=True,
-                # TODO: Is this type error right or just HF transformers oddness?
-                tools=vf_tools # type: ignore
+                tools=vf_tools[vf_task] # type: ignore
             )
 
             message["token_ids"] = tokenizer(
