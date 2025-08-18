@@ -9,4 +9,9 @@ def load_environment(
         vf.load_environment("vf-tool-test"),
         vf.load_environment("vf-alphabet-sort")
     ]
-    return vfe.MultiTurnEnvGroup(envs)
+    env_names = [
+        "reverse-text",
+        "tool-test",
+        "alphabet-sort"
+    ]
+    return vfe.MultiTurnEnvGroup(envs, env_names=env_names)
