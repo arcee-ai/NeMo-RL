@@ -48,6 +48,7 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         env_names: List[str] | None = None,
         message_type: vf.MessageType | None = None,
         max_turns: int | None = None,
+        force_overwrite_task: bool = False,
         **kwargs,
     ):
         if not envs:
@@ -69,7 +70,7 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
                 return example
 
             env_dataset = env.get_dataset() if hasattr(env, "get_dataset") else None
-            if env_dataset is not None and "task" not in env_dataset.column_names:
+            if (env_dataset is not None and "task" not in env_dataset.column_names) or force_overwrite_task:
                 env_dataset = env_dataset.map(add_task)
             if env_dataset is not None:
                 datasets.append(env_dataset)
