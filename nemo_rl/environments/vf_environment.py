@@ -10,8 +10,6 @@ from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentRet
 
 import verifiers as vf
 
-from nemo_rl.models.generation.interfaces import GenerationInterface
-
 class VfEnvironmentMetadata(TypedDict):
     """Persistent state of the environment across steps."""
     answer: str | None
@@ -32,7 +30,6 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     """Wraps a verifiers environment into a NeMo-RL one."""
     cfg: VfEnvironmentConfig
     env: vf.MultiTurnEnv
-    generation: GenerationInterface | None
     
     def __init__(self, cfg: VfEnvironmentConfig):
         self.cfg = cfg
@@ -47,25 +44,9 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             **env_cfg,
         )
         
-        # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup.
-        # TODO: Work out a replacement for EnvGroup with proper MultiTurnEnv support.
+        # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup, which we have a multi-turn replacement for.
         if not isinstance(self.env, vf.MultiTurnEnv):
             raise TypeError("VfEnvironment only supports MultiTurnEnv environments (this includes SingleTurnEnv and ToolEnv but not EnvGroup).")
-        
-        # Optional handle to a generation controller (e.g., VllmGeneration)
-        self.generation: Any = None
-
-    def set_generation_handle(self, generation: GenerationInterface) -> None:
-        """Store a handle to a generation interface (e.g., VllmGeneration)."""
-        self.generation = generation
-
-    def query_vllm(self, prompts: list[str], greedy: bool = False) -> list[str]:
-        """Query the vLLM generation backend from within the environment worker."""
-        assert self.generation is not None, "vLLM generation handle not set"
-        inputs = BatchedDataDict({"prompts": prompts})
-        outputs = self.generation.generate_text(inputs, greedy=greedy)
-        return outputs["texts"]
-        
         
     async def step(self, message_log_batch: list[LLMMessageLogType], metadata: list[VfEnvironmentMetadata]) -> EnvironmentReturn[VfEnvironmentMetadata]:
         observations = []
