@@ -19,6 +19,7 @@ from collections import defaultdict
 from typing import Any, Callable, Optional
 
 from omegaconf import OmegaConf
+import ray
 from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.environments.vf_environment import VfEnvironment
@@ -249,6 +250,14 @@ def main() -> None:
         grpo_state,
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
+
+    # Provide the vLLM generation handle to the VF environment actor so it can query the policy.
+    try:
+        vf_env_handle = task_to_env["vf"]
+        ray.get(vf_env_handle.set_generation_handle.remote(policy_generation))
+    except Exception as e:
+        # Non-fatal: training still proceeds even if environment-side vLLM querying isn't used.
+        print(f"Warning: failed to set generation handle on VfEnvironment: {e}")
 
     grpo_train(
         policy,
