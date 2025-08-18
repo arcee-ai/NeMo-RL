@@ -70,7 +70,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                     "prompt": messages[:last_user_index+1],
                     "completion": messages[last_user_index+1:],
                     "answer": meta.get("answer", None),
-                    "task": meta.get("task", "default"),
+                    "task": meta.get("task", None),
                     "info": meta.get("info", None),
                     "responses": messages[last_user_index+1:],
                     "turn": sum(1 for m in messages if m.get("role") == "assistant"),
