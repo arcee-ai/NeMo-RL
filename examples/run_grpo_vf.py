@@ -79,6 +79,8 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
     else:
         vf_tools = {"env_0": []}
     
+    print(f"vf_tools: {vf_tools}")
+    
     # TaskDataProcessFnCallable
     def vf_data_processor(
         datum_dict: dict[str, Any],
