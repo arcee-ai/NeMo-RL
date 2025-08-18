@@ -57,6 +57,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         answers = []
         
         for messages, meta in zip(message_log_batch, metadata):
+            print(f"Evaluating environment with task {meta.get('task')}")
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
                 # Find last user message index.
