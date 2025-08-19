@@ -78,9 +78,7 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
         vf_tools = {"env_0": vf_env.tools}
     else:
         vf_tools = {"env_0": []}
-    
-    print(f"vf_tools: {vf_tools}")
-    
+        
     # TaskDataProcessFnCallable
     def vf_data_processor(
         datum_dict: dict[str, Any],
@@ -91,7 +89,6 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
     ) -> DatumSpec:
         """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""    
         vf_task = datum_dict.get("task", "env_0")
-        print(f"Processing datum for task {vf_task}")
         prompt_messages = datum_dict["prompt"]
         extra_env_info = {key: datum_dict[key] for key in datum_dict if key != "prompt"}
         
