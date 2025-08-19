@@ -3,8 +3,9 @@ from typing import Dict, List, Tuple, Union
 from datasets import concatenate_datasets
 from openai import AsyncOpenAI
 
+from ..rubric.grouped_rubric import GroupedRubric
 
-class _MtEnvGroupRubric(vf.Rubric):
+class _MtEnvGroupRubric(GroupedRubric):
     def __init__(self, env_map: Dict[str, vf.MultiTurnEnv]):
         super().__init__()
         self.env_map = env_map
@@ -15,6 +16,30 @@ class _MtEnvGroupRubric(vf.Rubric):
 
     def get_reward_func_names(self) -> List[str]:
         return self._all_reward_names
+    
+    def should_group_rollouts(self, task: str) -> bool:
+        return isinstance(self.env_map.get(task, self.env_map.values()[0]).rubric, GroupedRubric)
+
+    async def score_rollouts_grouped(
+        self,
+        prompts: List[vf.Messages],
+        completions: List[vf.Messages],
+        answers: List[str],
+        states: List[vf.State],
+        task: str,
+        infos: List[vf.Info] = [],
+        **kwargs,
+    ) -> vf.RolloutScores:
+        if not self.should_group_rollouts(task):
+            raise ValueError("GroupedRubric is not enabled for this task.")
+        
+        env = self.env_map.get(task)
+        if env is None:
+            raise ValueError(f"No environment found for task {task}.")
+        
+        return await env.rubric.score_rollouts_grouped(
+            prompts, completions, answers, states, task, infos, **kwargs
+        )
 
     async def score_rollout(
         self,

@@ -393,12 +393,12 @@ class BaseVllmGenerationWorker:
         
         parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
         if parser_name is None:
-            return [None for _ in texts]
+            return [{}] * len(texts)
 
         try:
             ParserCls = ToolParserManager.get_tool_parser(parser_name)
         except Exception:
-            return [None for _ in texts]
+            return [{}] * len(texts)
 
         try:
             tokenizer = self.llm.get_tokenizer()
@@ -406,7 +406,7 @@ class BaseVllmGenerationWorker:
             tokenizer = None
 
         if tokenizer is None:
-            return [None for _ in texts]
+            return [{}] * len(texts)
 
         try:
             parser: ToolParser = ParserCls(tokenizer)
@@ -422,11 +422,11 @@ class BaseVllmGenerationWorker:
                     info = parser.extract_tool_calls(text, req)
                     results.append(info.model_dump())
                 except Exception:
-                    results.append(None)
+                    results.append({})
             
             return results
         except Exception:
-            return [None for _ in texts]
+            return [{}] * len(texts)
 
 
 @ray.remote(

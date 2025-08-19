@@ -24,7 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_vf_reverser_600M"
+  checkpoint_dir: "results/grpo_vf_grouped_500M"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
@@ -32,7 +32,7 @@ checkpointing:
   checkpoint_must_save_by: null
 
 policy:
-  model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
+  model_name: "Qwen/Qwen2.5-0.5B-Instruct"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 256
@@ -129,7 +129,7 @@ data:
 
 env:
   vf:
-    environment_name: "vf_reverse_text"
+    environment_name: "vf_grouped"
 
 logger:
   log_dir: "logs"  # Base directory for all logs
@@ -140,11 +140,11 @@ logger:
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "nemo-grpo-dev"
-    name: "grpo-vf-reverser-0.6B"
+    name: "grpo-vf-grouped-0.5B"
   tensorboard: {}
   mlflow:
-    experiment_name: "grpo-vf-reverser-0.6B"
-    run_name: "grpo-vf-reverser-0.6B"
+    experiment_name: "grpo-vf-grouped-0.5B"
+    run_name: "grpo-vf-grouped-0.5B"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)

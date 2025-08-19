@@ -1,0 +1,17 @@
+[project]
+name = "vf-grouped"
+version = "0.1.1"
+tags = ["text", "transformation", "single-turn", "xml"]
+license = "Apache-2.0"
+description = "Test grouped reward functions"
+dependencies = [
+    "verifiers>=0.1.2",
+    "vf-exts",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["vf_grouped.py"]

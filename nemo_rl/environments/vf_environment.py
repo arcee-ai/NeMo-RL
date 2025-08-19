@@ -9,6 +9,7 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentReturn
 
 import verifiers as vf
+import vf_exts as vfe
 
 class VfEnvironmentMetadata(TypedDict):
     """Persistent state of the environment across steps."""
@@ -23,7 +24,15 @@ class VfEnvironmentConfig(TypedDict):
     environment_name: str
     # Passed to vf.load_environment as kwargs - make sure this is serializable.
     environment_config: dict[str, Any] | None
-    
+
+
+def split_prompt_completion(messages: vf.Messages) -> tuple[vf.Messages, vf.Messages]:
+    """Split a list of messages into a prompt and completion."""
+    last_user_index = 0
+    for i, m in enumerate(messages):
+        if m.get("role") == "user":
+            last_user_index = i
+    return messages[:last_user_index+1], messages[last_user_index+1:]
     
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
@@ -56,25 +65,65 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         
+        # Gather GRPO groups and populate initial state field.
+        group_messages = {}
+        group_metas = {}
         for messages, meta in zip(message_log_batch, metadata):
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
-                # Find last user message index.
-                last_user_index = 0
-                for i, m in enumerate(messages):
-                    if m.get("role") == "user":
-                        last_user_index = i
-                
+                prompt, completion = split_prompt_completion(messages)
                 meta["state"] = self.env.setup_state({
-                    "prompt": messages[:last_user_index+1],
-                    "completion": messages[last_user_index+1:],
+                    "prompt": prompt,
+                    "completion": completion,
                     "answer": meta.get("answer", None),
                     "task": meta.get("task", None),
                     "info": meta.get("info", None),
-                    "responses": messages[last_user_index+1:],
+                    "responses": completion,
                     "turn": sum(1 for m in messages if m.get("role") == "assistant"),
                 })
             
+            if meta.get("_grpo_gid", None) is None:
+                raise ValueError("GRPO group not specified for rollout.", messages, meta)
+            
+            grpo_gid: int = meta["_grpo_gid"]
+            if grpo_gid not in group_messages:
+                group_messages[grpo_gid] = []
+                group_metas[grpo_gid] = []
+            group_messages[grpo_gid].append(messages)
+            group_metas[grpo_gid].append(meta)
+        
+        grouped_rewards: dict[int, list[float]] = {}
+        grouped_metrics: dict[int, dict[str, list[float]]] = {}
+        
+        if isinstance(self.env.rubric, vfe.GroupedRubric):
+            # Score groups
+            for grpo_gid in group_messages.keys():
+                all_messages = group_messages[grpo_gid]
+                metas = group_metas[grpo_gid]
+                assert len(set(meta.get("task", None) for meta in metas)) <= 1, "All rollouts in a GRPO group should have the same task."
+                
+                split = [split_prompt_completion(m) for m in all_messages]
+                prompts = [x[0] for x in split]
+                completions = [x[1] for x in split]
+                
+                states = [x["state"] for x in metas]
+                
+                results: vf.RolloutScores = await self.env.rubric.score_rollouts_grouped(
+                    prompts,
+                    completions,
+                    metas[0].get("answer", None),
+                    states,
+                    metas[0].get("task", None),
+                    metas[0].get("info", None),
+                )
+                grouped_rewards[grpo_gid] = results.reward
+                grouped_metrics[grpo_gid] = results.metrics
+                
+                # Tag message with their group index.
+                for i, meta in enumerate(metas):
+                    meta["_grpo_group_idx"] = i
+        
+        for messages, meta in zip(message_log_batch, metadata):
             # Step verifiers environment.
             responses, new_state = self.env.env_response(messages, meta["state"])
             meta["state"].update(new_state)
@@ -86,24 +135,28 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             if self.env.is_completed(messages, meta["state"]) or meta["state"]["turn"] >= self.env.max_turns:
                 # Rollout marked complete - calculate rewards and finalize.
                 
-                # TODO: Make some affordance for Kimi-style group-relative judgement here.
-                # We're using standard verifiers-style reward functions, which evaluate in a vacuum.
-                results: vf.RolloutScore = await self.env.rubric.score_rollout(
-                    meta["state"]["prompt"],
-                    meta["state"]["completion"],
-                    meta.get("answer", None),
-                    meta["state"],
-                    meta.get("task", None),
-                    meta.get("info", None),
-                )
+                if meta.get("_grpo_gid", None) in grouped_rewards:
+                    rewards.append(grouped_rewards[meta["_grpo_gid"]][meta["_grpo_group_idx"]])
+                    
+                    meta["metrics"] = grouped_metrics[meta["_grpo_gid"]]
+                else:
+                    results: vf.RolloutScore = await self.env.rubric.score_rollout(
+                        meta["state"]["prompt"],
+                        meta["state"]["completion"],
+                        meta.get("answer", None),
+                        meta["state"],
+                        meta.get("task", None),
+                        meta.get("info", None),
+                    )
+                    
+                    rewards.append(results.reward)
                 
-                # This gets integrated into the rollout metrics.
-                meta["metrics"] = results.metrics
+                    # This later gets integrated into the rollout metrics.
+                    meta["metrics"] = results.metrics
                 
                 # There isn't another rollout after this one, so the model doesn't actually see this.
                 next_metadata.append(meta)
                 next_stop_strings.append(None)
-                rewards.append(results.reward)
                 terminated.append(True)
             else:
                 # Largely placeholders to indicate a follow-up step is required.

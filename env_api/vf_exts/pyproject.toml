@@ -15,7 +15,7 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-packages = ["vf_exts", "vf_exts.env"]
+packages = ["vf_exts", "vf_exts.env", "vf_exts.rubric"]
 
 [tool.setuptools.dynamic]
 version = {attr = "vf_exts.__version__"}
