@@ -489,6 +489,11 @@ def run_multi_turn_rollout(
                         env_metric_sums[k] = env_metric_sums.get(k, 0.0) + float(v)
                         env_metric_counts[k] = env_metric_counts.get(k, 0) + 1
 
+        # Update extra_env_info for all active samples with latest metadata
+        for i, global_idx in enumerate(active_indices.tolist()):
+            if env_output.metadata[i] is not None:
+                current_batch["extra_env_info"][global_idx] = env_output.metadata[i]
+
         # Determine done samples and update active set
         terminateds = env_output.terminateds.bool()
         done = truncation_mask | terminateds
@@ -519,6 +524,8 @@ def run_multi_turn_rollout(
 
     # Add total rewards to the final batch
     current_batch["total_reward"] = total_rewards
+
+    # Note: Do not mutate batch with per-sample flags and counts; use local tensors directly below
 
     # Calculate aggregate metrics
     rollout_metrics = {
@@ -553,14 +560,13 @@ def run_multi_turn_rollout(
             "messages": filtered_messages,
             "grpo_group_id": current_batch["idx"][i],
             "total_reward": current_batch["total_reward"][i].item(),
-            "terminated": current_batch["terminated"][i].item(),
-            "truncated": current_batch["truncated"][i].item(),
-            "max_turns_reached": current_batch["max_turns_reached"][i].item(),
-            "turn_count": current_batch["turn_count"][i].item(),
-            "total_tokens": current_batch["total_tokens"][i].item(),
-            "assistant_tokens": current_batch["assistant_tokens"][i].item(),
-            "env_tokens": current_batch["env_tokens"][i].item(),
-            "env_metrics": env_output.metadata[i].get("metrics", {}),
+            "terminated": sample_terminated[i].item(),
+            "truncated": sample_truncated[i].item(),
+            "max_turns_reached": sample_max_turns_reached[i].item(),
+            "total_tokens": sample_token_counts[i].item(),
+            "assistant_tokens": sample_assistant_token_counts[i].item(),
+            "env_tokens": sample_env_token_counts[i].item(),
+            "env_metrics": current_batch["extra_env_info"][i].get("metrics", {}),
         })
     
     rollout_metrics["rollouts/text"] = rollout_log
