@@ -81,10 +81,12 @@ class PairwiseJudgeRubric(GroupedRubric):
                 was_malformed = True
                 opinion = 4
             
+            # We have to do this twice so the resulting metric is the same size as the group.
+            was_judge_malformed.append(was_malformed)
             was_judge_malformed.append(was_malformed)
             
-            rewards.append(1 - opinion / 7) # A is highest when opinion is 1
-            rewards.append(opinion / 7) # B is highest when opinion is 7
+            rewards.append(4 - opinion) # A is highest when opinion is 1
+            rewards.append(opinion - 4) # B is highest when opinion is 7
             
         return RolloutScores(reward=rewards, metrics={"was_judge_malformed": was_judge_malformed})
             
