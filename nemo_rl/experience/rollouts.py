@@ -545,9 +545,9 @@ def run_multi_turn_rollout(
     rollout_log = []
     for i in range(len(current_batch["message_log"])):
         # Copy to avoid mutating the original.
-        filtered_messages = dict(get_keys_from_message_log(
+        filtered_messages: list[dict] = get_keys_from_message_log(
             current_batch["message_log"][i], ["role", "content", "tool_calls"]
-        ).copy())
+        ).copy()
         
         rollout_log.append({
             "messages": filtered_messages,
