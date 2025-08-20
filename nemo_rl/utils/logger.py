@@ -371,19 +371,24 @@ class WandbLogger(LoggerInterface):
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
                     message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br />")
-                    content += f"<p><b>[{message['role']}]:</b> {message_fixed}</p>"
+                    
+                    if message["role"] == "tool":
+                        content += f"<p><b>[tool] (call_id={message['tool_call_id']}):</b> <pre>{message_fixed}</pre></p>"
+                    else:
+                        content += f"<p><b>[{message['role']}]:</b> {message_fixed}</p>"
                 
                     tool_calls = message.get("tool_calls", [])
                     if len(tool_calls) > 0:
                         content += "<div style='margin-left: 20px;'>"
                         content += "<p><b>Model called tools</b></p>"
                         for tool_call in tool_calls:
+                            call_id = tool_call.id
                             func_obj = tool_call.function
                             try:
                                 args_formatted = json.dumps(json.loads(func_obj.arguments), indent=2)
                             except json.JSONDecodeError:
                                 args_formatted = func_obj.arguments
-                            content += f"<p><b>{func_obj.name}:</b> <pre>{args_formatted}</pre></p>"
+                            content += f"<p><b>{func_obj.name} (call_id={call_id}):</b> <pre>{args_formatted}</pre></p>"
                         content += "</div>"
                 
                 content += "<p><b>Metrics:</b></p>"
