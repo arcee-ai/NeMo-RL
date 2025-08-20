@@ -377,7 +377,8 @@ class WandbLogger(LoggerInterface):
                     if len(tool_calls) > 0:
                         content += "<p><b>Model called tools</b></p>"
                         for tool_call in tool_calls:
-                            content += f"<p><b>{tool_call.name}:</b> <pre>{json.dumps(tool_call.args, indent=2)}</pre></p>"
+                            func_obj = tool_call.function
+                            content += f"<p><b>{func_obj.name}:</b> <pre>{json.dumps(func_obj.arguments, indent=2)}</pre></p>"
                 
                 content += "<p><b>Metrics:</b></p>"
                 content += self.render_html_table(
