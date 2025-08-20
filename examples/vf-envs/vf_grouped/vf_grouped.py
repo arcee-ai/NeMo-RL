@@ -8,6 +8,7 @@ import random
 import os
 import math
 import re
+import logging
 
 import openai
 
@@ -61,7 +62,8 @@ async def get_opinion(client: openai.AsyncOpenAI, poem_a: str, poem_b: str) -> i
     
     match = re.search(r"<answer>(.*?)</answer>", response.choices[0].message.content)
     if match is None:
-        raise ValueError(f"No answer found in response: {response.choices[0].message.content}")
+        logging.error(f"No answer found in response: {response.choices[0].message.content}")
+        return 4
     return int(match.group(1))
 
 def load_environment(num_examples=100,seed=42) -> vf.MultiTurnEnv:
