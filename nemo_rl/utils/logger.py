@@ -395,7 +395,13 @@ class WandbLogger(LoggerInterface):
                 content += self.render_html_table(
                     {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
                 )
-                content += self.render_html_table(rollout["env_metrics"])
+                
+                # If any group metrics are group-wise, index them here.
+                env_metrics = rollout["env_metrics"].copy()
+                for k, v in env_metrics.items():
+                    if isinstance(v, list) and len(v) == len(group_rollouts):
+                        env_metrics[k] = v[i]
+                content += self.render_html_table(env_metrics)
         
         return content
 
