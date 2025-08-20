@@ -79,16 +79,21 @@ def load_environment(num_examples=100,seed=42) -> vf.MultiTurnEnv:
     
     async def poem_reward_func(completions: list[vf.Messages], answer: list[str], **kwargs) -> list[float]:
         rewards = []
+        pairs = []
         for i in range(0, len(completions), 2):
             a = completions[i][-1]["content"]
             b = completions[i+1][-1]["content"]
-            opinion = await get_opinion(client, a, b)
-            
+            pairs.append((a, b))
+
+        tasks = [get_opinion(client, a, b) for a, b in pairs]
+        opinions = await asyncio.gather(*tasks)
+
+        for opinion in opinions:
             b_reward = opinion / 7
             a_reward = 1 - b_reward
             rewards.append(a_reward)
             rewards.append(b_reward)
-        
+
         return rewards
     
     rubric = vfe.GroupedRubric([poem_reward_func])
