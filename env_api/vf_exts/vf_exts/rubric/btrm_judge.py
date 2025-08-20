@@ -48,6 +48,7 @@ class PairwiseJudgeRubric(GroupedRubric):
         self.judge_client = judge_client if judge_client is not None else OpenAI()
         self.judge_model = judge_model
         self.judge_prompt = judge_prompt
+        self.rubric_prompt = rubric_prompt
         self.judge_sampling_args = judge_sampling_args
 
     async def score_rollouts_grouped(
