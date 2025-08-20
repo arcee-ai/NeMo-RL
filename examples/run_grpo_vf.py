@@ -99,11 +99,16 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
         
         # NeMo-RL expects a format with a standard message log alongside token IDs.
         # Go through and convert each message.
-        for message in prompt_messages:
+        for i, message in enumerate(prompt_messages):
+            # Add the assistant generation header after the final user message so
+            # the model starts generating after the header rather than emitting it.
+            add_gen_prompt = (
+                i == len(prompt_messages) - 1 and message.get("role") == "user"
+            )
             raw_message: str = tokenizer.apply_chat_template(  # type: ignore
                 [message],
                 tokenize=False,
-                add_generation_prompt=False,
+                add_generation_prompt=add_gen_prompt,
                 add_special_tokens=True,
                 tools=vf_tools[vf_task] # type: ignore
             )
