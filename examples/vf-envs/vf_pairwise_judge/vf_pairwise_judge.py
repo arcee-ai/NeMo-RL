@@ -65,7 +65,7 @@ def load_environment(num_examples=100,seed=42) -> vf.MultiTurnEnv:
     
     client = openai.OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
     
-    rubric = vfe.PairwiseJudgeRubric(judge_client=client, judge_model="google/gemini-2.5-flash-lite")
+    rubric = vfe.PairwiseJudgeRubric(judge_client=client, judge_model="google/gemini-2.5-flash-lite", judge_prompt=JUDGE_PROMPT)
     
     env = vf.SingleTurnEnv(dataset=dataset, rubric=rubric)
     return env
