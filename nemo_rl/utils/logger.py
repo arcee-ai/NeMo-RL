@@ -371,7 +371,7 @@ class WandbLogger(LoggerInterface):
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
                     message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br />")
-                    content += f"<p><b><{message['role']}>:</b> {message_fixed}</p>"
+                    content += f"<p><b>&lt;{message['role']}&gt;:</b> {message_fixed}</p>"
                 
                     tool_calls = message.get("tool_calls", [])
                     if len(tool_calls) > 0:
