@@ -341,7 +341,10 @@ class WandbLogger(LoggerInterface):
         row = ""
         for k, v in data.items():
             header += f"<th>{k}</th>"
-            row += f"<td>{v}</td>"
+            if isinstance(v, float):
+                row += f"<td>{v:.4f}</td>"
+            else:
+                row += f"<td>{v}</td>"
         
         return f"<table><tr>{header}</tr>{row}</table>"
     
@@ -375,11 +378,10 @@ class WandbLogger(LoggerInterface):
                         for tool_call in tool_calls:
                             content += f"<p><b>{tool_call['name']}:</b> <pre>{json.dumps(tool_call['args'], indent=2)}</pre></p>"
                 
-                content += "<p><b>Rollout metrics:</b></p>"
+                content += "<p><b>Metrics:</b></p>"
                 content += self.render_html_table(
                     {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
                 )
-                content += "<p><b>Environment metrics:</b></p>"
                 content += self.render_html_table(rollout["env_metrics"])
         
         return content
