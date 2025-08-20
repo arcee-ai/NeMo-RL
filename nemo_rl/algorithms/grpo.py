@@ -935,7 +935,7 @@ def validate(
             # Collect message logs for later display
             to_env = [
                 get_keys_from_message_log(
-                    val_batch["message_log"][i], ["role", "content"]
+                    val_batch["message_log"][i], ["role", "content", "tool_calls", "tool_call_id"]
                 )
                 for i in range(len(val_batch["message_log"]))
             ]

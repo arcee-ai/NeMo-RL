@@ -234,7 +234,7 @@ def calculate_rewards(
     """
     # Extract message logs for environment (most recent interaction)
     to_env = [
-        get_keys_from_message_log(batch["message_log"][i], ["role", "content", "tool_calls"])
+        get_keys_from_message_log(batch["message_log"][i], ["role", "content", "tool_calls", "tool_call_id"])
         for i in range(len(batch["message_log"]))
     ]
     task_names = batch["task_name"]
@@ -553,7 +553,7 @@ def run_multi_turn_rollout(
     for i in range(len(current_batch["message_log"])):
         # Copy to avoid mutating the original.
         filtered_messages: list[dict] = get_keys_from_message_log(
-            current_batch["message_log"][i], ["role", "content", "tool_calls"]
+            current_batch["message_log"][i], ["role", "content", "tool_calls", "tool_call_id"]
         ).copy()
         
         rollout_log.append({
@@ -955,7 +955,7 @@ def run_async_multi_turn_rollout(
 
         rollout_metrics["rollouts/text"] = [
             get_keys_from_message_log(
-                final_batch["message_log"][i], ["role", "content"]
+                final_batch["message_log"][i], ["role", "content", "tool_calls", "tool_call_id"]
             )
             for i in range(len(final_batch["message_log"]))
         ]
