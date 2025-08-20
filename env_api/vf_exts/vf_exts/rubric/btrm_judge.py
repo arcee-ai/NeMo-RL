@@ -74,7 +74,12 @@ class PairwiseJudgeRubric(GroupedRubric):
                 was_malformed = True
                 opinion = 4
             else:
-                opinion = int(match.group(1))
+                try:
+                    opinion = int(match.group(1))
+                except ValueError:
+                    logging.error(f"Model gave invalid opinion: {match.group(1)}")
+                    was_malformed = True
+                    opinion = 4
             
             if opinion < 1 or opinion > 7:
                 logging.error(f"Model gave invalid opinion: {opinion}")
