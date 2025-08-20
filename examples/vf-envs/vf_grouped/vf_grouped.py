@@ -78,8 +78,8 @@ def load_environment(num_examples=100,seed=42) -> vf.MultiTurnEnv:
     async def poem_reward_func(completions: list[vf.Messages], answer: list[str], **kwargs) -> list[float]:
         rewards = []
         for i in range(0, len(completions), 2):
-            a = completions[i]["content"]
-            b = completions[i+1]["content"]
+            a = completions[i][-1]["content"]
+            b = completions[i+1][-1]["content"]
             opinion = await get_opinion(client, a, b)
             
             b_reward = opinion / 7
