@@ -59,9 +59,7 @@ async def get_opinion(client: openai.AsyncOpenAI, poem_a: str, poem_b: str) -> i
             {"role": "user", "content": JUDGE_PROMPT.format(poem_a, poem_b)}
         ]
     )
-    
-    print(response.choices[0].message.content)
-    
+        
     match = re.search(r"<answer>(.*?)</answer>", response.choices[0].message.content)
     if match is None:
         logging.error(f"No answer found in response: {response.choices[0].message.content}")
