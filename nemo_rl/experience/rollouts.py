@@ -562,7 +562,6 @@ def run_multi_turn_rollout(
             "total_reward": current_batch["total_reward"][i].item(),
             "terminated": sample_terminated[i].item(),
             "truncated": sample_truncated[i].item(),
-            "max_turns_reached": sample_max_turns_reached[i].item(),
             "total_tokens": sample_token_counts[i].item(),
             "assistant_tokens": sample_assistant_token_counts[i].item(),
             "env_tokens": sample_env_token_counts[i].item(),
