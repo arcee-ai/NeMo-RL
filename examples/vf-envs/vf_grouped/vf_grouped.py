@@ -54,7 +54,7 @@ Poem B:
 
 async def get_opinion(client: openai.AsyncOpenAI, poem_a: str, poem_b: str) -> int:
     response = await client.chat.completions.create(
-        model="moonshotai/kimi-k2",
+        model="openai/gpt-5-nano",
         messages=[
             {"role": "user", "content": JUDGE_PROMPT.format(poem_a, poem_b)}
         ]
