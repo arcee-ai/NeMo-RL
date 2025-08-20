@@ -368,14 +368,20 @@ class WandbLogger(LoggerInterface):
         for group_id, group_rollouts in rollouts_by_group.items():
             content += f"<h2>Group {group_id}</h2>"
             for i, rollout in enumerate(group_rollouts):
+                # Get tool results in advance
+                tool_results = {}
+                for message in rollout["messages"]:
+                    if message["role"] == "tool":
+                        tool_results[message["tool_call_id"]] = message["content"]
+                
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
                     message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br />")
                     
                     if message["role"] == "tool":
-                        content += f"<p><b>[tool] (call_id={message['tool_call_id']}):</b> <pre>{message_fixed}</pre></p>"
-                    else:
-                        content += f"<p><b>[{message['role']}]:</b> {message_fixed}</p>"
+                        continue
+                    
+                    content += f"<p><b>[{message['role']}]:</b> {message_fixed}</p>"
                 
                     tool_calls = message.get("tool_calls", [])
                     if len(tool_calls) > 0:
@@ -388,7 +394,8 @@ class WandbLogger(LoggerInterface):
                                 args_formatted = json.dumps(json.loads(func_obj.arguments), indent=2)
                             except json.JSONDecodeError:
                                 args_formatted = func_obj.arguments
-                            content += f"<p><b>{func_obj.name} (call_id={call_id}):</b> <pre>{args_formatted}</pre></p>"
+                            response = tool_results.get(call_id, "[N/A]")
+                            content += f"<p><b>{func_obj.name}):</b> <pre>{args_formatted}</pre><br />Response: <pre>{response}</pre></p>"
                         content += "</div>"
                 
                 content += "<p><b>Metrics:</b></p>"
