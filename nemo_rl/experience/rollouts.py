@@ -269,6 +269,7 @@ def calculate_rewards(
         futures.append(future)
         future_to_indices[future] = indices
 
+    print("▶ Stepping environments...")
     results = ray.get(futures)
     all_rewards = []
     all_env_observations = []
