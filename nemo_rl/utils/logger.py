@@ -302,11 +302,11 @@ class WandbLogger(LoggerInterface):
         # Try to find our custom rollout log items in metrics, and if we do log them as HTML instead.
         for k, v in metrics.items():
             if self.is_rollout_log(v):
-                metrics[k] = wandb.Html(self.render_rollout_log(v))
-                
                 # TODO: Temporary fix for https://github.com/wandb/wandb/issues/10369
                 # Inject proper UTF-8 encoding header.
-                metrics[k].html = metrics[k].html.replace("<head>", "<head><meta charset=\"utf-8\">")
+                metrics[k] = wandb.Html(
+                    f"<head><meta charset=\"utf-8\"></head><body>{self.render_rollout_log(v)}</body>"
+                )
 
         # If step_metric is provided, use the corresponding value from metrics as step
         if step_metric and step_metric in metrics:
