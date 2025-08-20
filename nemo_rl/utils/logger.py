@@ -302,7 +302,7 @@ class WandbLogger(LoggerInterface):
         # Try to find our custom rollout log items in metrics, and if we do log them as HTML instead.
         for k, v in metrics.items():
             if self.is_rollout_log(v):
-                metrics[k] = wandb.Html(self.render_rollout_log(v, k))
+                metrics[k] = wandb.Html(self.render_rollout_log(v))
 
         # If step_metric is provided, use the corresponding value from metrics as step
         if step_metric and step_metric in metrics:
@@ -381,7 +381,8 @@ class WandbLogger(LoggerInterface):
                 )
                 content += "<p><b>Environment metrics:</b></p>"
                 content += self.render_html_table(rollout["env_metrics"])
-                    
+        
+        return content
 
 
 class GpuMetricSnapshot(TypedDict):
