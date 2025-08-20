@@ -369,6 +369,12 @@ class WandbLogger(LoggerInterface):
                 for message in rollout["messages"]:
                     content += f"<p><b>{message['role']}:</b> {message['content']}</p>"
                 
+                    tool_calls = message.get("tool_calls", [])
+                    if len(tool_calls) > 0:
+                        content += "<p><b>Model called tools</b></p>"
+                        for tool_call in tool_calls:
+                            content += f"<p><b>{tool_call['name']}:</b> <pre>{json.dumps(tool_call['args'], indent=2)}</pre></p>"
+                
                 content += "<p><b>Rollout metrics:</b></p>"
                 content += self.render_html_table(
                     {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
