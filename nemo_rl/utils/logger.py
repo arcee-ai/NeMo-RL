@@ -395,7 +395,7 @@ class WandbLogger(LoggerInterface):
                             except json.JSONDecodeError:
                                 args_formatted = func_obj.arguments
                             response = tool_results.get(call_id, "[N/A]")
-                            content += f"<p><b>{func_obj.name}):</b> <pre>{args_formatted}</pre><br />Response: <pre>{response}</pre></p>"
+                            content += f"<p><b>{func_obj.name}):</b> <pre>{args_formatted}</pre>Response: <pre>{response}</pre></p>"
                         content += "</div>"
                 
                 content += "<p><b>Metrics:</b></p>"
