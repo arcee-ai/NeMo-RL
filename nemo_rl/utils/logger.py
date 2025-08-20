@@ -299,17 +299,10 @@ class WandbLogger(LoggerInterface):
                 for k, v in metrics.items()
             }
         
-        # Try to find OpenAI-style chat conversations in metrics, and if so log them as HTML instead.
+        # Try to find our custom rollout log items in metrics, and if we do log them as HTML instead.
         for k, v in metrics.items():
-            if self.is_oai_conversation(v):
-                metrics[k] = wandb.Html(self.render_conversation(v, k))
-            elif isinstance(v, list):
-                if len(v) >= 1 and self.is_oai_conversation(v[0]):
-                    metrics[k] = wandb.Html(
-                        "\n".join(
-                            [self.render_conversation(c, heading=f"Rollout {i}") for i, c in enumerate(v)]
-                        )
-                    )
+            if self.is_rollout_log(v):
+                metrics[k] = wandb.Html(self.render_rollout_log(v, k))
 
         # If step_metric is provided, use the corresponding value from metrics as step
         if step_metric and step_metric in metrics:
@@ -335,27 +328,54 @@ class WandbLogger(LoggerInterface):
         """
         self.run.log({name: figure}, step=step)
     
-    def is_oai_conversation(self, value: Any) -> bool:
+    def is_rollout_log(self, value: Any) -> bool:
+        """Check if a value is a rollout log."""
         if isinstance(value, list):
-            if len(value) >= 1 and isinstance(value[0], dict) and "role" in value[0].keys():
+            if len(value) >= 1 and isinstance(value[0], dict) and "grpo_group_id" in value[0].keys():
                 return True
         return False
     
-    def render_conversation(self, conversation: list[dict], heading: str = "") -> str:
-        """Log an OpenAI-styyle chat conversation to wandb.
+    def render_html_table(self, data: dict[str, Any]) -> str:
+        """Render a dictionary as an HTML table."""
+        header = ""
+        row = ""
+        for k, v in data.items():
+            header += f"<th>{k}</th>"
+            row += f"<td>{v}</td>"
+        
+        return f"<table><tr>{header}</tr>{row}</table>"
+    
+    def render_rollout_log(self, rollouts: list[dict]) -> str:
+        """Render a list of rollout logs as HTML.
         
         Args:
-            conversation: List of dictionaries, each containing 'role' and 'content' keys
-            step: Global step value
+            rollouts: List of rollout logs
         """
         content = ""
-        if heading != "":
-            content += f"<h3>{heading}</h3>"
-        for message in conversation:
-            msg_content = message.get("content", "")
-            msg_escaped = msg_content.replace("<", "&lt;").replace(">", "&gt;")
-            content += f"<p><b>{message.get('role', 'unknown')}:</b> {msg_escaped}</p>"
-        return content
+        
+        # Split by groups
+        rollouts_by_group = {}
+        for rollout in rollouts:
+            group_id = rollout["grpo_group_id"]
+            if group_id not in rollouts_by_group:
+                rollouts_by_group[group_id] = []
+            rollouts_by_group[group_id].append(rollout)
+        
+        # Render each group
+        for group_id, group_rollouts in rollouts_by_group.items():
+            content += f"<h2>Group {group_id}</h2>"
+            for i, rollout in enumerate(group_rollouts):
+                content += f"<h3>Rollout {i}</h3>"
+                for message in rollout["messages"]:
+                    content += f"<p><b>{message['role']}:</b> {message['content']}</p>"
+                
+                content += "<p><b>Rollout metrics:</b></p>"
+                content += self.render_html_table(
+                    {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
+                )
+                content += "<p><b>Environment metrics:</b></p>"
+                content += self.render_html_table(rollout["env_metrics"])
+                    
 
 
 class GpuMetricSnapshot(TypedDict):

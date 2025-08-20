@@ -540,13 +540,30 @@ def run_multi_turn_rollout(
             sample_env_token_counts.float().mean().item()
         ),
     }
-
-    rollout_metrics["rollouts/text"] = [
-        get_keys_from_message_log(
+    
+    # Assemble detailed rollout logs.
+    rollout_log = []
+    for i in range(len(current_batch["message_log"])):
+        # Copy to avoid mutating the original.
+        filtered_messages = dict(get_keys_from_message_log(
             current_batch["message_log"][i], ["role", "content", "tool_calls"]
-        )
-        for i in range(len(current_batch["message_log"]))
-    ]
+        ).copy())
+        
+        rollout_log.append({
+            "messages": filtered_messages,
+            "grpo_group_id": current_batch["idx"][i],
+            "total_reward": current_batch["total_reward"][i].item(),
+            "terminated": current_batch["terminated"][i].item(),
+            "truncated": current_batch["truncated"][i].item(),
+            "max_turns_reached": current_batch["max_turns_reached"][i].item(),
+            "turn_count": current_batch["turn_count"][i].item(),
+            "total_tokens": current_batch["total_tokens"][i].item(),
+            "assistant_tokens": current_batch["assistant_tokens"][i].item(),
+            "env_tokens": current_batch["env_tokens"][i].item(),
+            "env_metrics": env_output.metadata[i].get("metrics", {}),
+        })
+    
+    rollout_metrics["rollouts/text"] = rollout_log
 
     # Add aggregated environment metrics (averaged over samples that reported them)
     for k, total in env_metric_sums.items():
