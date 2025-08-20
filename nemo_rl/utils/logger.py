@@ -378,6 +378,8 @@ class WandbLogger(LoggerInterface):
                 for message in rollout["messages"]:
                     message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br />")
                     
+                    print(message_fixed)
+                    
                     if message["role"] == "tool":
                         continue
                     
