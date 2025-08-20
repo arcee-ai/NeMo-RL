@@ -298,6 +298,18 @@ class WandbLogger(LoggerInterface):
                 f"{prefix}/{k}" if k != step_metric else k: v
                 for k, v in metrics.items()
             }
+        
+        # Try to find OpenAI-style chat conversations in metrics, and if so log them as HTML instead.
+        for k, v in metrics.items():
+            if self.is_oai_conversation(v):
+                metrics[k] = wandb.Html(self.render_conversation(v, k))
+            elif isinstance(v, list):
+                if len(v) >= 1 and self.is_oai_conversation(v[0]):
+                    metrics[k] = wandb.Html(
+                        "\n".join(
+                            [self.render_conversation(c, heading=f"Rollout {i}") for i, c in enumerate(v)]
+                        )
+                    )
 
         # If step_metric is provided, use the corresponding value from metrics as step
         if step_metric and step_metric in metrics:
@@ -322,6 +334,28 @@ class WandbLogger(LoggerInterface):
             step: Global step value
         """
         self.run.log({name: figure}, step=step)
+    
+    def is_oai_conversation(self, value: Any) -> bool:
+        if isinstance(value, list):
+            if len(value) >= 1 and isinstance(value[0], dict) and "role" in value[0].keys():
+                return True
+        return False
+    
+    def render_conversation(self, conversation: list[dict], heading: str = "") -> str:
+        """Log an OpenAI-styyle chat conversation to wandb.
+        
+        Args:
+            conversation: List of dictionaries, each containing 'role' and 'content' keys
+            step: Global step value
+        """
+        content = ""
+        if heading != "":
+            content += f"<h3>{heading}</h3>"
+        for message in conversation:
+            msg_content = message.get("content", "")
+            msg_escaped = msg_content.replace("<", "&lt;").replace(">", "&gt;")
+            content += f"<p><b>{message.get('role', 'unknown')}:</b> {msg_escaped}</p>"
+        return content
 
 
 class GpuMetricSnapshot(TypedDict):

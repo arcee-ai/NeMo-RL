@@ -541,6 +541,13 @@ def run_multi_turn_rollout(
         ),
     }
 
+    rollout_metrics["rollouts/text"] = [
+        get_keys_from_message_log(
+            current_batch["message_log"][i], ["role", "content", "tool_calls"]
+        )
+        for i in range(len(current_batch["message_log"]))
+    ]
+
     # Add aggregated environment metrics (averaged over samples that reported them)
     for k, total in env_metric_sums.items():
         count = max(env_metric_counts.get(k, 1), 1)
@@ -923,6 +930,13 @@ def run_async_multi_turn_rollout(
             "max_total_reward": max(m["total_reward"] for m in all_sample_metrics),
             "min_total_reward": min(m["total_reward"] for m in all_sample_metrics),
         }
+
+        rollout_metrics["rollouts/text"] = [
+            get_keys_from_message_log(
+                final_batch["message_log"][i], ["role", "content"]
+            )
+            for i in range(len(final_batch["message_log"]))
+        ]
 
         return final_batch, rollout_metrics
 
