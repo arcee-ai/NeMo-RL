@@ -326,6 +326,40 @@ def calculate_rewards(
     )
 
 
+def build_rollouts_log(
+    message_logs: list[list[dict]],
+    grpo_group_ids: list[int],
+    total_rewards: list[float],
+    extra_env_infos: list[dict],
+    sample_metrics: list[dict],
+) -> list[dict]:
+    """Construct rich per-sample rollout logs for metrics.
+
+    Expects per-sample metrics with keys: terminated, truncated, total_tokens,
+    assistant_tokens, env_tokens.
+    """
+    rollout_log: list[dict] = []
+    for i in range(len(message_logs)):
+        filtered_messages: list[dict] = get_keys_from_message_log(
+            message_logs[i], ["role", "content", "tool_calls", "tool_call_id"]
+        ).copy()
+        m = sample_metrics[i]
+        rollout_log.append(
+            {
+                "messages": filtered_messages,
+                "grpo_group_id": grpo_group_ids[i],
+                "total_reward": float(total_rewards[i]),
+                "terminated": bool(m.get("terminated", False)),
+                "truncated": bool(m.get("truncated", False)),
+                "total_tokens": int(m.get("total_tokens", 0)),
+                "assistant_tokens": int(m.get("assistant_tokens", 0)),
+                "env_tokens": int(m.get("env_tokens", 0)),
+                "env_metrics": extra_env_infos[i].get("metrics", {}),
+            }
+        )
+    return rollout_log
+
+
 def run_multi_turn_rollout(
     policy_generation: GenerationInterface,
     input_batch: BatchedDataDict[DatumSpec],
@@ -549,26 +583,24 @@ def run_multi_turn_rollout(
     }
     
     # Assemble detailed rollout logs.
-    rollout_log = []
-    for i in range(len(current_batch["message_log"])):
-        # Copy to avoid mutating the original.
-        filtered_messages: list[dict] = get_keys_from_message_log(
-            current_batch["message_log"][i], ["role", "content", "tool_calls", "tool_call_id"]
-        ).copy()
-        
-        rollout_log.append({
-            "messages": filtered_messages,
-            "grpo_group_id": current_batch["idx"][i],
-            "total_reward": current_batch["total_reward"][i].item(),
+    sync_sample_metrics = [
+        {
             "terminated": sample_terminated[i].item(),
             "truncated": sample_truncated[i].item(),
             "total_tokens": sample_token_counts[i].item(),
             "assistant_tokens": sample_assistant_token_counts[i].item(),
             "env_tokens": sample_env_token_counts[i].item(),
-            "env_metrics": current_batch["extra_env_info"][i].get("metrics", {}),
-        })
-    
-    rollout_metrics["rollouts/text"] = rollout_log
+        }
+        for i in range(len(current_batch["message_log"]))
+    ]
+
+    rollout_metrics["rollouts/text"] = build_rollouts_log(
+        message_logs=current_batch["message_log"],
+        grpo_group_ids=current_batch["idx"],
+        total_rewards=[current_batch["total_reward"][i].item() for i in range(len(current_batch["message_log"]))],
+        extra_env_infos=current_batch["extra_env_info"],
+        sample_metrics=sync_sample_metrics,
+    )
 
     # Add aggregated environment metrics (averaged over samples that reported them)
     for k, total in env_metric_sums.items():
@@ -953,12 +985,22 @@ def run_async_multi_turn_rollout(
             "min_total_reward": min(m["total_reward"] for m in all_sample_metrics),
         }
 
-        rollout_metrics["rollouts/text"] = [
-            get_keys_from_message_log(
-                final_batch["message_log"][i], ["role", "content", "tool_calls", "tool_call_id"]
-            )
-            for i in range(len(final_batch["message_log"]))
-        ]
+        rollout_metrics["rollouts/text"] = build_rollouts_log(
+            message_logs=final_batch["message_log"],
+            grpo_group_ids=final_batch["idx"],
+            total_rewards=[state["total_reward"].item() for state in final_sample_states],
+            extra_env_infos=[state["extra_env_info"] for state in final_sample_states],
+            sample_metrics=[
+                {
+                    "terminated": m.get("terminated", False),
+                    "truncated": m.get("truncated", False),
+                    "total_tokens": m.get("total_tokens", 0),
+                    "assistant_tokens": m.get("assistant_tokens", 0),
+                    "env_tokens": m.get("env_tokens", 0),
+                }
+                for m in all_sample_metrics
+            ],
+        )
 
         return final_batch, rollout_metrics
 
