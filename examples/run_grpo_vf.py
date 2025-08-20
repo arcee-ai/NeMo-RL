@@ -64,7 +64,7 @@ TokenizerType = PreTrainedTokenizerBase
 
 # Slightly odd closure for verifiers env in the data processor, which needs a specific signature.
 def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
-    vf_tools: dict[str, list[Callable]]
+    vf_tools: dict[str, list[Callable]] = defaultdict(lambda: [])
     if isinstance(vf_env, vfe.MultiTurnEnvGroup):
         env_map = vf_env.env_map
         vf_tools = {}
@@ -75,9 +75,9 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
             else:
                 vf_tools[env_id] = []
     elif isinstance(vf_env, vf.ToolEnv):
-        vf_tools = {"env_0": vf_env.tools}
+        vf_tools = defaultdict(lambda: vf_env.tools)
     else:
-        vf_tools = {"env_0": []}
+        vf_tools = defaultdict(lambda: [])
         
     # TaskDataProcessFnCallable
     def vf_data_processor(
