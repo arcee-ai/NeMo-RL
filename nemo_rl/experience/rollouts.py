@@ -494,11 +494,8 @@ def run_multi_turn_rollout(
                     truncation_mask[i] = True
                     sample_truncated[active_indices[i]] = True
 
-                tokenized_env_obs_message = {
-                    "role": msg.get("role", "environment"),
-                    "content": env_obs_content,
-                    "token_ids": tokenized_obs,
-                }
+                tokenized_env_obs_message = msg.copy()
+                tokenized_env_obs_message["token_ids"] = tokenized_obs
                 current_batch["message_log"][global_idx].append(tokenized_env_obs_message)
 
                 # Record token usage - environment
