@@ -126,7 +126,7 @@ class GroupedRubric(Rubric):
         self,
         prompts: List[Messages],
         completions: List[Messages],
-        answer: List[str],
+        answer: str,
         states: List[State],
         task: str,
         info: Info,
