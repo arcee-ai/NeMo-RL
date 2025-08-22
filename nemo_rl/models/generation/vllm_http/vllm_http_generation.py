@@ -31,7 +31,7 @@ class VllmHttpGeneration(GenerationInterface):
     
         # Suppress static type checker complaint on .options by casting to Any
         vllm_app = cast(Any, VLLMOpenAIServe).options(
-            ray_actor_options={"num_cpus": 1, "num_gpus": config["gpus_per_node"]}
+            ray_actor_options={"num_cpus": 1, "num_gpus": config["colocated"]["resources"]["gpus_per_node"]}
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
