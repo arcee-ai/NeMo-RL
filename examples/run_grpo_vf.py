@@ -236,7 +236,7 @@ def main() -> None:
 
     init_ray()
     
-    # serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
+    serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
     
     vllm_app = VLLMOpenAIServe.options(
         ray_actor_options={"num_cpus": 1, "num_gpus": 1}
