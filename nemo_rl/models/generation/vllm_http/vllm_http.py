@@ -43,18 +43,23 @@ class VLLMOpenAIServe:
         parser = make_arg_parser(parser)
         self._args = parser.parse_args(args=args)
         validate_parsed_serve_args(self._args)
-
+        
+        asyncio.create_task(self._init_app(worker_extension_cls))
+    
+    async def _init_app(self, worker_extension_cls: str):
         self._worker_extension_cls = worker_extension_cls
-        self._engine_client_ctx = None
-        self._engine_client = None
+        
+        engine_args = AsyncEngineArgs.from_cli_args(self._args)
+        engine_args.worker_extension_cls = worker_extension_cls
 
-        new_app = build_vllm_app(self._args)
+        self._engine_client_ctx = build_async_engine_client_from_engine_args(
+            engine_args, self._args.disable_frontend_multiprocessing, None
+        )
+        self._engine_client = await self._engine_client_ctx.__aenter__()
+
+        vllm_app = build_vllm_app(self._args)
         
-        @new_app.get("/sanity_check_2")
-        async def _sanity_check_2():
-            return {"status": "great success"}
-        
-        _serve_app.mount("/", new_app)
+        _serve_app.mount("/", vllm_app)
 
     @_serve_app.get("/sanity_check")
     async def _sanity_check(self):
