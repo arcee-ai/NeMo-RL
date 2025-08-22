@@ -114,6 +114,8 @@ policy:
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
+    colocated:
+      enabled: false
     gpus_per_node: 1
     num_nodes: null
 
