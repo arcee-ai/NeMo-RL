@@ -55,14 +55,5 @@ class VLLMOpenAIServe:
         # _serve_app.mount("/", vllm_app)
 
     @_serve_app.get("/sanity_check")
-    async def _sanity_check():
-        return {"status": "ok"}
-
-    # Expose weight management endpoints on the vLLM app itself under /v1/*
-    @_serve_app.post("/v1/update_weights")
-    async def _update_weights(request: Request):
-        data = await request.json()
-        model_path = data.get("model_path")
-        engine_client = request.app.state.engine_client
-        await engine_client.collective_rpc("update_weights", args=(model_path,))
+    async def _sanity_check(self):
         return {"status": "ok"}
