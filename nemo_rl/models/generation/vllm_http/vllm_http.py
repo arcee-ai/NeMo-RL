@@ -11,7 +11,7 @@ from vllm.entrypoints.openai.api_server import (
 )
 from vllm.utils import FlexibleArgumentParser
 
-@serve.deployment(route_prefix="/v1")
+@serve.deployment()
 class VLLMOpenAIServe:
     def __init__(
         self,
