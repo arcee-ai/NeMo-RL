@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request
 _serve_app = FastAPI()
 
 
-@serve.deployment()
+@serve.deployment
 @serve.ingress(_serve_app)
 class VLLMOpenAIServe:
     def __init__(
