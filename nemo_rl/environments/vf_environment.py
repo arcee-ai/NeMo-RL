@@ -65,6 +65,16 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         terminated = []  # Also gets converted to tensor.
         answers = []
         
+        import openai
+        temp_oai = openai.OpenAI(api_key="irrelevant", base_url="127.0.0.1:8000/")
+        response = temp_oai.chat.completions.create(
+            model="policy",
+            messages=[
+                {"role": "user", "content": "Hello, how are you?"}
+            ]
+        )
+        print(response.choices[0].message.content)
+        
         # Gather GRPO groups and populate initial state field.
         group_messages = {}
         group_metas = {}
