@@ -50,6 +50,7 @@ class VllmHttpGeneration(GenerationInterface):
                 if response.status_code == 200:
                     success = True
                     break
+                time.sleep(1)
             except RequestException:
                 pass
         
