@@ -54,7 +54,7 @@ class VLLMOpenAIServe:
         async def _sanity_check_2():
             return {"status": "great success"}
         
-        _serve_app.mount("/v1", new_app)
+        _serve_app.mount("/", new_app)
 
     @_serve_app.get("/sanity_check")
     async def _sanity_check(self):
