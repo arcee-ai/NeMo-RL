@@ -239,7 +239,7 @@ def main() -> None:
     # serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
     
     vllm_app = VLLMOpenAIServe.options(
-        ray_actor_options={"num_cpus": 1}
+        ray_actor_options={"num_cpus": 1, "num_gpus": 1}
     ).bind(
         model=config["policy"]["model_name"],
         tensor_parallel_size=config["policy"]["generation"]["vllm_cfg"]["tensor_parallel_size"],
