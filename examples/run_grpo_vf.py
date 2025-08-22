@@ -238,13 +238,15 @@ def main() -> None:
     
     serve.start(detached=True, http_options={"port": 8000})
     
-    VLLMOpenAIServe.options(
+    vllm_app = VLLMOpenAIServe.options(
         ray_actor_options={"num_gpus": 1}
-    ).deploy(
+    ).bind(
         model=config["policy"]["model_name"],
         tensor_parallel_size=config["policy"]["generation"]["vllm_cfg"]["tensor_parallel_size"],
         max_model_len=config["policy"]["generation"]["vllm_cfg"]["max_model_len"]
     )
+    
+    serve.run(vllm_app)
 
     # setup tokenizer
     tokenizer = get_tokenizer(config["policy"]["tokenizer"])
