@@ -48,10 +48,10 @@ class VLLMOpenAIServe:
         self._engine_client_ctx = None
         self._engine_client = None
 
-        new_app = FastAPI()
+        new_app = build_vllm_app(self._args)
         
         @new_app.get("/sanity_check_2")
-        async def _sanity_check_2(self):
+        async def _sanity_check_2():
             return {"status": "great success"}
         
         _serve_app.mount("/v1", new_app)
