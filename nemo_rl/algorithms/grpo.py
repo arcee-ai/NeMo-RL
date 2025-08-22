@@ -55,6 +55,8 @@ from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
+from nemo_rl.models.generation.vllm_http.config import HttpVllmConfig
+from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.models.policy.lm_policy import Policy
@@ -326,6 +328,11 @@ def setup(
         print(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
+    elif backend == "vllm_http":
+        generation_config = cast(HttpVllmConfig, generation_config)
+        policy_generation = VllmHttpGeneration(
+            cluster=inference_cluster, config=generation_config
+        )
 
     if last_checkpoint_path:
         weights_path = Path(last_checkpoint_path) / "policy" / "weights"
@@ -394,7 +401,7 @@ def _should_use_async_rollouts(master_config: MasterConfig) -> bool:
         return False
 
     backend = generation_config.get("backend", "")
-    if backend != "vllm":
+    if backend not in ["vllm", "vllm_http"]:
         return False
 
     vllm_cfg = generation_config.get("vllm_cfg", {})
