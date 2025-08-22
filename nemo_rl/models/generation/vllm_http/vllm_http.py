@@ -48,17 +48,15 @@ class VLLMOpenAIServe:
         self._engine_client_ctx = None
         self._engine_client = None
 
-        # Build vLLM FastAPI app and include its routes under the ingress app.
-        # Using include_router avoids path prefix confusion when Serve strips route_prefix.
+        # Build vLLM FastAPI app and mount it at root so its /v1/* routes are preserved.
         vllm_app = build_vllm_app(self._args)
-        _serve_app.include_router(vllm_app.router)
-        
-        @_serve_app.get("/sanity_check")
+
+        @vllm_app.get("/sanity_check")
         async def _sanity_check():
             return {"status": "ok"}
 
-        # Expose weight management endpoints on the ingress app.
-        @_serve_app.post("/v1/update_weights")
+        # Expose weight management endpoints on the vLLM app itself under /v1/*
+        @vllm_app.post("/v1/update_weights")
         async def _update_weights(request: Request):
             data = await request.json()
             model_path = data.get("model_path")
@@ -66,14 +64,17 @@ class VLLMOpenAIServe:
             await engine_client.collective_rpc("update_weights", args=(model_path,))
             return {"status": "ok"}
 
-        @_serve_app.post("/v1/reload_weights")
+        @vllm_app.post("/v1/reload_weights")
         async def _reload_weights(request: Request):
             engine_client = request.app.state.engine_client
             await engine_client.collective_rpc("reload_weights")
             return {"status": "ok"}
 
+        # Mount the vLLM app as the root app served by Serve.
+        _serve_app.mount("/", vllm_app)
+
         # Register startup/shutdown events to init/teardown engine client lazily via ASGI lifespan.
-        @_serve_app.on_event("startup")
+        @vllm_app.on_event("startup")
         async def _startup():
             engine_args = AsyncEngineArgs.from_cli_args(self._args)
             engine_args.worker_extension_cls = self._worker_extension_cls
@@ -82,11 +83,11 @@ class VLLMOpenAIServe:
             )
             self._engine_client = await self._engine_client_ctx.__aenter__()
             vllm_config = await self._engine_client.get_vllm_config()
-            await init_app_state(self._engine_client, vllm_config, _serve_app.state, self._args)
+            await init_app_state(self._engine_client, vllm_config, vllm_app.state, self._args)
             # Provide direct access for custom endpoints
-            _serve_app.state.engine_client = self._engine_client
+            vllm_app.state.engine_client = self._engine_client
 
-        @_serve_app.on_event("shutdown")
+        @vllm_app.on_event("shutdown")
         async def _shutdown():
             if self._engine_client_ctx is not None:
                 await self._engine_client_ctx.__aexit__(None, None, None)
