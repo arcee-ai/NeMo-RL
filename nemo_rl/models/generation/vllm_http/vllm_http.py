@@ -48,11 +48,13 @@ class VLLMOpenAIServe:
         self._engine_client_ctx = None
         self._engine_client = None
 
-        # Build vLLM FastAPI app and mount it at root so its /v1/* routes are preserved.
-        vllm_app = build_vllm_app(self._args)
+        new_app = FastAPI()
         
-        # Mount the vLLM app as the root app served by Serve.
-        # _serve_app.mount("/", vllm_app)
+        @new_app.get("/sanity_check_2")
+        async def _sanity_check_2(self):
+            return {"status": "great success"}
+        
+        _serve_app.mount("/v1", new_app)
 
     @_serve_app.get("/sanity_check")
     async def _sanity_check(self):
