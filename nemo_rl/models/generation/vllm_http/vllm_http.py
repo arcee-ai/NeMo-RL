@@ -52,6 +52,10 @@ class VLLMOpenAIServe:
         # Using include_router avoids path prefix confusion when Serve strips route_prefix.
         vllm_app = build_vllm_app(self._args)
         _serve_app.include_router(vllm_app.router)
+        
+        @_serve_app.get("/sanity_check")
+        async def _sanity_check():
+            return {"status": "ok"}
 
         # Expose weight management endpoints on the ingress app.
         @_serve_app.post("/v1/update_weights")
