@@ -11,7 +11,7 @@ from vllm.entrypoints.openai.api_server import (
 )
 from vllm.utils import FlexibleArgumentParser
 
-@serve.deployment()
+@serve.deployment(route_prefix="/v1")
 class VLLMOpenAIServe:
     def __init__(
         self,
@@ -38,9 +38,16 @@ class VLLMOpenAIServe:
         self._args = parser.parse_args(args=args)
         validate_parsed_serve_args(self._args)
 
-        asyncio.run(self._init_app(worker_extension_cls))
+        # Defer async initialization to first request to avoid nesting event loops.
+        self._worker_extension_cls = worker_extension_cls
+        self._asgi = None
+        self._init_task = None
+        self._engine_client_ctx = None
+        self._engine_client = None
 
     async def _init_app(self, worker_extension_cls: str):
+        if self._asgi is not None:
+            return
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
 
@@ -69,4 +76,8 @@ class VLLMOpenAIServe:
         self._asgi = app
 
     async def __call__(self, scope, receive, send):
+        if self._asgi is None:
+            if self._init_task is None:
+                self._init_task = asyncio.create_task(self._init_app(self._worker_extension_cls))
+            await self._init_task
         await self._asgi(scope, receive, send)
