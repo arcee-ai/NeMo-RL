@@ -246,7 +246,7 @@ def main() -> None:
         max_model_len=config["policy"]["generation"]["vllm_cfg"]["max_model_len"]
     )
     
-    serve.run(vllm_app)
+    serve.run(vllm_app, route_prefix="/")
 
     # setup tokenizer
     tokenizer = get_tokenizer(config["policy"]["tokenizer"])

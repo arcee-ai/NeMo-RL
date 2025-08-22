@@ -48,12 +48,13 @@ class VLLMOpenAIServe:
         self._engine_client_ctx = None
         self._engine_client = None
 
-        # Build vLLM FastAPI app and mount under the ingress app.
+        # Build vLLM FastAPI app and include its routes under the ingress app.
+        # Using include_router avoids path prefix confusion when Serve strips route_prefix.
         vllm_app = build_vllm_app(self._args)
-        _serve_app.mount("/", vllm_app)
+        _serve_app.include_router(vllm_app.router)
 
         # Expose weight management endpoints on the ingress app.
-        @_serve_app.post("/update_weights")
+        @_serve_app.post("/v1/update_weights")
         async def _update_weights(request: Request):
             data = await request.json()
             model_path = data.get("model_path")
@@ -61,7 +62,7 @@ class VLLMOpenAIServe:
             await engine_client.collective_rpc("update_weights", args=(model_path,))
             return {"status": "ok"}
 
-        @_serve_app.post("/reload_weights")
+        @_serve_app.post("/v1/reload_weights")
         async def _reload_weights(request: Request):
             engine_client = request.app.state.engine_client
             await engine_client.collective_rpc("reload_weights")
