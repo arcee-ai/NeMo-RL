@@ -50,7 +50,7 @@ class VLLMOpenAIServe:
         self._worker_extension_cls = worker_extension_cls
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
-        engine_args.worker_extension_cls = worker_extension_cls
+        # engine_args.worker_extension_cls = worker_extension_cls
 
         self._engine_client_ctx = build_async_engine_client_from_engine_args(
             engine_args, self._args.disable_frontend_multiprocessing, None
