@@ -5,13 +5,19 @@ from ray import serve
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 from vllm.entrypoints.openai.api_server import (
-    build_app,
+    build_app as build_vllm_app,
     build_async_engine_client_from_engine_args,
     init_app_state,
 )
 from vllm.utils import FlexibleArgumentParser
+from fastapi import FastAPI, Request
 
-@serve.deployment()
+# Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
+_serve_app = FastAPI()
+
+
+@serve.deployment(route_prefix="/v1")
+@serve.ingress(_serve_app)
 class VLLMOpenAIServe:
     def __init__(
         self,
@@ -38,46 +44,44 @@ class VLLMOpenAIServe:
         self._args = parser.parse_args(args=args)
         validate_parsed_serve_args(self._args)
 
-        # Defer async initialization to first request to avoid nesting event loops.
         self._worker_extension_cls = worker_extension_cls
-        self._asgi = None
-        self._init_task = None
         self._engine_client_ctx = None
         self._engine_client = None
 
-    async def _init_app(self, worker_extension_cls: str):
-        if self._asgi is not None:
-            return
-        engine_args = AsyncEngineArgs.from_cli_args(self._args)
-        engine_args.worker_extension_cls = worker_extension_cls
+        # Build vLLM FastAPI app and mount under the ingress app.
+        vllm_app = build_vllm_app(self._args)
+        _serve_app.mount("/", vllm_app)
 
-        self._engine_client_ctx = build_async_engine_client_from_engine_args(
-            engine_args, self._args.disable_frontend_multiprocessing, None
-        )
-        self._engine_client = await self._engine_client_ctx.__aenter__()
-
-        app = build_app(self._args)
-
-        @app.post("/update_weights")
-        async def _update_weights(request):
+        # Expose weight management endpoints on the ingress app.
+        @_serve_app.post("/update_weights")
+        async def _update_weights(request: Request):
             data = await request.json()
             model_path = data.get("model_path")
-            await self._engine_client.collective_rpc("update_weights", args=(model_path,))
+            engine_client = request.app.state.engine_client
+            await engine_client.collective_rpc("update_weights", args=(model_path,))
             return {"status": "ok"}
 
-        @app.post("/reload_weights")
-        async def _reload_weights(_):
-            await self._engine_client.collective_rpc("reload_weights")
+        @_serve_app.post("/reload_weights")
+        async def _reload_weights(request: Request):
+            engine_client = request.app.state.engine_client
+            await engine_client.collective_rpc("reload_weights")
             return {"status": "ok"}
 
-        vllm_config = await self._engine_client.get_vllm_config()
-        await init_app_state(self._engine_client, vllm_config, app.state, self._args)
+        # Register startup/shutdown events to init/teardown engine client lazily via ASGI lifespan.
+        @_serve_app.on_event("startup")
+        async def _startup():
+            engine_args = AsyncEngineArgs.from_cli_args(self._args)
+            engine_args.worker_extension_cls = self._worker_extension_cls
+            self._engine_client_ctx = build_async_engine_client_from_engine_args(
+                engine_args, self._args.disable_frontend_multiprocessing, None
+            )
+            self._engine_client = await self._engine_client_ctx.__aenter__()
+            vllm_config = await self._engine_client.get_vllm_config()
+            await init_app_state(self._engine_client, vllm_config, _serve_app.state, self._args)
+            # Provide direct access for custom endpoints
+            _serve_app.state.engine_client = self._engine_client
 
-        self._asgi = app
-
-    async def __call__(self, scope, receive, send):
-        if self._asgi is None:
-            if self._init_task is None:
-                self._init_task = asyncio.create_task(self._init_app(self._worker_extension_cls))
-            await self._init_task
-        await self._asgi(scope, receive, send)
+        @_serve_app.on_event("shutdown")
+        async def _shutdown():
+            if self._engine_client_ctx is not None:
+                await self._engine_client_ctx.__aexit__(None, None, None)
