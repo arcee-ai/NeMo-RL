@@ -211,7 +211,13 @@ class VllmHttpGeneration(GenerationInterface):
         choice = resp.choices[0]
         
         generated_logprobs = choice.logprobs.token_logprobs
-        raise RuntimeError(choice)
+        
+        # IF you specify return_tokens_as_token_ids, the tokens are returned as strings like "token_id:1234"
+        generated_token_strings = choice.logprobs.tokens
+        
+        generated_token_ids = [int(token.split(":")[1]) for token in generated_token_strings]
+        
+        return generated_token_ids, generated_logprobs
 
     async def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
