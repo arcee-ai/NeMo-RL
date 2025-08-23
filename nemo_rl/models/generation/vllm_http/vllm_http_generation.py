@@ -389,7 +389,7 @@ class VllmHttpGeneration(GenerationInterface):
         h = self.get_deployment_handle()
         ret = []
         for i in range(self.num_replicas):
-            h_i = h.options(shard_key=str(i))
+            h_i = h.options(multiplexed_model_id=str(i))
             ret.append(h_i.admin_init_collective.remote(0, ip, port, world_size).result())
         return ret
 
@@ -401,18 +401,18 @@ class VllmHttpGeneration(GenerationInterface):
         # Wait for the reset to complete
         if self.cfg["vllm_cfg"]["async_engine"]:
             for i in range(self.num_replicas):
-                h_i = h.options(shard_key=str(i))
+                h_i = h.options(multiplexed_model_id=str(i))
                 h_i.admin_reset_prefix_cache_async.remote().result()
         else:
             for i in range(self.num_replicas):
-                h_i = h.options(shard_key=str(i))
+                h_i = h.options(multiplexed_model_id=str(i))
                 h_i.admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
         for i in range(self.num_replicas):
-            h_i = h.options(shard_key=str(i))
+            h_i = h.options(multiplexed_model_id=str(i))
             # Wait for refit prep to complete.
             h_i.admin_prepare_refit_info.remote(state_dict_info).result()
 
@@ -423,6 +423,6 @@ class VllmHttpGeneration(GenerationInterface):
         ret = []
         h = self.get_deployment_handle()
         for i in range(self.num_replicas):
-            h_i = h.options(shard_key=str(i))
+            h_i = h.options(multiplexed_model_id=str(i))
             ret.append(h_i.admin_update_from_collective.remote())
         return ret
