@@ -161,35 +161,51 @@ class VllmHttpGeneration(GenerationInterface):
         batch_size = input_ids.shape[0]
         padded_input_length = input_ids.size(1)
 
-        max_new_tokens: int = self.cfg["max_new_tokens"]
-        temperature: float = 0.0 if greedy else self.cfg["temperature"]
-        top_p: float = self.cfg["top_p"]
-        top_k: Optional[int] = 1 if greedy else (self.cfg["top_k"] if self.cfg["top_k"] is not None else -1)
-
-        # Prepare per-sample requests (use vLLM OpenAI extension: prompt_token_ids)
-        generated_token_id_lists: list[list[int]] = []
-        generated_logprobs_lists: list[list[float]] = []
-        generated_texts: list[str] = []
-        max_generated = 0
-
+        # Build prompts for batched request (use vLLM OpenAI extension: prompt_token_ids)
+        prompts_token_ids_batch: list[list[int]] = []
         for i in range(batch_size):
             valid_len = int(input_lengths[i].item())
-            prompt_token_ids = input_ids[i, :valid_len].tolist() if valid_len > 0 else []
-            stop_strings_i: Optional[list[str]] = None
-            if batch_stop_strings and i < len(batch_stop_strings):
-                stop_strings_i = batch_stop_strings[i]
-
-            gen_token_ids, gen_logprobs, parsed_tool_calls = self._generate_one(
-                prompt_token_ids=prompt_token_ids,
-                stop_strings=stop_strings_i,
-                greedy=greedy,
+            prompts_token_ids_batch.append(
+                input_ids[i, :valid_len].tolist() if valid_len > 0 else []
             )
 
-            generated_token_id_lists.append(gen_token_ids)
-            generated_logprobs_lists.append(gen_logprobs)
-            generated_texts.append(generated_texts)
-            if len(gen_token_ids) > max_generated:
-                max_generated = len(gen_token_ids)
+        # Decide whether we can use a single batched call or must fall back to per-sample
+        use_single_call = False
+        common_stop_strings: Optional[list[str]] = None
+        if not batch_stop_strings or len(batch_stop_strings) == 0:
+            use_single_call = True
+            common_stop_strings = None
+        elif len(batch_stop_strings) >= batch_size and all(
+            batch_stop_strings[i] == batch_stop_strings[0] for i in range(batch_size)
+        ):
+            use_single_call = True
+            common_stop_strings = batch_stop_strings[0]
+
+        if use_single_call:
+            generated_token_id_lists, generated_logprobs_lists, generated_texts = self._generate_batch(
+                prompts_token_ids=prompts_token_ids_batch,
+                stop_strings=common_stop_strings,
+                greedy=greedy,
+            )
+        else:
+            # Per-sample fallback when stop strings differ across the batch
+            generated_token_id_lists = []
+            generated_logprobs_lists = []
+            generated_texts = []
+            for i in range(batch_size):
+                stop_strings_i: Optional[list[str]] = None
+                if batch_stop_strings and i < len(batch_stop_strings):
+                    stop_strings_i = batch_stop_strings[i]
+                gen_ids_i, gen_lps_i, gen_text_i = self._generate_batch(
+                    prompts_token_ids=[prompts_token_ids_batch[i]],
+                    stop_strings=stop_strings_i,
+                    greedy=greedy,
+                )
+                generated_token_id_lists.append(gen_ids_i[0])
+                generated_logprobs_lists.append(gen_lps_i[0])
+                generated_texts.append(gen_text_i[0])
+
+        max_generated = max((len(ids) for ids in generated_token_id_lists), default=0)
 
         # Assemble batched outputs with right padding
         pad_id = self.cfg.get("pad_token_id")
@@ -234,13 +250,13 @@ class VllmHttpGeneration(GenerationInterface):
             }
         )
 
-    def _generate_one(
+    def _generate_batch(
         self,
         *,
-        prompt_token_ids: list[int],
+        prompts_token_ids: list[list[int]],
         stop_strings: Optional[list[str]],
         greedy: bool,
-    ) -> tuple[list[int], list[float], str]:
+    ) -> tuple[list[list[int]], list[list[float]], list[str]]:
         max_new_tokens: int = self.cfg["max_new_tokens"]
         temperature: float = 0.0 if greedy else self.cfg["temperature"]
         top_p: float = self.cfg["top_p"]
@@ -248,7 +264,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         resp = self.client.completions.create(
             model=self.served_model_name,
-            prompt=prompt_token_ids,
+            prompt=prompts_token_ids,
             max_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -258,19 +274,26 @@ class VllmHttpGeneration(GenerationInterface):
                 "return_tokens_as_token_ids": True,
             }
         )
+        
+        generated_token_ids_list: list[list[int]] = []
+        generated_logprobs_list: list[list[float]] = []
+        generated_texts_list: list[str] = []
 
-        choice = resp.choices[0]
-        
-        generated_logprobs = choice.logprobs.token_logprobs
-        
-        # If you specify return_tokens_as_token_ids, the tokens are returned as strings like "token_id:1234"
-        generated_token_strings = choice.logprobs.tokens
-        generated_token_ids = [int(token.split(":")[1]) for token in generated_token_strings]
-        
-        # Extract text for tool call parsing
-        generated_text = choice.text
-        
-        return generated_token_ids, generated_logprobs, generated_text
+        for choice in resp.choices:
+            generated_logprobs = choice.logprobs.token_logprobs
+            
+            # If you specify return_tokens_as_token_ids, the tokens are returned as strings like "token_id:1234"
+            generated_token_strings = choice.logprobs.tokens
+            generated_token_ids = [int(token.split(":")[1]) for token in generated_token_strings]
+            
+            # Extract text for tool call parsing
+            generated_text = choice.text
+            
+            generated_token_ids_list.append(generated_token_ids)
+            generated_logprobs_list.append(generated_logprobs)
+            generated_texts_list.append(generated_text)
+            
+        return generated_token_ids_list, generated_logprobs_list, generated_texts_list
 
     async def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
@@ -304,8 +327,8 @@ class VllmHttpGeneration(GenerationInterface):
 
             task = asyncio.create_task(
                 asyncio.to_thread(
-                    self._generate_one,
-                    prompt_token_ids=prompt_token_ids,
+                    self._generate_batch,
+                    prompts_token_ids=[prompt_token_ids],
                     stop_strings=stop_strings_i,
                     greedy=greedy,
                 )
@@ -315,7 +338,12 @@ class VllmHttpGeneration(GenerationInterface):
 
         # Yield samples as they complete
         for completed in asyncio.as_completed(tasks):
+            # Do it one at a time instad of batched
             gen_ids, gen_lps, parsed_tool_calls = await completed
+            gen_ids = gen_ids[0]
+            gen_lps = gen_lps[0]
+            parsed_tool_calls = parsed_tool_calls[0]
+            
             # Find original index for this task
             # Map by popping first not-yet-done; maintain parallel order using tasks list
             idx = tasks.index(cast(asyncio.Task, completed))
