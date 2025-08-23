@@ -208,10 +208,11 @@ class VllmHttpGeneration(GenerationInterface):
         choice = resp.choices[0]
         gen_token_ids: list[int] = []
         gen_logprobs: list[float] = []
+        
+        print(choice)
 
         content = getattr(choice.logprobs, "content", None)
         if content is not None:
-            raise RuntimeError(f"content: {content}")
             for token_info in content:
                 token_id = getattr(token_info, "token_id", None)
                 if token_id is None:
