@@ -33,22 +33,13 @@ class VllmHttpGeneration(GenerationInterface):
         serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
     
         py_exec = get_actor_python_env("nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
-        if py_exec.startswith("uv"):
-            py_exec = create_local_venv_on_each_node(
-                py_executable=py_exec,
-                venv_name="nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe",
-            )
     
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
                 "num_cpus": 1,
                 "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
                 "runtime_env": {
-                    "py_executable": py_exec,
-                    "env_vars": {
-                        "VIRTUAL_ENV": py_exec,
-                        "UV_PROJECT_ENVIRONMENT": py_exec,
-                    }
+                    "py_executable": py_exec
                 }
             }
         ).bind(
