@@ -330,7 +330,10 @@ class VllmHttpGeneration(GenerationInterface):
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         h = self.get_deployment_handle()
         # Wait for the reset to complete
-        h.admin_reset_prefix_cache.remote().result()
+        if self.cfg["vllm_cfg"]["async_engine"]:
+            h.admin_reset_prefix_cache_async.remote().result()
+        else:
+            h.admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:

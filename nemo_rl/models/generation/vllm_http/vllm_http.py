@@ -77,6 +77,10 @@ class VLLMOpenAIServe:
     async def admin_reset_prefix_cache(self) -> bool:
         await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
         return True
+    
+    async def admin_reset_prefix_cache_async(self) -> bool:
+        await self._engine_client.collective_rpc("reset_prefix_cache_async", args=tuple())
+        return True
         
     async def admin_init_collective(self, rank_prefix: int, ip: str, port: int, world_size: int) -> bool:
         # Broadcast same args to all engine workers; extension computes rank from local rank
