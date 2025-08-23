@@ -169,7 +169,7 @@ class VllmHttpGeneration(GenerationInterface):
         # Prepare per-sample requests (use vLLM OpenAI extension: prompt_token_ids)
         generated_token_id_lists: list[list[int]] = []
         generated_logprobs_lists: list[list[float]] = []
-        generated_tool_calls_lists: list[list[dict[str, Any]]] = []
+        generated_texts: list[str] = []
         max_generated = 0
 
         for i in range(batch_size):
@@ -187,7 +187,7 @@ class VllmHttpGeneration(GenerationInterface):
 
             generated_token_id_lists.append(gen_token_ids)
             generated_logprobs_lists.append(gen_logprobs)
-            generated_tool_calls_lists.append(parsed_tool_calls)
+            generated_texts.append(generated_text)
             if len(gen_token_ids) > max_generated:
                 max_generated = len(gen_token_ids)
 
@@ -230,7 +230,7 @@ class VllmHttpGeneration(GenerationInterface):
                 "logprobs": torch.stack(logprobs_list),
                 "generation_lengths": torch.tensor(generation_lengths, dtype=torch.long),
                 "unpadded_sequence_lengths": torch.tensor(unpadded_sequence_lengths, dtype=torch.long),
-                "tool_calls": generated_tool_calls_lists,
+                "tool_calls": self._maybe_parse_tool_calls(generated_texts),
             }
         )
 
@@ -240,7 +240,7 @@ class VllmHttpGeneration(GenerationInterface):
         prompt_token_ids: list[int],
         stop_strings: Optional[list[str]],
         greedy: bool,
-    ) -> tuple[list[int], list[float], list[dict[str, Any]]]:
+    ) -> tuple[list[int], list[float], str]:
         max_new_tokens: int = self.cfg["max_new_tokens"]
         temperature: float = 0.0 if greedy else self.cfg["temperature"]
         top_p: float = self.cfg["top_p"]
@@ -269,9 +269,8 @@ class VllmHttpGeneration(GenerationInterface):
         
         # Extract text for tool call parsing
         generated_text = choice.text
-        parsed_tool_calls = self._maybe_parse_tool_calls([generated_text])
         
-        return generated_token_ids, generated_logprobs, parsed_tool_calls
+        return generated_token_ids, generated_logprobs, generated_text
 
     async def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
