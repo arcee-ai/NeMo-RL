@@ -56,6 +56,7 @@ class VllmHttpGeneration(GenerationInterface):
         
         # TODO: find better place for this, force V1 engine
         runtime_env["env_vars"]["VLLM_USE_V1"] = "1"
+        runtime_env["env_vars"]["NCCL_DEBUG"] = "INFO"
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
