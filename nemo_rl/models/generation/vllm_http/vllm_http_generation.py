@@ -98,6 +98,54 @@ class VllmHttpGeneration(GenerationInterface):
         # The served model name from VLLMOpenAIServe defaults to "policy"
         self.served_model_name = "policy"
 
+    def _maybe_parse_tool_calls(self, texts: list[str]) -> list[dict[str, Any]]:
+        """Parse tool calls from generated texts if a parser is configured.
+
+        Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
+        """
+        
+        # For some reason, this file is imported in contexts outside of the vLLM worker.
+        # As such, this import needs to be here rather than at the top level.
+        from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
+        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+        
+        parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
+        if parser_name is None:
+            return [{}] * len(texts)
+
+        try:
+            ParserCls = ToolParserManager.get_tool_parser(parser_name)
+        except Exception:
+            return [{}] * len(texts)
+
+        try:
+            tokenizer = self.llm.get_tokenizer()
+        except Exception:
+            tokenizer = None
+
+        if tokenizer is None:
+            return [{}] * len(texts)
+
+        try:
+            parser: ToolParser = ParserCls(tokenizer)
+            # Dummy request for parser shim.
+            req = ChatCompletionRequest(
+                messages=[{"role": "user", "content": ""}],
+                tool_choice="auto",
+                tools=[],
+            )
+            results: list[dict[str, Any] | None] = []
+            for text in texts:
+                try:
+                    info = parser.extract_tool_calls(text, req)
+                    results.append(info.model_dump())
+                except Exception:
+                    results.append({})
+            
+            return results
+        except Exception:
+            return [{}] * len(texts)
+
     def generate(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
     ) -> BatchedDataDict["GenerationOutputSpec"]:
@@ -130,7 +178,7 @@ class VllmHttpGeneration(GenerationInterface):
             if batch_stop_strings and i < len(batch_stop_strings):
                 stop_strings_i = batch_stop_strings[i]
 
-            gen_token_ids, gen_logprobs = self._generate_one(
+            gen_token_ids, gen_logprobs, parsed_tool_calls = self._generate_one(
                 prompt_token_ids=prompt_token_ids,
                 stop_strings=stop_strings_i,
                 greedy=greedy,
@@ -189,7 +237,7 @@ class VllmHttpGeneration(GenerationInterface):
         prompt_token_ids: list[int],
         stop_strings: Optional[list[str]],
         greedy: bool,
-    ) -> tuple[list[int], list[float]]:
+    ) -> tuple[list[int], list[float], list[dict[str, Any]]]:
         max_new_tokens: int = self.cfg["max_new_tokens"]
         temperature: float = 0.0 if greedy else self.cfg["temperature"]
         top_p: float = self.cfg["top_p"]
@@ -212,12 +260,15 @@ class VllmHttpGeneration(GenerationInterface):
         
         generated_logprobs = choice.logprobs.token_logprobs
         
-        # IF you specify return_tokens_as_token_ids, the tokens are returned as strings like "token_id:1234"
+        # If you specify return_tokens_as_token_ids, the tokens are returned as strings like "token_id:1234"
         generated_token_strings = choice.logprobs.tokens
-        
         generated_token_ids = [int(token.split(":")[1]) for token in generated_token_strings]
         
-        return generated_token_ids, generated_logprobs
+        # Extract text for tool call parsing
+        generated_text = choice.text
+        parsed_tool_calls = self._maybe_parse_tool_calls([generated_text])
+        
+        return generated_token_ids, generated_logprobs, parsed_tool_calls
 
     async def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
@@ -262,7 +313,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         # Yield samples as they complete
         for completed in asyncio.as_completed(tasks):
-            gen_ids, gen_lps = await completed
+            gen_ids, gen_lps, parsed_tool_calls = await completed
             # Find original index for this task
             # Map by popping first not-yet-done; maintain parallel order using tasks list
             idx = tasks.index(cast(asyncio.Task, completed))
@@ -290,6 +341,7 @@ class VllmHttpGeneration(GenerationInterface):
                     "logprobs": full_logprobs.unsqueeze(0),
                     "generation_lengths": torch.tensor([len(gen_ids)], dtype=torch.long),
                     "unpadded_sequence_lengths": torch.tensor([seq_len + len(gen_ids)], dtype=torch.long),
+                    "tool_calls": parsed_tool_calls,
                 }
             )
 
