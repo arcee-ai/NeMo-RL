@@ -36,7 +36,8 @@ class VllmHttpGeneration(GenerationInterface):
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
-            max_model_len=config["vllm_cfg"]["max_model_len"]
+            max_model_len=config["vllm_cfg"]["max_model_len"],
+            extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
         serve.run(vllm_app, route_prefix="/")
