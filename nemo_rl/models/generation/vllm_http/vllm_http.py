@@ -2,14 +2,6 @@
 import asyncio
 from typing import Optional
 from ray import serve
-from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
-from vllm.entrypoints.openai.api_server import (
-    build_app as build_vllm_app,
-    build_async_engine_client_from_engine_args,
-    init_app_state,
-)
-from vllm.utils import FlexibleArgumentParser
 from fastapi import FastAPI, Request
 
 # Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
@@ -38,6 +30,10 @@ class VLLMOpenAIServe:
         ]
         if extra_cli_args:
             args += extra_cli_args
+        
+        # We have to import these here so we can import some of these classes in the main process
+        from vllm.utils import FlexibleArgumentParser
+        from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 
         parser = FlexibleArgumentParser(description="vLLM OAI app for Ray Serve")
         parser = make_arg_parser(parser)
@@ -48,6 +44,15 @@ class VLLMOpenAIServe:
     
     async def _init_app(self, worker_extension_cls: str):
         self._worker_extension_cls = worker_extension_cls
+        
+        # We have to import these here so we can import some of these classes in the main process
+        
+        from vllm.engine.arg_utils import AsyncEngineArgs
+        from vllm.entrypoints.openai.api_server import (
+            build_app as build_vllm_app,
+            build_async_engine_client_from_engine_args,
+            init_app_state,
+        )
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
