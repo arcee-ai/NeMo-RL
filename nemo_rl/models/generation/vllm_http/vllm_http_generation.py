@@ -40,7 +40,7 @@ class VllmHttpGeneration(GenerationInterface):
             extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
-        serve.run(vllm_app, route_prefix="/")
+        serve.run(vllm_app, route_prefix="/", app_name="vllm_http_generation")
         
         # Poll vLLM server until it's ready to avoid race condition
         print("Waiting for vLLM server to come online...")
@@ -282,9 +282,12 @@ class VllmHttpGeneration(GenerationInterface):
 
             yield original_idx, single
 
+    def get_deployment_handle(self):
+        return serve.get_deployment_handle("vllm_http_generation", app_name="vllm_http_generation")
+
     # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
-        h = serve.get_deployment_handle("VLLMOpenAIServe")
+        h = self.get_deployment_handle()
         return [h.admin_init_collective(ip, port, world_size).remote(0, ip, port, world_size)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
@@ -294,7 +297,7 @@ class VllmHttpGeneration(GenerationInterface):
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
-        h = serve.get_deployment_handle("VLLMOpenAIServe")
+        h = self.get_deployment_handle()
         ray.get(h.admin_prepare_refit_info(state_dict_info).remote(state_dict_info))
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
@@ -302,5 +305,5 @@ class VllmHttpGeneration(GenerationInterface):
         return False
 
     def update_weights_from_collective(self):
-        h = serve.get_deployment_handle("VLLMOpenAIServe")
+        h = self.get_deployment_handle()
         ray.get(h.admin_update_from_collective().remote())
