@@ -390,7 +390,8 @@ class VllmHttpGeneration(GenerationInterface):
         ret = []
         for i in range(self.num_replicas):
             h_i = h.options(multiplexed_model_id=str(i))
-            ret.append(h_i.admin_init_collective.remote(0, ip, port, world_size).result())
+            # TODO: integrate this better with grpo algorithm
+            ret.append(h_i.admin_init_collective.remote(0, ip, port, world_size*self.num_replicas).result())
         return ret
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
