@@ -329,12 +329,14 @@ class VllmHttpGeneration(GenerationInterface):
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         h = self.get_deployment_handle()
-        h.admin_reset_prefix_cache.remote()
+        # Wait for the reset to complete
+        h.admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
-        h = self.get_deployment_handle()
-        h.admin_prepare_refit_info.remote(state_dict_info)
+        h = self.get_deployment_handle()'
+        # Wait for refit prep to complete.
+        h.admin_prepare_refit_info.remote(state_dict_info).result()
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
