@@ -228,6 +228,7 @@ class VllmHttpGeneration(GenerationInterface):
                 "logprobs": torch.stack(logprobs_list),
                 "generation_lengths": torch.tensor(generation_lengths, dtype=torch.long),
                 "unpadded_sequence_lengths": torch.tensor(unpadded_sequence_lengths, dtype=torch.long),
+                "tool_calls": parsed_tool_calls,
             }
         )
 
