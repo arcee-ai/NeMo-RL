@@ -51,7 +51,7 @@ class PY_EXECUTABLES:
     # Use NeMo-RL direct dependencies and vllm.
     VLLM = "uv run --locked --extra vllm"
     
-    # For the newer vllm_http backend, we use the latest vllm and flash-attn
+    # For the newer vllm_http backend, we use the latest vllm
     VLLM_HTTP = "uv run --locked --extra vllm_http"
 
     # Megatron-core (and nemo dependencies)
