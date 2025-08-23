@@ -1,4 +1,5 @@
 import time
+import os
 import asyncio
 from typing import Any, Optional, cast, AsyncGenerator
 
@@ -33,14 +34,31 @@ class VllmHttpGeneration(GenerationInterface):
         serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
     
         py_exec = get_actor_python_env("nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
-    
+
+        # Resolve uv-based executables to a concrete venv python under venvs/
+        if isinstance(py_exec, str) and py_exec.startswith("uv"):
+            py_exec = create_local_venv_on_each_node(
+                py_executable=py_exec,
+                venv_name="nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe",
+            )
+
+        # Prepare runtime_env to ensure Serve replicas use the managed venv
+        runtime_env = {"py_executable": py_exec}
+        try:
+            venv_dir = os.path.dirname(os.path.dirname(py_exec)) if isinstance(py_exec, str) else None
+            if venv_dir:
+                runtime_env["env_vars"] = {
+                    "VIRTUAL_ENV": venv_dir,
+                    "UV_PROJECT_ENVIRONMENT": venv_dir,
+                }
+        except Exception:
+            pass
+
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
                 "num_cpus": 1,
                 "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
-                "runtime_env": {
-                    "py_executable": py_exec
-                }
+                "runtime_env": runtime_env,
             }
         ).bind(
             model=config["model_name"],
