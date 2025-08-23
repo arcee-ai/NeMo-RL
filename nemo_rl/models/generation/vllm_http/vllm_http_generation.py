@@ -59,21 +59,19 @@ class VllmHttpGeneration(GenerationInterface):
         runtime_env["env_vars"]["NCCL_CUMEM_ENABLE"] = "1"
         # TODO: I really don't like this. Find a way around torch dtype serialization.
         runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
-        
-        self.num_replicas = config["vllm_cfg"]["data_parallel_size"]
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
                 "num_cpus": 1,
                 # "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
                 "runtime_env": runtime_env,
-            },
-            num_replicas=self.num_replicas
+            }
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
             max_model_len=config["vllm_cfg"]["max_model_len"],
             gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
+            data_parallel_size=config["vllm_cfg"]["data_parallel_size"],
             extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
@@ -387,12 +385,7 @@ class VllmHttpGeneration(GenerationInterface):
     # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
         h = self.get_deployment_handle()
-        ret = []
-        for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
-            # TODO: integrate this better with grpo algorithm
-            ret.append(h_i.admin_init_collective.remote(0, ip, port, world_size*self.num_replicas).result())
-        return ret
+        return [h.admin_init_collective.remote(0, ip, port, world_size)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
@@ -401,29 +394,19 @@ class VllmHttpGeneration(GenerationInterface):
         h = self.get_deployment_handle()
         # Wait for the reset to complete
         if self.cfg["vllm_cfg"]["async_engine"]:
-            for i in range(self.num_replicas):
-                h_i = h.options(multiplexed_model_id=str(i))
-                h_i.admin_reset_prefix_cache_async.remote().result()
+            h.admin_reset_prefix_cache_async.remote().result()
         else:
-            for i in range(self.num_replicas):
-                h_i = h.options(multiplexed_model_id=str(i))
-                h_i.admin_reset_prefix_cache.remote().result()
+            h.admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
-        for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
-            # Wait for refit prep to complete.
-            h_i.admin_prepare_refit_info.remote(state_dict_info).result()
+        # Wait for refit prep to complete.
+        h.admin_prepare_refit_info.remote(state_dict_info).result()
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
-        ret = []
         h = self.get_deployment_handle()
-        for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
-            ret.append(h_i.admin_update_from_collective.remote())
-        return ret
+        return [h.admin_update_from_collective.remote()]
