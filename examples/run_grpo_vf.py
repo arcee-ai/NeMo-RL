@@ -222,6 +222,9 @@ def main() -> None:
     config: MasterConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
 
+    # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
+    os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
+
     # Print config
     print("Final config:")
     pprint.pprint(config)
