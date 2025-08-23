@@ -265,7 +265,7 @@ class VllmHttpGeneration(GenerationInterface):
         resp = self.client.completions.create(
             model=self.served_model_name,
             prompt=prompts_token_ids,
-            # max_tokens=max_new_tokens,
+            max_tokens=None,
             temperature=temperature,
             top_p=top_p,
             stop=stop_strings if stop_strings else None,
