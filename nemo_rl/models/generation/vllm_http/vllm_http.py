@@ -18,7 +18,7 @@ class VLLMOpenAIServe:
         tensor_parallel_size: int = 1,
         max_model_len: int = 8192,
         extra_cli_args: Optional[list[str]] = None,
-        worker_extension_cls: str = "nemo_rl.models.generation.vllm.vllm_backend.VllmInternalWorkerExtension",
+        worker_extension_cls: str = "nemo_rl.models.generation.vllm_http.worker_ext.VllmHttpWorkerExtension",
     ):
         args = [
             "--model", model,
