@@ -288,7 +288,7 @@ class VllmHttpGeneration(GenerationInterface):
     # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
         h = self.get_deployment_handle()
-        return [h.admin_init_collective(ip, port, world_size).remote(0, ip, port, world_size)]
+        return [h.admin_init_collective.remote(0, ip, port, world_size)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
@@ -298,7 +298,7 @@ class VllmHttpGeneration(GenerationInterface):
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
-        ray.get(h.admin_prepare_refit_info(state_dict_info).remote(state_dict_info))
+        ray.get(h.admin_prepare_refit_info.remote(state_dict_info))
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         # Not yet supported over HTTP
@@ -306,4 +306,4 @@ class VllmHttpGeneration(GenerationInterface):
 
     def update_weights_from_collective(self):
         h = self.get_deployment_handle()
-        ray.get(h.admin_update_from_collective().remote())
+        ray.get(h.admin_update_from_collective.remote())
