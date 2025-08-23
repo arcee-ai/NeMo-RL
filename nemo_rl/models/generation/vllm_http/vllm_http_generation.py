@@ -384,7 +384,15 @@ class VllmHttpGeneration(GenerationInterface):
 
     def init_collective(self, ip: str, port: int, world_size: int):
         h = self.get_deployment_handle()
-        return [h.admin_init_collective.remote(0, ip, port, world_size)]
+        # Derive actual number of vLLM workers (dp_size * tp_size) from the deployment
+        try:
+            device_ids = h.admin_report_device_id.remote().result()
+            inferred_world_size = (len(device_ids) + 1)
+        except Exception:
+            # Fallback to provided world_size if introspection fails
+            inferred_world_size = world_size
+        # Use the inferred world size to avoid rank/world-size mismatches
+        return [h.admin_init_collective.remote(0, ip, port, inferred_world_size)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
