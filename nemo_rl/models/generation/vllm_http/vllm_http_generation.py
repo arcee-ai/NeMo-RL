@@ -382,10 +382,9 @@ class VllmHttpGeneration(GenerationInterface):
     def get_deployment_handle(self):
         return serve.get_deployment_handle("VLLMOpenAIServe", app_name="vllm_http_generation")
 
-    # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
         h = self.get_deployment_handle()
-        return [h.admin_init_collective.remote(0, ip, port, world_size)]
+        return [h.admin_init_collective.remote(0, ip, port, world_size*self.cfg["vllm_cfg"]["data_parallel_size"])]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
