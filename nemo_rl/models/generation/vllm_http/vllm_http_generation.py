@@ -69,7 +69,7 @@ class VllmHttpGeneration(GenerationInterface):
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
-            max_model_len=config["vllm_cfg"]["max_model_len"],
+            # max_model_len=config["vllm_cfg"]["max_model_len"],
             extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
@@ -249,7 +249,7 @@ class VllmHttpGeneration(GenerationInterface):
         resp = self.client.completions.create(
             model=self.served_model_name,
             prompt=prompt_token_ids,
-            # max_tokens=max_new_tokens,
+            max_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             stop=stop_strings if stop_strings else None,
