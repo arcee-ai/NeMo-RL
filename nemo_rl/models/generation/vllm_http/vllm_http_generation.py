@@ -283,7 +283,7 @@ class VllmHttpGeneration(GenerationInterface):
             yield original_idx, single
 
     def get_deployment_handle(self):
-        return serve.get_deployment_handle("vllm_http_generation", app_name="vllm_http_generation")
+        return serve.get_deployment_handle("VLLMOpenAIServe", app_name="vllm_http_generation")
 
     # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
