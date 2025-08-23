@@ -171,6 +171,13 @@ default-groups = ["dev", "build"]
 #  --link-mode=copy (slower but more reliable; supresses warning)
 #  --link-mode=symlink (fastest option when uv cache and venv on different file-system; caveat: venv is brittle since it depends on the environment/container)
 link-mode = "copy"
+# Prevent using both vLLM and vLLM-http backends in the same venv
+conflicts = [
+  [
+    { extra = "vllm" },
+    { extra = "vllm_http" },
+  ],
+]
 
 # Needed when building from source
 [[tool.uv.dependency-metadata]]
