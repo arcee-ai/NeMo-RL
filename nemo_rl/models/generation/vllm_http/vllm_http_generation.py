@@ -384,7 +384,7 @@ class VllmHttpGeneration(GenerationInterface):
 
     def init_collective(self, ip: str, port: int, world_size: int):
         h = self.get_deployment_handle()
-        return [h.admin_init_collective.remote(0, ip, port, world_size*self.cfg["vllm_cfg"]["data_parallel_size"])]
+        return [h.admin_init_collective.remote(0, ip, port, world_size)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
