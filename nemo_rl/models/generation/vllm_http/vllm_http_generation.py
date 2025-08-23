@@ -328,7 +328,11 @@ class VllmHttpGeneration(GenerationInterface):
         return True
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
-        return True
+        # Reset prefix cache
+        return self.worker_group.run_all_workers_single_data(
+            "reset_prefix_cache",
+            run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
+        )
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
