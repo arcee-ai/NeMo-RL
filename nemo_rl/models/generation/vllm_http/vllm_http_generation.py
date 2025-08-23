@@ -31,7 +31,7 @@ class VllmHttpGeneration(GenerationInterface):
         # Save config for later use
         self.cfg = config
 
-        serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
+        serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
     
         py_exec = get_actor_python_env("nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
 
