@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-# Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
-os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
-
 import argparse
 import os
 import pprint
