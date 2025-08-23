@@ -40,7 +40,7 @@ class VllmHttpGeneration(GenerationInterface):
             extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
-        serve.run(vllm_app, route_prefix="/", app_name="vllm_http_generation")
+        serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
         
         # Poll vLLM server until it's ready to avoid race condition
         print("Waiting for vLLM server to come online...")
