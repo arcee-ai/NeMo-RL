@@ -31,7 +31,7 @@ class VllmHttpGeneration(GenerationInterface):
         # Save config for later use
         self.cfg = config
 
-        serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
+        serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode", "access_log": False})
     
         py_exec = get_actor_python_env("nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
 
@@ -169,6 +169,7 @@ class VllmHttpGeneration(GenerationInterface):
         # Prepare per-sample requests (use vLLM OpenAI extension: prompt_token_ids)
         generated_token_id_lists: list[list[int]] = []
         generated_logprobs_lists: list[list[float]] = []
+        generated_tool_calls_lists: list[list[dict[str, Any]]] = []
         max_generated = 0
 
         for i in range(batch_size):
@@ -186,6 +187,7 @@ class VllmHttpGeneration(GenerationInterface):
 
             generated_token_id_lists.append(gen_token_ids)
             generated_logprobs_lists.append(gen_logprobs)
+            generated_tool_calls_lists.append(parsed_tool_calls)
             if len(gen_token_ids) > max_generated:
                 max_generated = len(gen_token_ids)
 
@@ -228,7 +230,7 @@ class VllmHttpGeneration(GenerationInterface):
                 "logprobs": torch.stack(logprobs_list),
                 "generation_lengths": torch.tensor(generation_lengths, dtype=torch.long),
                 "unpadded_sequence_lengths": torch.tensor(unpadded_sequence_lengths, dtype=torch.long),
-                "tool_calls": parsed_tool_calls,
+                "tool_calls": generated_tool_calls_lists,
             }
         )
 
