@@ -330,14 +330,11 @@ class VllmHttpGeneration(GenerationInterface):
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
-        # Fire-and-forget; upstream code does not expect a return value here
         h.admin_prepare_refit_info.remote(state_dict_info)
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
-        # Not yet supported over HTTP
-        return False
+        raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
         h = self.get_deployment_handle()
-        # Return a list of DeploymentResponse futures; the caller will wait on them
         return [h.admin_update_from_collective.remote()]
