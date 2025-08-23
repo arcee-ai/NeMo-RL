@@ -334,7 +334,7 @@ class VllmHttpGeneration(GenerationInterface):
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
-        h = self.get_deployment_handle()'
+        h = self.get_deployment_handle()
         # Wait for refit prep to complete.
         h.admin_prepare_refit_info.remote(state_dict_info).result()
 
