@@ -65,12 +65,13 @@ class VllmHttpGeneration(GenerationInterface):
                 "num_cpus": 1,
                 # "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
                 "runtime_env": runtime_env,
-            }
+            },
+            num_replicas=config["vllm_cfg"]["data_parallel_size"]
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
             max_model_len=config["vllm_cfg"]["max_model_len"],
-            extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
+            extra_cli_args=config["vllm_cfg"]["extra_cli_args"] + ["--gpu-memory-utilization", config["vllm_cfg"]["gpu_memory_utilization"]]
         )
         
         serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
