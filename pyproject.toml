@@ -177,6 +177,10 @@ conflicts = [
     { extra = "vllm" },
     { extra = "vllm_http" },
   ],
+  [
+    { extra = "vllm_http" },
+    { extra = "mcore" },
+  ]
 ]
 
 # Needed when building from source
