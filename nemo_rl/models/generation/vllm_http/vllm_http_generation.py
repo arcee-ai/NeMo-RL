@@ -89,6 +89,8 @@ class VllmHttpGeneration(GenerationInterface):
         if not success:
             raise RuntimeError("vLLM server did not come online in time (waited {} seconds)".format(config["server_timeout"]))
 
+        print(f"vLLM server is online at http://127.0.0.1:8000/v1")
+
         self.client = openai.OpenAI(api_key="n/a", base_url="http://127.0.0.1:8000/v1")
         # The served model name from VLLMOpenAIServe defaults to "policy"
         self.served_model_name = "policy"
