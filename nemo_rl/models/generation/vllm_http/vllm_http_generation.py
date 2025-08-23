@@ -59,6 +59,8 @@ class VllmHttpGeneration(GenerationInterface):
         runtime_env["env_vars"]["NCCL_CUMEM_ENABLE"] = "1"
         # TODO: I really don't like this. Find a way around torch dtype serialization.
         runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
+        
+        self.num_replicas = config["vllm_cfg"]["data_parallel_size"]
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
@@ -66,7 +68,7 @@ class VllmHttpGeneration(GenerationInterface):
                 # "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
                 "runtime_env": runtime_env,
             },
-            num_replicas=config["vllm_cfg"]["data_parallel_size"]
+            num_replicas=self.num_replicas
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
@@ -392,21 +394,36 @@ class VllmHttpGeneration(GenerationInterface):
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         h = self.get_deployment_handle()
+        refs = []
         # Wait for the reset to complete
         if self.cfg["vllm_cfg"]["async_engine"]:
-            h.admin_reset_prefix_cache_async.remote().result()
+            for i in range(self.num_replicas):
+                h_i = h.options(shard_key=str(i))
+                refs.append(h_i.admin_reset_prefix_cache_async.remote())
         else:
-            h.admin_reset_prefix_cache.remote().result()
+            for i in range(self.num_replicas):
+                h_i = h.options(shard_key=str(i))
+                refs.append(h_i.admin_reset_prefix_cache.remote())
+        ray.get(refs)
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
-        # Wait for refit prep to complete.
-        h.admin_prepare_refit_info.remote(state_dict_info).result()
+        refs = []
+        for i in range(self.num_replicas):
+            h_i = h.options(shard_key=str(i))
+            # Wait for refit prep to complete.
+            refs.append(h_i.admin_prepare_refit_info.remote(state_dict_info))
+        
+        ray.get(refs)
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
+        refs = []
         h = self.get_deployment_handle()
-        return [h.admin_update_from_collective.remote()]
+        for i in range(self.num_replicas):
+            h_i = h.options(shard_key=str(i))
+            refs.append(h_i.admin_update_from_collective.remote())
+        return refs
