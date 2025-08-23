@@ -187,7 +187,7 @@ class VllmHttpGeneration(GenerationInterface):
 
             generated_token_id_lists.append(gen_token_ids)
             generated_logprobs_lists.append(gen_logprobs)
-            generated_texts.append(generated_text)
+            generated_texts.append(generated_texts)
             if len(gen_token_ids) > max_generated:
                 max_generated = len(gen_token_ids)
 
