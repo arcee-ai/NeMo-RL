@@ -211,6 +211,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         content = getattr(choice.logprobs, "content", None)
         if content is not None:
+            print(content)
             for token_info in content:
                 token_id = getattr(token_info, "token_id", None)
                 if token_id is None:
@@ -225,8 +226,7 @@ class VllmHttpGeneration(GenerationInterface):
 
                 if token_id is None:
                     raise RuntimeError(
-                        "vLLM HTTP server did not return token_id in logprobs; enable processed_logprobs with token ids",
-                        token_info
+                        "vLLM HTTP server did not return token_id in logprobs; enable processed_logprobs with token ids"
                     )
                 gen_token_ids.append(int(token_id))
                 gen_logprobs.append(float(logprob))
