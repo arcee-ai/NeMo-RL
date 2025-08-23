@@ -17,6 +17,7 @@ class VLLMOpenAIServe:
         served_model_name: str = "policy",
         tensor_parallel_size: int = 1,
         max_model_len: int = 8192,
+        gpu_memory_utilization: float = 0.7,
         extra_cli_args: Optional[list[str]] = None,
         worker_extension_cls: str = "nemo_rl.models.generation.vllm_http.worker_ext.VllmHttpWorkerExtension",
     ):
@@ -27,6 +28,7 @@ class VLLMOpenAIServe:
             "--tensor-parallel-size", str(tensor_parallel_size),
             "--max-model-len", str(max_model_len),
             "--logprobs-mode", "processed_logprobs",
+            "--gpu-memory-utilization", str(gpu_memory_utilization),
         ]
         if extra_cli_args:
             args += extra_cli_args

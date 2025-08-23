@@ -71,7 +71,8 @@ class VllmHttpGeneration(GenerationInterface):
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
             max_model_len=config["vllm_cfg"]["max_model_len"],
-            extra_cli_args=config["vllm_cfg"]["extra_cli_args"] + ["--gpu-memory-utilization", config["vllm_cfg"]["gpu_memory_utilization"]]
+            gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
+            extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
         serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
