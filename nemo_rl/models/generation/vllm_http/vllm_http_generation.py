@@ -387,43 +387,42 @@ class VllmHttpGeneration(GenerationInterface):
     # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
         h = self.get_deployment_handle()
-        return [h.admin_init_collective.remote(0, ip, port, world_size)]
+        ret = []
+        for i in range(self.num_replicas):
+            h_i = h.options(shard_key=str(i))
+            ret.append(h_i.admin_init_collective.remote(0, ip, port, world_size).result())
+        return ret
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         h = self.get_deployment_handle()
-        refs = []
         # Wait for the reset to complete
         if self.cfg["vllm_cfg"]["async_engine"]:
             for i in range(self.num_replicas):
-                h_i = h.options(multiplexed_model_id=str(i))
-                refs.append(h_i.admin_reset_prefix_cache_async.remote())
+                h_i = h.options(shard_key=str(i))
+                h_i.admin_reset_prefix_cache_async.remote().result()
         else:
             for i in range(self.num_replicas):
-                h_i = h.options(multiplexed_model_id=str(i))
-                refs.append(h_i.admin_reset_prefix_cache.remote())
-        ray.get(refs)
+                h_i = h.options(shard_key=str(i))
+                h_i.admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         h = self.get_deployment_handle()
-        refs = []
         for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
+            h_i = h.options(shard_key=str(i))
             # Wait for refit prep to complete.
-            refs.append(h_i.admin_prepare_refit_info.remote(state_dict_info))
-        
-        ray.get(refs)
+            h_i.admin_prepare_refit_info.remote(state_dict_info).result()
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
-        refs = []
+        ret = []
         h = self.get_deployment_handle()
         for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
-            refs.append(h_i.admin_update_from_collective.remote())
-        return refs
+            h_i = h.options(shard_key=str(i))
+            ret.append(h_i.admin_update_from_collective.remote())
+        return ret
