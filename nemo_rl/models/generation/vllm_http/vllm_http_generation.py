@@ -202,60 +202,13 @@ class VllmHttpGeneration(GenerationInterface):
             temperature=temperature,
             top_p=top_p,
             stop=stop_strings if stop_strings else None,
-            logprobs=True,
-            extra_body={
-                "return_tokens_as_token_ids": True,
-            },
+            logprobs=1e10
         )
 
         choice = resp.choices[0]
-        gen_token_ids: list[int] = []
-        gen_logprobs: list[float] = []
         
-        lp = getattr(choice, "logprobs", None)
-        if lp is None:
-            raise RuntimeError("vLLM HTTP response lacks logprobs; ensure logprobs=True is set")
-
-        # Prefer OpenAI-style fields when present with token ids
-        token_ids = getattr(lp, "token_ids", None)
-        token_logprobs = getattr(lp, "token_logprobs", None)
-        if token_ids is not None and token_logprobs is not None:
-            gen_token_ids = [int(t) for t in token_ids]
-            gen_logprobs = [float(x) for x in token_logprobs]
-        else:
-            # Fallback to processed_logprobs structure if available
-            content = getattr(lp, "content", None)
-            if content is not None:
-                for token_info in content:
-                    token_id = getattr(token_info, "token_id", None)
-                    if token_id is None:
-                        top_list = getattr(token_info, "top_logprobs", None)
-                        if top_list and len(top_list) > 0:
-                            token_id = getattr(top_list[0], "token_id", None)
-                            logprob = getattr(top_list[0], "logprob", 0.0)
-                        else:
-                            logprob = 0.0
-                    else:
-                        logprob = getattr(token_info, "logprob", 0.0)
-
-                    if token_id is None:
-                        raise RuntimeError(
-                            "vLLM HTTP server did not return token_id in logprobs; enable return_tokens_as_token_ids"
-                        )
-                    gen_token_ids.append(int(token_id))
-                    gen_logprobs.append(float(logprob))
-            else:
-                # As a last resort, try OpenAI classic fields without token ids
-                tokens = getattr(lp, "tokens", None)
-                if tokens is not None and token_logprobs is not None:
-                    raise RuntimeError(
-                        "vLLM HTTP response returned text tokens without token ids. Set extra_body.return_tokens_as_token_ids=True."
-                    )
-                raise RuntimeError(
-                    "vLLM HTTP response lacks token-level details; cannot construct token ids"
-                )
-
-        return gen_token_ids, gen_logprobs
+        print(choice)
+        raise RuntimeError("stop")
 
     async def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
