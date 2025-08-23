@@ -195,19 +195,14 @@ class VllmHttpGeneration(GenerationInterface):
         top_p: float = self.cfg["top_p"]
         top_k: Optional[int] = 1 if greedy else (self.cfg["top_k"] if self.cfg["top_k"] is not None else -1)
 
-        extra_body: dict[str, Any] = {"prompt_token_ids": prompt_token_ids}
-        if top_k is not None and top_k >= 0:
-            extra_body["top_k"] = top_k
-
         resp = self.client.completions.create(
             model=self.served_model_name,
-            prompt="",
+            prompt=prompt_token_ids,
             max_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             stop=stop_strings if stop_strings else None,
-            logprobs=True,
-            extra_body=extra_body,
+            logprobs=True
         )
 
         choice = resp.choices[0]
