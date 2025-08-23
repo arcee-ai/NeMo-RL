@@ -100,7 +100,7 @@ policy:
 
   generation:
     backend: "vllm_http"
-    max_new_tokens: ${policy.max_total_sequence_length}
+    max_new_tokens: 256
     temperature: 1.0
     top_p: 1.0
     top_k: null
