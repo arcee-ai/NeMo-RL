@@ -333,8 +333,6 @@ def setup(
         policy_generation = VllmHttpGeneration(
             cluster=inference_cluster, config=generation_config
         )
-        
-    print("!!!!!!!!!!!!!!! it returned")
 
     if last_checkpoint_path:
         weights_path = Path(last_checkpoint_path) / "policy" / "weights"
