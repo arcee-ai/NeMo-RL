@@ -202,13 +202,16 @@ class VllmHttpGeneration(GenerationInterface):
             temperature=temperature,
             top_p=top_p,
             stop=stop_strings if stop_strings else None,
-            logprobs=1e10
+            logprobs=1,
+            extra_body={
+                "return_tokens_as_token_ids": True,
+            }
         )
 
         choice = resp.choices[0]
         
-        print(choice)
-        raise RuntimeError("stop")
+        generated_logprobs = choice.logprobs.token_logprobs
+        raise RuntimeError(choice)
 
     async def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
