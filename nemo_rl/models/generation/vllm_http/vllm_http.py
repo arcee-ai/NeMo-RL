@@ -26,7 +26,7 @@ class VLLMOpenAIServe:
         tensor_parallel_size: int = 1,
         max_model_len: int = 8192,
         extra_cli_args: Optional[list[str]] = None,
-        worker_extension_cls: str = "nemo_rl.models.generation.vllm_http.worker_ext.CheckpointWorker",
+        worker_extension_cls: str = "nemo_rl.models.generation.vllm.vllm_backend.VllmInternalWorkerExtension",
     ):
         args = [
             "--model", model,
@@ -50,7 +50,7 @@ class VLLMOpenAIServe:
         self._worker_extension_cls = worker_extension_cls
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
-        # engine_args.worker_extension_cls = worker_extension_cls
+        engine_args.worker_extension_cls = worker_extension_cls
 
         self._engine_client_ctx = build_async_engine_client_from_engine_args(
             engine_args, self._args.disable_frontend_multiprocessing, None
@@ -64,7 +64,19 @@ class VLLMOpenAIServe:
         vllm_app.state.engine_client = self._engine_client
         
         _serve_app.mount("/", vllm_app)
+        
+    async def admin_init_collective(self, rank_prefix: int, ip: str, port: int, world_size: int) -> bool:
+        # Broadcast same args to all engine workers; extension computes rank from local rank
+        await self._engine_client.collective_rpc("init_collective", args=(rank_prefix, ip, port, world_size))
+        return True
 
-    @_serve_app.get("/sanity_check")
-    async def _sanity_check(self):
-        return {"status": "ok"}
+    async def admin_prepare_refit_info(self, state_dict_info: dict) -> bool:
+        await self._engine_client.collective_rpc("prepare_refit_info", args=(state_dict_info,))
+        return True
+
+    async def admin_update_from_collective(self) -> bool:
+        results = await self._engine_client.collective_rpc("update_weights_from_collective", args=tuple())
+        return bool(results and results[0])
+
+    async def admin_report_device_id(self) -> list[str]:
+        return await self._engine_client.collective_rpc("report_device_id", args=tuple())

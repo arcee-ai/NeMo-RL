@@ -3,6 +3,7 @@ import asyncio
 from typing import Any, Optional, cast, AsyncGenerator
 
 import openai
+import ray
 import requests
 from requests.exceptions import RequestException
 import torch
@@ -282,7 +283,8 @@ class VllmHttpGeneration(GenerationInterface):
 
     # The following interface methods are no-ops for now
     def init_collective(self, ip: str, port: int, world_size: int):
-        return []
+        h = serve.get_deployment_handle("VLLMOpenAIServe")
+        return [h.admin_init_collective(ip, port, world_size).remote(0, ip, port, world_size)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
@@ -291,12 +293,13 @@ class VllmHttpGeneration(GenerationInterface):
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
-        return None
+        h = serve.get_deployment_handle("VLLMOpenAIServe")
+        ray.get(h.admin_prepare_refit_info(state_dict_info).remote(state_dict_info))
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         # Not yet supported over HTTP
         return False
 
     def update_weights_from_collective(self):
-        # Not yet supported over HTTP
-        return []
+        h = serve.get_deployment_handle("VLLMOpenAIServe")
+        ray.get(h.admin_update_from_collective().remote())
