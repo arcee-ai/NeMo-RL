@@ -211,7 +211,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         content = getattr(choice.logprobs, "content", None)
         if content is not None:
-            print(content)
+            raise RuntimeError(f"content: {content}")
             for token_info in content:
                 token_id = getattr(token_info, "token_id", None)
                 if token_id is None:
