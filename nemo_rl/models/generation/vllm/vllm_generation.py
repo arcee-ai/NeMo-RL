@@ -665,6 +665,13 @@ class VllmGeneration(GenerationInterface):
 
         # Wait for all futures to complete
         ray.get(futures)
+    
+    def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
+        # Reset prefix cache
+        return self.worker_group.run_all_workers_single_data(
+            "reset_prefix_cache",
+            run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
+        )
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         """Update weights of the policy using IPC handles, considering tensor parallelism.

@@ -333,6 +333,13 @@ def setup(
         policy_generation = VllmHttpGeneration(
             cluster=inference_cluster, config=generation_config
         )
+        
+        # See above for justification of this call.
+        policy_generation.finish_generation()
+        
+        print(
+            f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
+        )
 
     if last_checkpoint_path:
         weights_path = Path(last_checkpoint_path) / "policy" / "weights"
