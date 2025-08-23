@@ -8,6 +8,7 @@ import requests
 from requests.exceptions import RequestException
 import torch
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.ray_actor_environment_registry import get_actor_python_env
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
     GenerationInterface,
@@ -30,9 +31,17 @@ class VllmHttpGeneration(GenerationInterface):
 
         serve.start(detached=True, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode"})
     
+        py_exec = get_actor_python_env("nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
+    
         # Suppress static type checker complaint on .options by casting to Any
         vllm_app = cast(Any, VLLMOpenAIServe).options(
-            ray_actor_options={"num_cpus": 1, "num_gpus": config["colocated"]["resources"]["gpus_per_node"]}
+            ray_actor_options={
+                "num_cpus": 1,
+                "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
+                "runtime_env": {
+                    "py_executable": py_exec
+                }
+            }
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
