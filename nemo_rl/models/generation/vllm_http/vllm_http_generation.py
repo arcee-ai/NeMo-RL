@@ -56,8 +56,9 @@ class VllmHttpGeneration(GenerationInterface):
         
         # TODO: find better place for this, force V1 engine
         runtime_env["env_vars"]["VLLM_USE_V1"] = "1"
-        runtime_env["env_vars"]["NCCL_DEBUG"] = "INFO"
         runtime_env["env_vars"]["NCCL_CUMEM_ENABLE"] = "1"
+        # TODO: I really don't like this. Find a way around torch dtype serialization.
+        runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
