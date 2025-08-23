@@ -43,7 +43,7 @@ class VllmHttpGeneration(GenerationInterface):
             )
 
         # Prepare runtime_env to ensure Serve replicas use the managed venv
-        runtime_env = {"py_executable": py_exec}
+        runtime_env = {"py_executable": py_exec, "env_vars": {}}
         try:
             venv_dir = os.path.dirname(os.path.dirname(py_exec)) if isinstance(py_exec, str) else None
             if venv_dir:
@@ -53,6 +53,9 @@ class VllmHttpGeneration(GenerationInterface):
                 }
         except Exception:
             pass
+        
+        # TODO: find better place for this, force V1 engine
+        runtime_env["env_vars"]["VLLM_USE_V1"] = "1"
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
