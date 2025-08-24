@@ -369,11 +369,12 @@ def setup(
         futures_train = policy.init_collective(ip, port, world_size)
         futures_inference = policy_generation.init_collective(ip, port, world_size)  # type: ignore
         
-        print(f"Waiting for {len(futures_train)} training workers to init communication")
+        print(f"Waiting for {len(futures_train)} training workers to init communication...")
         # wait for all futures to complete (supports Ray ObjectRef and Ray Serve DeploymentResponse)
         _wait_on_futures(futures_train)
-        print(f"Waiting for {len(futures_inference)} inference workers to init communication")
+        print(f"Waiting for {len(futures_inference)} inference workers to init communication...")
         _wait_on_futures(futures_inference)
+        print("All workers initialized collective communication!")
 
     # prepare refit info
     state_dict_info = policy.prepare_refit_info()
