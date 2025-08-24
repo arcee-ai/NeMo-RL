@@ -363,7 +363,7 @@ def setup(
         # inference cluster + head node of the train cluster
         world_size = inference_nodes * inference_gpus_per_node + 1
         if backend == "vllm_http":
-            world_size = world_size * policy_generation.num_replicas # type: ignore
+            world_size = (world_size-1) * policy_generation.num_replicas + 1 # type: ignore
         print(f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})")
         # init collective
         futures_train = policy.init_collective(ip, port, world_size)
