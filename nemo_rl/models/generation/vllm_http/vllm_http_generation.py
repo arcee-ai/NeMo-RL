@@ -62,8 +62,9 @@ class VllmHttpGeneration(GenerationInterface):
         runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
-        self.num_replicas = config["vllm_cfg"]["data_parallel_size"]
+        self.dp_size = config["vllm_cfg"]["data_parallel_size"]
         self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
+        self.pp_size = config["vllm_cfg"]["pipeline_parallel_size"]
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
@@ -75,9 +76,10 @@ class VllmHttpGeneration(GenerationInterface):
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=self.tp_size,
+            pipeline_parallel_size=self.pp_size,
             max_model_len=config["vllm_cfg"]["max_model_len"],
             gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
-            data_parallel_size=self.num_replicas,
+            data_parallel_size=self.dp_size,
             extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
