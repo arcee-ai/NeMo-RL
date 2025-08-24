@@ -194,6 +194,7 @@ class VllmHttpWorkerExtension:
             )
             return False
 
+        print(f"vLLM worker ext @ update_weights_from_collective: done")
         return True
 
     def start_gpu_profiling(self) -> None:
