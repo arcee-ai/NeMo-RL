@@ -88,7 +88,7 @@ class VLLMOpenAIServe:
         return True
         
     async def admin_init_collective(self, rank_prefix: int, ip: str, port: int, world_size: int) -> bool:
-        print(f"init_collective: rank_prefix={rank_prefix}, ip={ip}, port={port}, world_size={world_size} on device {self.device}")
+        print(f"init_collective: rank_prefix={rank_prefix}, ip={ip}, port={port}, world_size={world_size}")
         # Broadcast same args to all engine workers; extension computes rank from local rank
         await self._engine_client.collective_rpc("init_collective", args=(rank_prefix, ip, port, world_size))
         return True
