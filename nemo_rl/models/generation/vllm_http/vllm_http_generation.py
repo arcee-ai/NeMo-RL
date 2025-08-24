@@ -397,7 +397,7 @@ class VllmHttpGeneration(GenerationInterface):
         h.admin_check.remote().result() 
         l = list(h._router._asyncio_router.request_router._replica_id_set)
         print(f"get_replica_handles: {l}")
-        return l
+        return [ray.get_actor(r_id.to_full_id_str(), namespace="serve") for r_id in l]
 
     def init_collective(self, ip: str, port: int, world_size: int):
         ret = []
