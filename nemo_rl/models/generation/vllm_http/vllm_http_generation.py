@@ -397,7 +397,7 @@ class VllmHttpGeneration(GenerationInterface):
         if h._router is None:
             # Router is created lazily. If not initialized, initialize it.
             h._init()
-        return list(h._router._asyncio_router._request_router._replica_id_set)
+        return list(h._router._asyncio_router.request_router()._replica_id_set)
 
     def init_collective(self, ip: str, port: int, world_size: int):
         ret = []
