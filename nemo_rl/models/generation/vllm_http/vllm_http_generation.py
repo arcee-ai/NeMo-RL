@@ -71,13 +71,13 @@ class VllmHttpGeneration(GenerationInterface):
                 # "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
                 "runtime_env": runtime_env,
             },
-            num_replicas=self.num_replicas
+            # num_replicas=self.num_replicas
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=self.tp_size,
             max_model_len=config["vllm_cfg"]["max_model_len"],
             gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
-            data_parallel_size=1,
+            data_parallel_size=self.num_replicas,
             extra_cli_args=config["vllm_cfg"]["extra_cli_args"]
         )
         
@@ -398,7 +398,7 @@ class VllmHttpGeneration(GenerationInterface):
         replica_ids = list(h._router._asyncio_router.request_router._replica_id_set)
         print(f"get_replica_handles: {replica_ids}")
         # Return per-replica DeploymentHandles by pinning distinct multiplexed_model_id values.
-        return [h.options(multiplexed_model_id=str(i)) for i in range(len(replica_ids))]
+        return [h]
 
     def init_collective(self, ip: str, port: int, world_size: int):
         ret = []
