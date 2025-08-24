@@ -181,11 +181,13 @@ class VllmHttpWorkerExtension:
             "Please call prepare_refit_info when initializing the worker."
         )
         
-        print(f"vLLM worker ext @ update_weights_from_collective")
+        rank = torch.distributed.get_rank()
+        
+        print(f"vLLM worker (rank {rank}) ext @ update_weights_from_collective")
 
         try:
             for name, (shape, dtype) in self.state_dict_info.items():
-                print(f"vLLM worker ext @ update_weights_from_collective: receiving {shape} weight {name}")
+                print(f"vLLM worker (rank {rank}) ext @ update_weights_from_collective: receiving {shape} weight {name}")
                 weight = torch.empty(shape, dtype=dtype, device="cuda")
                 self.model_update_group.broadcast(weight, src=0)
                 self.model_runner.model.load_weights(weights=[(name, weight)])
@@ -195,7 +197,7 @@ class VllmHttpWorkerExtension:
             )
             return False
 
-        print(f"vLLM worker ext @ update_weights_from_collective: done")
+        print(f"vLLM worker (rank {rank}) ext @ update_weights_from_collective: done")
         return True
 
     def start_gpu_profiling(self) -> None:
