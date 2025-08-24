@@ -66,7 +66,9 @@ class VllmHttpGeneration(GenerationInterface):
         self.pp_size = config["vllm_cfg"]["pipeline_parallel_size"]
         
         # Calculate DP size from total GPUs and TP/PP size
-        total_gpus = config["colocated"]["resources"]["num_nodes"] * config["colocated"]["resources"]["gpus_per_node"]
+        num_nodes = config["colocated"]["resources"].get("num_nodes", 1)
+        gpus_per_node = config["colocated"]["resources"].get("gpus_per_node", 1)
+        total_gpus = num_nodes * gpus_per_node
         self.dp_size = total_gpus // (self.tp_size * self.pp_size)
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
