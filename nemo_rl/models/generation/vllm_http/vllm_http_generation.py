@@ -62,6 +62,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
         self.num_replicas = config["vllm_cfg"]["data_parallel_size"]
+        self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
@@ -72,7 +73,7 @@ class VllmHttpGeneration(GenerationInterface):
             num_replicas=self.num_replicas
         ).bind(
             model=config["model_name"],
-            tensor_parallel_size=config["vllm_cfg"]["tensor_parallel_size"],
+            tensor_parallel_size=self.tp_size,
             max_model_len=config["vllm_cfg"]["max_model_len"],
             gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
             data_parallel_size=1,
