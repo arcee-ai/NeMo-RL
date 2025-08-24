@@ -27,6 +27,8 @@ class VllmHttpWorkerExtension:
 
         local_rank = torch.distributed.get_rank()
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster
+        
+        print(f"vLLM worker ext @ init_collective: rank_prefix={rank_prefix}, ip={ip}, port={port}, world_size={world_size} on device {self.device} and rank {rank}")
 
         pg = StatelessProcessGroup.create(
             host=ip, port=port, rank=rank, world_size=world_size
