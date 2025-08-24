@@ -394,17 +394,18 @@ class VllmHttpGeneration(GenerationInterface):
     def get_replica_handles(self) -> list[DeploymentHandle]:
         h = self.get_deployment_handle()
         # TODO: This is a janky call to internal Serve state. There is no other way to do this as of writing.
-        h.admin_check.remote().result() 
-        l = list(h._router._asyncio_router.request_router._replica_id_set)
-        print(f"get_replica_handles: {l}")
-        return [ray.get_actor(r_id.to_full_id_str(), namespace="serve") for r_id in l]
+        h.admin_check.remote().result()
+        replica_ids = list(h._router._asyncio_router.request_router._replica_id_set)
+        print(f"get_replica_handles: {replica_ids}")
+        # Return per-replica DeploymentHandles by pinning distinct multiplexed_model_id values.
+        return [h.options(multiplexed_model_id=str(i)) for i in range(len(replica_ids))]
 
     def init_collective(self, ip: str, port: int, world_size: int):
         ret = []
         tp_size = self.cfg["vllm_cfg"]["tensor_parallel_size"]
         # With Serve replicas, we assign a distinct rank_prefix per replica to avoid collisions.
-        for h_i in self.get_replica_handles():
-            rank_prefix = h_i.multiplexed_model_id * tp_size
+        for idx, h_i in enumerate(self.get_replica_handles()):
+            rank_prefix = idx * tp_size
             ret.append(h_i.admin_init_collective.remote(rank_prefix, ip, port, world_size))
         return ret
 
