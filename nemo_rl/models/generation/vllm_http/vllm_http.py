@@ -98,6 +98,7 @@ class VLLMOpenAIServe:
         return True
 
     async def admin_update_from_collective(self) -> bool:
+        print(f"(http backend) vllm_http.py @ admin_update_from_collective")
         results = await self._engine_client.collective_rpc("update_weights_from_collective", args=tuple())
         return bool(results and results[0])
 
