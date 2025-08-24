@@ -22,6 +22,7 @@ from nemo_rl.models.generation.vllm_http.config import HttpVllmConfig
 from nemo_rl.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
 
 from ray import serve
+from ray.serve.handle import DeploymentHandle
 
 
 class VllmHttpGeneration(GenerationInterface):
@@ -387,17 +388,20 @@ class VllmHttpGeneration(GenerationInterface):
     def shutdown(self):
         serve.shutdown()
 
-    def get_deployment_handle(self):
+    def get_deployment_handle(self) -> DeploymentHandle:
         return serve.get_deployment_handle("VLLMOpenAIServe", app_name="vllm_http_generation")
 
-    def init_collective(self, ip: str, port: int, world_size: int):
+    def get_replica_handles(self) -> list[DeploymentHandle]:
         h = self.get_deployment_handle()
+        # TODO: This is a janky call to internal Serve state. There is no other way to do this as of writing.
+        return list(h._router._asyncio_router._request_router._replica_id_set)
+
+    def init_collective(self, ip: str, port: int, world_size: int):
         ret = []
         tp_size = self.cfg["vllm_cfg"]["tensor_parallel_size"]
         # With Serve replicas, we assign a distinct rank_prefix per replica to avoid collisions.
-        for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
-            rank_prefix = i * tp_size
+        for h_i in self.get_replica_handles():
+            rank_prefix = h_i.multiplexed_model_id * tp_size
             ret.append(h_i.admin_init_collective.remote(rank_prefix, ip, port, world_size))
         return ret
 
@@ -405,32 +409,25 @@ class VllmHttpGeneration(GenerationInterface):
         return True
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
-        h = self.get_deployment_handle()
         # Wait for the reset to complete across replicas
         if self.cfg["vllm_cfg"]["async_engine"]:
-            for i in range(self.num_replicas):
-                h_i = h.options(multiplexed_model_id=str(i))
+            for h_i in self.get_replica_handles():
                 h_i.admin_reset_prefix_cache_async.remote().result()
         else:
-            for i in range(self.num_replicas):
-                h_i = h.options(multiplexed_model_id=str(i))
+            for h_i in self.get_replica_handles():
                 h_i.admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
-        h = self.get_deployment_handle()
         # Wait for refit prep to complete across replicas.
-        for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
+        for h_i in self.get_replica_handles():
             h_i.admin_prepare_refit_info.remote(state_dict_info).result()
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
-        h = self.get_deployment_handle()
         ret = []
-        for i in range(self.num_replicas):
-            h_i = h.options(multiplexed_model_id=str(i))
+        for h_i in self.get_replica_handles():
             ret.append(h_i.admin_update_from_collective.remote())
         return ret
