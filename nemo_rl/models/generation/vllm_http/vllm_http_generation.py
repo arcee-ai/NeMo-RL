@@ -394,6 +394,9 @@ class VllmHttpGeneration(GenerationInterface):
     def get_replica_handles(self) -> list[DeploymentHandle]:
         h = self.get_deployment_handle()
         # TODO: This is a janky call to internal Serve state. There is no other way to do this as of writing.
+        if h._router is None:
+            # Router is created lazily. If not initialized, initialize it.
+            h._init()
         return list(h._router._asyncio_router._request_router._replica_id_set)
 
     def init_collective(self, ip: str, port: int, world_size: int):
