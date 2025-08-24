@@ -112,7 +112,6 @@ policy:
       precision: ${policy.precision}
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
-      data_parallel_size: 2
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
@@ -120,7 +119,7 @@ policy:
     colocated:
       enabled: false
       resources:
-        gpus_per_node: 1
+        gpus_per_node: 2
         num_nodes: null
 
 data:

@@ -62,9 +62,12 @@ class VllmHttpGeneration(GenerationInterface):
         runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
-        self.dp_size = config["vllm_cfg"]["data_parallel_size"]
         self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
         self.pp_size = config["vllm_cfg"]["pipeline_parallel_size"]
+        
+        # Calculate DP size from total GPUs and TP/PP size
+        total_gpus = config["colocated"]["resources"]["num_nodes"] * config["colocated"]["resources"]["gpus_per_node"]
+        self.dp_size = total_gpus // (self.tp_size * self.pp_size)
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
