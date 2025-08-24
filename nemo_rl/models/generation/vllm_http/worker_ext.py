@@ -180,6 +180,8 @@ class VllmHttpWorkerExtension:
             "state_dict_info is not prepared. "
             "Please call prepare_refit_info when initializing the worker."
         )
+        
+        print(f"vLLM worker ext @ update_weights_from_collective")
 
         try:
             for name, (shape, dtype) in self.state_dict_info.items():
