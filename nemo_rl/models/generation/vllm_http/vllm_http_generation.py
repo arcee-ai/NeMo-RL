@@ -395,7 +395,9 @@ class VllmHttpGeneration(GenerationInterface):
         h = self.get_deployment_handle()
         # TODO: This is a janky call to internal Serve state. There is no other way to do this as of writing.
         h.admin_check.remote().result() 
-        return list(h._router._asyncio_router.request_router._replica_id_set)
+        l = list(h._router._asyncio_router.request_router._replica_id_set)
+        print(f"get_replica_handles: {l}")
+        return l
 
     def init_collective(self, ip: str, port: int, world_size: int):
         ret = []
