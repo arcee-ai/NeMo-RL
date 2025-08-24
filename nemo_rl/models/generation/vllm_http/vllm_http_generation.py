@@ -67,7 +67,9 @@ class VllmHttpGeneration(GenerationInterface):
         
         # Calculate DP size from total GPUs and TP/PP size
         num_nodes = config["colocated"]["resources"].get("num_nodes", 1)
+        num_nodes = 1 if num_nodes is None else int(num_nodes)
         gpus_per_node = config["colocated"]["resources"].get("gpus_per_node", 1)
+        gpus_per_node = 1 if gpus_per_node is None else int(gpus_per_node)
         total_gpus = num_nodes * gpus_per_node
         self.dp_size = total_gpus // (self.tp_size * self.pp_size)
 
