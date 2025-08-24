@@ -394,9 +394,7 @@ class VllmHttpGeneration(GenerationInterface):
         for i in range(self.num_replicas):
             h_i = h.options(multiplexed_model_id=str(i))
             rank_prefix = i * tp_size
-            # world_size should be replicas*tp + 1
-            inferred_world_size = self.num_replicas * tp_size + 1
-            ret.append(h_i.admin_init_collective.remote(rank_prefix, ip, port, inferred_world_size).result())
+            ret.append(h_i.admin_init_collective.remote(rank_prefix, ip, port, world_size).result())
         return ret
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
