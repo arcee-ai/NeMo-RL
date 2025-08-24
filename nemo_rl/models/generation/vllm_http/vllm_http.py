@@ -79,6 +79,9 @@ class VLLMOpenAIServe:
     async def _sanity_check(self):
         return {"status": "ok"}
     
+    async def admin_check(self) -> bool:
+        return True
+    
     async def admin_reset_prefix_cache(self) -> bool:
         await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
         return True
