@@ -383,6 +383,9 @@ class VllmHttpGeneration(GenerationInterface):
 
             yield original_idx, single
 
+    def shutdown(self):
+        serve.shutdown()
+
     def get_deployment_handle(self):
         return serve.get_deployment_handle("VLLMOpenAIServe", app_name="vllm_http_generation")
 
