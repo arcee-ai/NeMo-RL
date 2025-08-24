@@ -69,10 +69,8 @@ class VllmHttpGeneration(GenerationInterface):
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
                 "num_cpus": 1,
-                # "num_gpus": config["colocated"]["resources"]["gpus_per_node"],
                 "runtime_env": runtime_env,
             },
-            # num_replicas=self.num_replicas
         ).bind(
             model=config["model_name"],
             tensor_parallel_size=self.tp_size,
