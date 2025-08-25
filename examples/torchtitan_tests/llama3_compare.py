@@ -75,3 +75,15 @@ top_token_ids = probs_tt.argmax(dim=-1)
 top_token = tokenizer.decode(top_token_ids[0])
 
 print(f"Next token: {top_token}")
+
+print("Load HF model")
+model_hf = AutoModelForCausalLM.from_pretrained("Llama-3-8B")
+model_hf.eval()
+
+print("Evaluate HF model")
+
+logits_hf = model_hf(input_ids)
+
+kldiv = torch.nn.functional.kl_div(logits_hf, logits_tt)
+
+print(f"KL divergence: {kldiv}")
