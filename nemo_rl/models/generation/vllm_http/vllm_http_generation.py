@@ -321,50 +321,80 @@ class VllmHttpGeneration(GenerationInterface):
         assert "input_ids" in data and "input_lengths" in data, (
             "input_ids and input_lengths are required in data for generation"
         )
+
         input_ids: torch.Tensor = data["input_ids"]
         input_lengths: torch.Tensor = data["input_lengths"]
         batch_stop_strings: list[list[str]] = data.get("stop_strings", [])
 
         batch_size = input_ids.shape[0]
+        if batch_size == 0:
+            return
+
+        padded_input_length = input_ids.size(1)
+
+        # Build prompts for each sample
+        prompts_token_ids_batch: list[list[int]] = []
+        for i in range(batch_size):
+            valid_len = int(input_lengths[i].item())
+            prompts_token_ids_batch.append(
+                input_ids[i, :valid_len].tolist() if valid_len > 0 else []
+            )
+
+        # Prepare async client lazily
+        async_client: openai.AsyncOpenAI
+        if not isinstance(getattr(self, "client", None), openai.AsyncOpenAI):
+            async_client = openai.AsyncOpenAI(
+                api_key="n/a", base_url="http://127.0.0.1:8000/v1"
+            )
+        else:
+            async_client = self.client  # type: ignore[assignment]
+
+        temperature: float = 0.0 if greedy else self.cfg["temperature"]
+        top_p: float = self.cfg["top_p"]
+        top_k: Optional[int] = 1 if greedy else (self.cfg["top_k"] if self.cfg["top_k"] is not None else -1)
+
+        async def _request_one(index: int) -> tuple[int, list[int], list[float], str]:
+            stop_strings_i: Optional[list[str]] = None
+            if batch_stop_strings and index < len(batch_stop_strings):
+                stop_strings_i = batch_stop_strings[index]
+
+            resp = await async_client.completions.create(
+                model=self.served_model_name,
+                prompt=[prompts_token_ids_batch[index]],
+                max_tokens=self.cfg["max_new_tokens"],
+                temperature=temperature,
+                top_p=top_p,
+                stop=stop_strings_i if stop_strings_i else None,
+                logprobs=1,
+                extra_body={
+                    "return_tokens_as_token_ids": True,
+                },
+            )
+
+            # vLLM returns exactly one choice for single-sample prompt
+            choice = resp.choices[0]
+            generated_logprobs: list[float] = choice.logprobs.token_logprobs
+            generated_token_strings = choice.logprobs.tokens
+            generated_token_ids: list[int] = [int(tok.split(":")[1]) for tok in generated_token_strings]
+            generated_text: str = choice.text
+            return index, generated_token_ids, generated_logprobs, generated_text
+
+        # Launch all requests concurrently
+        tasks = [asyncio.create_task(_request_one(i)) for i in range(batch_size)]
+
         pad_id = self.cfg.get("pad_token_id")
         assert pad_id is not None, "pad_token_id must be provided in config"
 
-        tasks: list[asyncio.Task] = []
-        for i in range(batch_size):
-            valid_len = int(input_lengths[i].item())
-            prompt_token_ids = input_ids[i, :valid_len].tolist() if valid_len > 0 else []
-            stop_strings_i: Optional[list[str]] = None
-            if batch_stop_strings and i < len(batch_stop_strings):
-                stop_strings_i = batch_stop_strings[i]
-
-            async def run_one(original_idx: int, ptok: list[int], stops: Optional[list[str]]):
-                gen_ids, gen_lps, gen_texts = await asyncio.to_thread(
-                    self._generate_batch,
-                    prompts_token_ids=[ptok],
-                    stop_strings=stops,
-                    greedy=greedy,
-                )
-                parsed_list = self._maybe_parse_tool_calls(gen_texts)
-                return original_idx, gen_ids, gen_lps, parsed_list
-
-            task = asyncio.create_task(run_one(i, prompt_token_ids, stop_strings_i))
-            tasks.append(task)
-
-        # Yield samples as they complete
         for completed in asyncio.as_completed(tasks):
-            # Do it one at a time instead of batched
-            original_idx, gen_ids, gen_lps, parsed_tool_calls = await completed
-            gen_ids = gen_ids[0]
-            gen_lps = gen_lps[0]
-            parsed_tool_calls = parsed_tool_calls[0]
+            index, gen_ids, gen_lps, gen_text = await completed
 
-            seq_len = int(input_lengths[original_idx].item())
-            padded_input_length = input_ids.size(1)
-            total_length = seq_len + len(gen_ids)
+            seq_len = int(input_lengths[index].item())
+            total_length = padded_input_length + len(gen_ids)
 
+            # Assemble single-sample outputs with right padding
             full_output = torch.full((total_length,), pad_id, dtype=input_ids.dtype)
             if seq_len > 0:
-                full_output[:seq_len] = input_ids[original_idx][:seq_len]
+                full_output[:seq_len] = input_ids[index][:seq_len]
             if len(gen_ids) > 0:
                 full_output[seq_len : seq_len + len(gen_ids)] = torch.tensor(gen_ids, dtype=input_ids.dtype)
 
@@ -374,17 +404,17 @@ class VllmHttpGeneration(GenerationInterface):
                 if pos < total_length:
                     full_logprobs[pos] = float(lp)
 
-            single = BatchedDataDict[GenerationOutputSpec](
+            single_output = BatchedDataDict[GenerationOutputSpec](
                 {
                     "output_ids": full_output.unsqueeze(0),
                     "logprobs": full_logprobs.unsqueeze(0),
                     "generation_lengths": torch.tensor([len(gen_ids)], dtype=torch.long),
                     "unpadded_sequence_lengths": torch.tensor([seq_len + len(gen_ids)], dtype=torch.long),
-                    "tool_calls": [parsed_tool_calls],
+                    "tool_calls": self._maybe_parse_tool_calls([gen_text]),
                 }
             )
 
-            yield original_idx, single
+            yield index, single_output
 
     def shutdown(self):
         serve.shutdown()
