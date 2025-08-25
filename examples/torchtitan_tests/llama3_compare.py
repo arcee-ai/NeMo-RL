@@ -44,15 +44,21 @@ args_8b = TransformerModelArgs(
     rope_theta=500000,
 )
 
+print("Init model and adapter")
+
 model_tt = Transformer(model_args=args_8b)
 adapter = Llama3StateDictAdapter(model_args=args_8b, hf_assets_path="Llama-3-8B")
 
+print("Load HF state dict")
 hf_state_dict = load_hf_state_dict(args_8b, "Llama-3-8B")
 
+print("Convert HF state dict to TT state dict")
 tt_state_dict = adapter.from_hf(hf_state_dict)
 
+print("Load TT state dict into model")
 model_tt.load_state_dict(tt_state_dict)
 
+print("Evaluate model")
 model_tt.eval()
 
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3-8B")
