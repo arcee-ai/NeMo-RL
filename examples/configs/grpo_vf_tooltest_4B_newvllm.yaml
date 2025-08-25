@@ -112,7 +112,7 @@ policy:
       tool_parser: "hermes"
       async_engine: false
       precision: ${policy.precision}
-      tensor_parallel_size: 2
+      tensor_parallel_size: 1
       pipeline_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
@@ -120,10 +120,10 @@ policy:
     colocated:
       # true: generation shares training GPUs
       # false: uses dedicated generation resources
-      enabled: true
+      enabled: false
       # only relevant when enabled is false
       resources:
-        gpus_per_node: 1 # Decides num gpus to be dedicated to generation when there is one node in the cluster i.e cluster.num_nodes == 1
+        gpus_per_node: 2 # Decides num gpus to be dedicated to generation when there is one node in the cluster i.e cluster.num_nodes == 1
         num_nodes: null # Decides number of nodes to be dedicated to generation
 
 data:
@@ -153,5 +153,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 2
+  gpus_per_node: 8
   num_nodes: 1
