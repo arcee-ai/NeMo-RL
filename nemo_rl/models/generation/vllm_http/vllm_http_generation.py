@@ -128,16 +128,19 @@ class VllmHttpGeneration(GenerationInterface):
         
         parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
         if parser_name is None:
+            print("No tool parser configured, returning empty tool calls")
             return [{}] * len(texts)
 
         try:
             ParserCls = ToolParserManager.get_tool_parser(parser_name)
         except Exception:
+            print(f"Failed to get tool parser {parser_name}, returning empty tool calls")
             return [{}] * len(texts)
 
         try:
             tokenizer = self.llm.get_tokenizer()
-        except Exception:
+        except Exception as e:
+            print(f"Failed to get tokenizer, returning empty tool calls: {e}")
             tokenizer = None
 
         if tokenizer is None:
@@ -156,11 +159,13 @@ class VllmHttpGeneration(GenerationInterface):
                 try:
                     info = parser.extract_tool_calls(text, req)
                     results.append(info.model_dump())
-                except Exception:
+                except Exception as e:
+                    print(f"Failed to parse tool calls for text {text}, returning empty tool call: {e}")
                     results.append({})
             
             return results
-        except Exception:
+        except Exception as e:
+            print(f"Failed to parse tool calls, returning empty tool calls: {e}")
             return [{}] * len(texts)
 
     def generate(
