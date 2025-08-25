@@ -67,12 +67,12 @@ vllm = [
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
     "mamba-ssm",
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
-    "causal-conv1d",
-    "hf-transfer"
+    "causal-conv1d"
 ]
 # For the vllm_http backend, we use the latest vllm
 vllm_http = [
-    "vllm==0.10.1.1"
+    "vllm==0.10.1.1",
+    "hf-transfer"
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
