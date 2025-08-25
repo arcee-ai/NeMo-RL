@@ -59,6 +59,7 @@ print("Load TT state dict into model")
 model_tt.load_state_dict(tt_state_dict)
 
 print("Evaluate model")
+model_tt.to("cuda")
 model_tt.eval()
 
 tokenizer = AutoTokenizer.from_pretrained("Llama-3-8B")
@@ -82,7 +83,7 @@ model_hf.eval()
 
 print("Evaluate HF model")
 
-logits_hf = model_hf(input_ids)
+logits_hf = model_hf(input_ids).logits
 
 kldiv = torch.nn.functional.kl_div(logits_hf, logits_tt)
 
