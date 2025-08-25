@@ -338,13 +338,14 @@ class VllmHttpGeneration(GenerationInterface):
                 stop_strings_i = batch_stop_strings[i]
 
             async def run_one(original_idx: int, ptok: list[int], stops: Optional[list[str]]):
-                gen_ids, gen_lps, parsed_tool_calls = await asyncio.to_thread(
+                gen_ids, gen_lps, gen_texts = await asyncio.to_thread(
                     self._generate_batch,
                     prompts_token_ids=[ptok],
                     stop_strings=stops,
                     greedy=greedy,
                 )
-                return original_idx, gen_ids, gen_lps, parsed_tool_calls
+                parsed_list = self._maybe_parse_tool_calls(gen_texts)
+                return original_idx, gen_ids, gen_lps, parsed_list
 
             task = asyncio.create_task(run_one(i, prompt_token_ids, stop_strings_i))
             tasks.append(task)
@@ -379,7 +380,7 @@ class VllmHttpGeneration(GenerationInterface):
                     "logprobs": full_logprobs.unsqueeze(0),
                     "generation_lengths": torch.tensor([len(gen_ids)], dtype=torch.long),
                     "unpadded_sequence_lengths": torch.tensor([seq_len + len(gen_ids)], dtype=torch.long),
-                    "tool_calls": parsed_tool_calls,
+                    "tool_calls": [parsed_tool_calls],
                 }
             )
 
