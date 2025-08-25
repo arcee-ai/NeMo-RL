@@ -69,7 +69,7 @@ class VLLMOpenAIServe:
         )
         self._engine_client = await self._engine_client_ctx.__aenter__()
         
-        self._tokenizer = self._engine_client.get_tokenizer()
+        self._tokenizer = await self._engine_client.get_tokenizer()
 
         vllm_app = build_vllm_app(self._args)
         
