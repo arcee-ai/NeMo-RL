@@ -1,5 +1,6 @@
 from collections import defaultdict
 from typing import Any, Optional
+import asyncio
 
 import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
@@ -156,10 +157,17 @@ class VllmHttpWorkerExtension:
         """Reset the engine's prefix cache on this worker.
 
         This method is invoked via vLLM's collective_rpc from the HTTP backend.
+        Supports both sync and async vLLM engines.
         """
         try:
-            self.model_runner.llm_engine.reset_prefix_cache()
-            return True
+            if hasattr(self.model_runner.llm_engine, "reset_prefix_cache"):
+                self.model_runner.llm_engine.reset_prefix_cache()
+                return True
+            elif hasattr(self.model_runner.llm_engine, "reset_prefix_cache_async"):
+                asyncio.run(self.model_runner.llm_engine.reset_prefix_cache_async())
+                return True
+            else:
+                return False
         except Exception:
             return False
     

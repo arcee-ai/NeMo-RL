@@ -404,10 +404,7 @@ class VllmHttpGeneration(GenerationInterface):
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         # Wait for the reset to complete across replicas
-        if self.cfg["vllm_cfg"]["async_engine"]:
-            self.get_deployment_handle().admin_reset_prefix_cache_async.remote().result()
-        else:
-            self.get_deployment_handle().admin_reset_prefix_cache.remote().result()
+        self.get_deployment_handle().admin_reset_prefix_cache.remote().result()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
