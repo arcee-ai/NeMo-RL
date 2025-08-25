@@ -153,5 +153,5 @@ class VLLMOpenAIServe:
             
             return results
         except Exception as e:
-            print(f"Error parsing tool calls: {e}")
+            raise e
             return [{}] * len(texts)
