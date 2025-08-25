@@ -1,6 +1,6 @@
 # GRPO Algorithm Configuration
 grpo:
-  num_prompts_per_step: 1
+  num_prompts_per_step: 3
   num_generations_per_prompt: 16
   max_rollout_turns: 10 # prefer to use verifiers to set turn limits
   max_num_steps: 1000000
@@ -35,7 +35,7 @@ policy:
   model_name: "Qwen/Qwen3-4B-Instruct-2507"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 8
+  train_global_batch_size: 48
   train_micro_batch_size: 2
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
