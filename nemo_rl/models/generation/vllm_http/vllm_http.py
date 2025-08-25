@@ -1,6 +1,6 @@
 # serve_vllm.py
 import asyncio
-from typing import Any, Optional
+from typing import Optional
 from ray import serve
 from fastapi import FastAPI, Request
 import torch
@@ -107,51 +107,3 @@ class VLLMOpenAIServe:
 
     async def admin_report_device_id(self) -> list[str]:
         return await self._engine_client.collective_rpc("report_device_id", args=tuple())
-
-    def maybe_parse_tool_calls(self, parser_name: str | None, texts: list[str]) -> list[dict[str, Any]]:
-        """Parse tool calls from generated texts if a parser is configured.
-
-        Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
-        """
-        
-        # For some reason, this file is imported in contexts outside of the vLLM worker.
-        # As such, this import needs to be here rather than at the top level.
-        from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        
-        if parser_name is None:
-            return [{}] * len(texts)
-
-        try:
-            ParserCls = ToolParserManager.get_tool_parser(parser_name)
-        except Exception:
-            return [{}] * len(texts)
-
-        try:
-            tokenizer = self.llm.get_tokenizer()
-        except Exception:
-            tokenizer = None
-
-        if tokenizer is None:
-            return [{}] * len(texts)
-
-        try:
-            parser: ToolParser = ParserCls(tokenizer)
-            # Dummy request for parser shim.
-            req = ChatCompletionRequest(
-                messages=[{"role": "user", "content": ""}],
-                tool_choice="auto",
-                tools=[],
-            )
-            results: list[dict[str, Any] | None] = []
-            for text in texts:
-                try:
-                    info = parser.extract_tool_calls(text, req)
-                    results.append(info.model_dump())
-                except Exception:
-                    results.append({})
-            
-            return results
-        except Exception as e:
-            raise e
-            return [{}] * len(texts)
