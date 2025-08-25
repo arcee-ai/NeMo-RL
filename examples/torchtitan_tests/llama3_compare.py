@@ -59,7 +59,6 @@ print("Load TT state dict into model")
 model_tt.load_state_dict(tt_state_dict)
 
 print("Evaluate model")
-model_tt.to("cuda")
 model_tt.eval()
 
 tokenizer = AutoTokenizer.from_pretrained("Llama-3-8B")
