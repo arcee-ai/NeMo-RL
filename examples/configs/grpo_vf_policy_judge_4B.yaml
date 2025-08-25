@@ -116,7 +116,7 @@ policy:
       pipeline_parallel_size: 1
       data_parallel_size: 2
       gpu_memory_utilization: 0.6
-      max_model_len: ${policy.max_total_sequence_length}
+      max_model_len: 2048
       enforce_eager: False
     colocated:
       # true: generation shares training GPUs
