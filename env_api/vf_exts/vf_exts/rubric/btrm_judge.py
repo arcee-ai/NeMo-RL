@@ -97,6 +97,10 @@ class PairwiseJudgeRubric(GroupedRubric):
                 was_malformed = True
                 opinion = 4
             
+            print(f"opinion: {opinion} (was_malformed: {was_malformed})")
+            print(f"prompt: {prompt}")
+            print(f"response: {response.choices[0].message.content}")
+            
             # We have to do this twice so the resulting metric is the same size as the group.
             was_judge_malformed.append(was_malformed)
             was_judge_malformed.append(was_malformed)
