@@ -108,7 +108,7 @@ class VLLMOpenAIServe:
     async def admin_report_device_id(self) -> list[str]:
         return await self._engine_client.collective_rpc("report_device_id", args=tuple())
 
-    def maybe_parse_tool_calls(self, texts: list[str]) -> list[dict[str, Any]]:
+    def maybe_parse_tool_calls(self, parser_name: str, texts: list[str]) -> list[dict[str, Any]]:
         """Parse tool calls from generated texts if a parser is configured.
 
         Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
@@ -119,7 +119,6 @@ class VLLMOpenAIServe:
         from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
         from vllm.entrypoints.openai.protocol import ChatCompletionRequest
         
-        parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
         if parser_name is None:
             return [{}] * len(texts)
 

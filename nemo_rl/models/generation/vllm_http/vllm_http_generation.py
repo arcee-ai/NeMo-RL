@@ -120,7 +120,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
         """
-        return self.get_deployment_handle().maybe_parse_tool_calls.remote(texts)
+        return self.get_deployment_handle().maybe_parse_tool_calls.remote(self.cfg["vllm_cfg"]["tool_parser"], texts)
 
     def generate(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
