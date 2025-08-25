@@ -94,7 +94,7 @@ class VllmHttpGeneration(GenerationInterface):
         print("Waiting for vLLM server to come online...")
         polling_start = time.time()
         success = False
-        while time.time() - polling_start < config["server_timeout"]:
+        while time.time() - polling_start < config.get("server_timeout", 60):
             try:
                 response = requests.get("http://127.0.0.1:8000/v1/models")
                 if response.status_code == 200:

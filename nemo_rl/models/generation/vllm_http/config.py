@@ -19,6 +19,6 @@ class VllmSpecificArgs(TypedDict):
 class HttpVllmConfig(GenerationConfig):
     vllm_cfg: VllmSpecificArgs
     gpus_per_node: int
-    server_timeout: int
+    server_timeout: NotRequired[int]
     num_nodes: NotRequired[int]
     vllm_kwargs: NotRequired[dict[str, Any]]
