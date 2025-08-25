@@ -63,7 +63,7 @@ model_tt.eval()
 
 tokenizer = AutoTokenizer.from_pretrained("Llama-3-8B")
 
-prompt = "Hello, how are you?"
+prompt = "The first US president was George "
 
 input_ids = tokenizer.encode(prompt, return_tensors="pt")
 
@@ -72,4 +72,6 @@ probs_tt = torch.softmax(logits_tt[:, -1, :], dim=-1)
 
 top_token_ids = probs_tt.argmax(dim=-1)
 
-print(top_token_ids)
+top_token = tokenizer.decode(top_token_ids[0])
+
+print(top_token)
