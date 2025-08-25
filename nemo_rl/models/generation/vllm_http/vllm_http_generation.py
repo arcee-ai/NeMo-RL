@@ -238,10 +238,10 @@ class VllmHttpGeneration(GenerationInterface):
             gen_ids = generated_token_id_lists[i]
             gen_lps = generated_logprobs_lists[i]
 
-            full_output = torch.full((total_length,), pad_id, dtype=input_ids.dtype)
-            full_output[:seq_len] = input_ids[i][:seq_len]
+            full_output = torch.full((total_length,), pad_id, dtype=torch.long)
+            full_output[:seq_len] = input_ids[i][:seq_len].to(dtype=torch.long)
             if len(gen_ids) > 0:
-                full_output[seq_len : seq_len + len(gen_ids)] = torch.tensor(gen_ids, dtype=input_ids.dtype)
+                full_output[seq_len : seq_len + len(gen_ids)] = torch.tensor(gen_ids, dtype=torch.long)
 
             output_ids_list.append(full_output)
 
@@ -392,11 +392,12 @@ class VllmHttpGeneration(GenerationInterface):
             total_length = padded_input_length + len(gen_ids)
 
             # Assemble single-sample outputs with right padding
-            full_output = torch.full((total_length,), pad_id, dtype=input_ids.dtype)
+            # Force integer dtype to torch.long to conform with downstream expectations
+            full_output = torch.full((total_length,), pad_id, dtype=torch.long)
             if seq_len > 0:
-                full_output[:seq_len] = input_ids[index][:seq_len]
+                full_output[:seq_len] = input_ids[index][:seq_len].to(dtype=torch.long)
             if len(gen_ids) > 0:
-                full_output[seq_len : seq_len + len(gen_ids)] = torch.tensor(gen_ids, dtype=input_ids.dtype)
+                full_output[seq_len : seq_len + len(gen_ids)] = torch.tensor(gen_ids, dtype=torch.long)
 
             full_logprobs = torch.zeros(total_length, dtype=torch.float32)
             for j, lp in enumerate(gen_lps):
