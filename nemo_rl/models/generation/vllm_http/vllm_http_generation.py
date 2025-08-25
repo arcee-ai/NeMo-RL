@@ -330,7 +330,6 @@ class VllmHttpGeneration(GenerationInterface):
         assert pad_id is not None, "pad_token_id must be provided in config"
 
         tasks: list[asyncio.Task] = []
-        indices: list[int] = []
         for i in range(batch_size):
             valid_len = int(input_lengths[i].item())
             prompt_token_ids = input_ids[i, :valid_len].tolist() if valid_len > 0 else []
@@ -338,29 +337,25 @@ class VllmHttpGeneration(GenerationInterface):
             if batch_stop_strings and i < len(batch_stop_strings):
                 stop_strings_i = batch_stop_strings[i]
 
-            task = asyncio.create_task(
-                asyncio.to_thread(
+            async def run_one(original_idx: int, ptok: list[int], stops: Optional[list[str]]):
+                gen_ids, gen_lps, parsed_tool_calls = await asyncio.to_thread(
                     self._generate_batch,
-                    prompts_token_ids=[prompt_token_ids],
-                    stop_strings=stop_strings_i,
+                    prompts_token_ids=[ptok],
+                    stop_strings=stops,
                     greedy=greedy,
                 )
-            )
+                return original_idx, gen_ids, gen_lps, parsed_tool_calls
+
+            task = asyncio.create_task(run_one(i, prompt_token_ids, stop_strings_i))
             tasks.append(task)
-            indices.append(i)
 
         # Yield samples as they complete
         for completed in asyncio.as_completed(tasks):
-            # Do it one at a time instad of batched
-            gen_ids, gen_lps, parsed_tool_calls = await completed
+            # Do it one at a time instead of batched
+            original_idx, gen_ids, gen_lps, parsed_tool_calls = await completed
             gen_ids = gen_ids[0]
             gen_lps = gen_lps[0]
             parsed_tool_calls = parsed_tool_calls[0]
-            
-            # Find original index for this task
-            # Map by popping first not-yet-done; maintain parallel order using tasks list
-            idx = tasks.index(cast(asyncio.Task, completed))
-            original_idx = indices[idx]
 
             seq_len = int(input_lengths[original_idx].item())
             padded_input_length = input_ids.size(1)
