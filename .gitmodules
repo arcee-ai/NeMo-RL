@@ -8,3 +8,6 @@
 	url = https://github.com/terrykong/Megatron-LM.git
 	branch = sahilj/megatron-external-loss-norm
 	shallow = true
+[submodule "3rdparty/torchtitan"]
+	path = 3rdparty/torchtitan
+	url = https://github.com/pytorch/torchtitan.git

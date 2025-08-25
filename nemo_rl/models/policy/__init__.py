@@ -15,6 +15,7 @@
 from typing import Any, NotRequired, TypedDict, Union
 
 from nemo_rl.models.generation.interfaces import GenerationConfig
+from nemo_rl.models.policy.torchtitan_config import TorchTitanConfig
 
 
 class DTensorConfig(TypedDict):
@@ -99,7 +100,6 @@ class MegatronConfig(TypedDict):
     scheduler: NotRequired[MegatronSchedulerConfig]
     distributed_data_parallel_config: MegatronDDPConfig
 
-
 class TokenizerConfig(TypedDict):
     name: str
     chat_template: NotRequired[str]
@@ -148,6 +148,7 @@ class PolicyConfig(TypedDict):
     reward_model_cfg: NotRequired[RewardModelConfig]
     dtensor_cfg: DTensorConfig
     megatron_cfg: NotRequired[MegatronConfig]
+    torchtitan_cfg: NotRequired[TorchTitanConfig]
     dynamic_batching: DynamicBatchingConfig
     sequence_packing: NotRequired[SequencePackingConfig]
     make_sequence_length_divisible_by: int
