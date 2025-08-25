@@ -63,7 +63,7 @@ model_tt.eval()
 
 tokenizer = AutoTokenizer.from_pretrained("Llama-3-8B")
 
-prompt = "The first US president was George "
+prompt = "The first US president was George"
 
 input_ids = tokenizer.encode(prompt, return_tensors="pt")
 
@@ -74,4 +74,4 @@ top_token_ids = probs_tt.argmax(dim=-1)
 
 top_token = tokenizer.decode(top_token_ids[0])
 
-print(top_token)
+print(f"Next token: {top_token}")
