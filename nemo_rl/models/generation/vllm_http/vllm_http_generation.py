@@ -120,48 +120,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
         """
-        
-        # For some reason, this file is imported in contexts outside of the vLLM worker.
-        # As such, this import needs to be here rather than at the top level.
-        from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        
-        parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
-        if parser_name is None:
-            return [{}] * len(texts)
-
-        try:
-            ParserCls = ToolParserManager.get_tool_parser(parser_name)
-        except Exception:
-            return [{}] * len(texts)
-
-        try:
-            tokenizer = self.llm.get_tokenizer()
-        except Exception:
-            tokenizer = None
-
-        if tokenizer is None:
-            return [{}] * len(texts)
-
-        try:
-            parser: ToolParser = ParserCls(tokenizer)
-            # Dummy request for parser shim.
-            req = ChatCompletionRequest(
-                messages=[{"role": "user", "content": ""}],
-                tool_choice="auto",
-                tools=[],
-            )
-            results: list[dict[str, Any] | None] = []
-            for text in texts:
-                try:
-                    info = parser.extract_tool_calls(text, req)
-                    results.append(info.model_dump())
-                except Exception:
-                    results.append({})
-            
-            return results
-        except Exception:
-            return [{}] * len(texts)
+        return self.get_deployment_handle().maybe_parse_tool_calls.remote(texts)
 
     def generate(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
