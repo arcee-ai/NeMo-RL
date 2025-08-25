@@ -68,6 +68,8 @@ class VLLMOpenAIServe:
             engine_args, disable_frontend_multiprocessing=self._args.disable_frontend_multiprocessing
         )
         self._engine_client = await self._engine_client_ctx.__aenter__()
+        
+        self._tokenizer = self._engine_client.get_tokenizer()
 
         vllm_app = build_vllm_app(self._args)
         
@@ -125,17 +127,12 @@ class VLLMOpenAIServe:
             print(f"Failed to get tool parser {parser_name}, returning empty tool calls")
             return [{}] * len(texts)
 
-        try:
-            tokenizer = self._engine_client.get_tokenizer()
-        except Exception as e:
-            print(f"Failed to get tokenizer, returning empty tool calls: {e}")
-            tokenizer = None
-
-        if tokenizer is None:
+        if self._tokenizer is None:
+            print("No tokenizer found, returning empty tool calls")
             return [{}] * len(texts)
 
         try:
-            parser: ToolParser = ParserCls(tokenizer)
+            parser: ToolParser = ParserCls(self._tokenizer)
             # Dummy request for parser shim.
             req = ChatCompletionRequest(
                 messages=[{"role": "user", "content": ""}],

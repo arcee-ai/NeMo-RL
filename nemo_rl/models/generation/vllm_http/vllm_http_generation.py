@@ -216,12 +216,8 @@ class VllmHttpGeneration(GenerationInterface):
 
             generation_lengths.append(len(gen_ids))
             unpadded_sequence_lengths.append(seq_len + len(gen_ids))
-        
-        print(generated_texts)
-        
+                
         tool_calls = self._maybe_parse_tool_calls(generated_texts)
-        
-        print(tool_calls)
 
         return BatchedDataDict[GenerationOutputSpec](
             {
