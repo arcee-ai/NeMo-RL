@@ -68,6 +68,7 @@ vllm = [
     "mamba-ssm",
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
     "causal-conv1d",
+    "hf-transfer"
 ]
 # For the vllm_http backend, we use the latest vllm
 vllm_http = [
