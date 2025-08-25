@@ -33,7 +33,7 @@ various_nouns = [
 def load_environment(num_examples=1000, seed=42) -> vf.MultiTurnEnv:
     random.seed(seed)
     dataset = Dataset.from_dict({
-        "question": [f"Please write a poem about the following word: {random.choice(various_nouns)}" for i in range(num_examples)],
+        "question": [f"Please write a short poem about the following word: {random.choice(various_nouns)}" for i in range(num_examples)],
         "answer": [""] * num_examples,
     })
     
