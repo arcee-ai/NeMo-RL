@@ -256,6 +256,10 @@ class VllmHttpGeneration(GenerationInterface):
 
             generation_lengths.append(len(gen_ids))
             unpadded_sequence_lengths.append(seq_len + len(gen_ids))
+        
+        tool_calls = self._maybe_parse_tool_calls(generated_texts)
+        
+        print(tool_calls)
 
         return BatchedDataDict[GenerationOutputSpec](
             {
@@ -263,7 +267,7 @@ class VllmHttpGeneration(GenerationInterface):
                 "logprobs": torch.stack(logprobs_list),
                 "generation_lengths": torch.tensor(generation_lengths, dtype=torch.long),
                 "unpadded_sequence_lengths": torch.tensor(unpadded_sequence_lengths, dtype=torch.long),
-                "tool_calls": self._maybe_parse_tool_calls(generated_texts),
+                "tool_calls": tool_calls,
             }
         )
 
