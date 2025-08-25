@@ -84,6 +84,6 @@ print("Evaluate HF model")
 
 logits_hf = model_hf(input_ids).logits
 
-kldiv = torch.nn.functional.kl_div(logits_hf, logits_tt)
+kldiv = torch.nn.functional.cross_entropy(logits_tt, logits_hf)
 
 print(f"KL divergence: {kldiv}")
