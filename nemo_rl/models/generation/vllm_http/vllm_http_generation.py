@@ -114,59 +114,14 @@ class VllmHttpGeneration(GenerationInterface):
         self.client = openai.OpenAI(api_key="n/a", base_url="http://127.0.0.1:8000/v1")
         # The served model name from VLLMOpenAIServe defaults to "policy"
         self.served_model_name = "policy"
-
+    
     def _maybe_parse_tool_calls(self, texts: list[str]) -> list[dict[str, Any]]:
         """Parse tool calls from generated texts if a parser is configured.
-
+        
         Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
         """
         
-        # For some reason, this file is imported in contexts outside of the vLLM worker.
-        # As such, this import needs to be here rather than at the top level.
-        from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        
-        parser_name = self.cfg["vllm_cfg"].get("tool_parser", None)
-        if parser_name is None:
-            print("No tool parser configured, returning empty tool calls")
-            return [{}] * len(texts)
-
-        try:
-            ParserCls = ToolParserManager.get_tool_parser(parser_name)
-        except Exception:
-            print(f"Failed to get tool parser {parser_name}, returning empty tool calls")
-            return [{}] * len(texts)
-
-        try:
-            tokenizer = self.llm.get_tokenizer()
-        except Exception as e:
-            print(f"Failed to get tokenizer, returning empty tool calls: {e}")
-            tokenizer = None
-
-        if tokenizer is None:
-            return [{}] * len(texts)
-
-        try:
-            parser: ToolParser = ParserCls(tokenizer)
-            # Dummy request for parser shim.
-            req = ChatCompletionRequest(
-                messages=[{"role": "user", "content": ""}],
-                tool_choice="auto",
-                tools=[],
-            )
-            results: list[dict[str, Any] | None] = []
-            for text in texts:
-                try:
-                    info = parser.extract_tool_calls(text, req)
-                    results.append(info.model_dump())
-                except Exception as e:
-                    print(f"Failed to parse tool calls for text {text}, returning empty tool call: {e}")
-                    results.append({})
-            
-            return results
-        except Exception as e:
-            print(f"Failed to parse tool calls, returning empty tool calls: {e}")
-            return [{}] * len(texts)
+        return self.get_deployment_handle().maybe_parse_tool_calls.remote(self.cfg["vllm_cfg"].get("tool_parser", None), texts).result()
 
     def generate(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
