@@ -2,6 +2,7 @@ from collections import defaultdict
 import json
 import os
 import torch
+import torch.nn.functional as F
 from nemo_rl.models.custom.llama3.model import Transformer
 from nemo_rl.models.custom.llama3.args import TransformerModelArgs
 from nemo_rl.models.custom.llama3.state_dict_adapter import Llama3StateDictAdapter
@@ -82,11 +83,31 @@ model_hf.eval()
 
 print("Evaluate HF model")
 
-logits_hf = model_hf(input_ids).logits
+with torch.no_grad():
+    logits_hf = model_hf(input_ids).logits
 
-kldiv = torch.nn.functional.cross_entropy(logits_tt, logits_hf)
+tt = logits_tt.detach().to(torch.float32)
+hf = logits_hf.detach().to(torch.float32)
 
-print(logits_tt.shape)
-print(logits_hf.shape)
+B, T, V = tt.shape
+tt_flat = tt.reshape(-1, V)
+hf_flat = hf.reshape(-1, V)
 
-print(f"cross-entropy: {kldiv}")
+max_abs_diff = (tt_flat - hf_flat).abs().max()
+mse = F.mse_loss(tt_flat, hf_flat)
+
+kl_tt_hf = F.kl_div(
+    F.log_softmax(tt_flat, dim=-1),
+    F.softmax(hf_flat, dim=-1),
+    reduction="batchmean",
+)
+kl_hf_tt = F.kl_div(
+    F.log_softmax(hf_flat, dim=-1),
+    F.softmax(tt_flat, dim=-1),
+    reduction="batchmean",
+)
+
+print(f"max_abs_diff: {max_abs_diff.item():.6e}")
+print(f"mse: {mse.item():.6e}")
+print(f"KL(tt||hf): {kl_tt_hf.item():.6e}")
+print(f"KL(hf||tt): {kl_hf_tt.item():.6e}")
