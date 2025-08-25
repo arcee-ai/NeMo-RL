@@ -17,6 +17,7 @@ from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.models.generation.interfaces import GenerationConfig
 from nemo_rl.models.generation.vllm import VllmConfig
+from nemo_rl.models.generation.vllm_http.config import HttpVllmConfig
 
 TokenizerType = PreTrainedTokenizerBase
 
@@ -36,6 +37,14 @@ def configure_generation_config(
         # set load_format
         config["vllm_cfg"]["load_format"] = "auto" if is_eval else "dummy"
 
+        # set skip_tokenizer_init
+        if is_eval or config["stop_strings"] is not None:
+            config["vllm_cfg"]["skip_tokenizer_init"] = False
+        else:
+            config["vllm_cfg"]["skip_tokenizer_init"] = True
+    elif config["backend"] == "vllm_http":
+        config = cast(HttpVllmConfig, config)
+        
         # set skip_tokenizer_init
         if is_eval or config["stop_strings"] is not None:
             config["vllm_cfg"]["skip_tokenizer_init"] = False

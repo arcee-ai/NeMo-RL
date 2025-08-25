@@ -96,6 +96,15 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         grouped_metrics: dict[int, dict[str, list[float]]] = {}
         
         if isinstance(self.env.rubric, vfe.GroupedRubric):
+            # Validate all groups are the same size.
+            normal_length = None
+            for grpo_gid, messages in group_messages.items():
+                if normal_length is None:
+                    normal_length = len(messages)
+                elif len(messages) != normal_length:
+                    # TODO: Figure out how to support this with async rollout generation.
+                    raise ValueError(f"GRPO group {grpo_gid} has different number of messages and metas. Please ensure you are not using the async engine, as this is currently incompatible with grouped rubrics.")
+            
             # Score groups
             for grpo_gid in group_messages.keys():
                 all_messages = group_messages[grpo_gid]

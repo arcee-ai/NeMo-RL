@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+# Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
+os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
+
 import argparse
 import os
 import pprint
@@ -20,6 +24,7 @@ from typing import Any, Callable, Optional
 
 from omegaconf import OmegaConf
 import ray
+from ray import serve
 from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.environments.vf_environment import VfEnvironment
@@ -38,6 +43,7 @@ from nemo_rl.distributed.ray_actor_environment_registry import (
 from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.models.generation import configure_generation_config
+from nemo_rl.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 

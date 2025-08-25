@@ -104,7 +104,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                 tensor_or_list: list[Any] | torch.Tensor = [
                     item for sublist in list_of_tensors for item in sublist
                 ]
-            elif all(x.ndim == 1 for x in list_of_tensors):
+            elif all(torch.is_tensor(x) and x.ndim == 1 for x in list_of_tensors):
                 tensor_or_list = torch.cat(list_of_tensors)
             elif isinstance(list_of_tensors[0], torch.Tensor):
                 pad_value = pad_value_dict.get(k, 0)

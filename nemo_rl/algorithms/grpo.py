@@ -55,6 +55,8 @@ from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
+from nemo_rl.models.generation.vllm_http.config import HttpVllmConfig
+from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.models.policy.lm_policy import Policy
@@ -326,6 +328,18 @@ def setup(
         print(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
+    elif backend == "vllm_http":
+        generation_config = cast(HttpVllmConfig, generation_config)
+        policy_generation = VllmHttpGeneration(
+            cluster=inference_cluster, config=generation_config
+        )
+        
+        # See above for justification of this call.
+        policy_generation.finish_generation()
+        
+        print(
+            f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
+        )
 
     if last_checkpoint_path:
         weights_path = Path(last_checkpoint_path) / "policy" / "weights"
@@ -346,14 +360,21 @@ def setup(
     # if it is not colocated inference, initialize collective communication for update weights
     if not colocated_inference:
         ip, port = train_cluster.get_master_address_and_port()
-        print(f"Using ip: {ip}, port: {port} for collective communication")
         # inference cluster + head node of the train cluster
         world_size = inference_nodes * inference_gpus_per_node + 1
+        if backend == "vllm_http":
+            world_size = policy_generation.tp_size * policy_generation.dp_size * policy_generation.pp_size + 1 # type: ignore
+        print(f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})")
         # init collective
         futures_train = policy.init_collective(ip, port, world_size)
         futures_inference = policy_generation.init_collective(ip, port, world_size)  # type: ignore
-        # wait for all futures to complete
-        ray.get(futures_train + futures_inference)
+        
+        print(f"Waiting for {len(futures_train)} training workers to init communication...")
+        # wait for all futures to complete (supports Ray ObjectRef and Ray Serve DeploymentResponse)
+        _wait_on_futures(futures_train)
+        print(f"Waiting for {len(futures_inference)} inference workers to init communication...")
+        _wait_on_futures(futures_inference)
+        print("All workers initialized collective communication!")
 
     # prepare refit info
     state_dict_info = policy.prepare_refit_info()
@@ -394,7 +415,7 @@ def _should_use_async_rollouts(master_config: MasterConfig) -> bool:
         return False
 
     backend = generation_config.get("backend", "")
-    if backend != "vllm":
+    if backend not in ["vllm", "vllm_http"]:
         return False
 
     vllm_cfg = generation_config.get("vllm_cfg", {})
@@ -452,8 +473,8 @@ def refit_policy_generation(
             futures_train = policy.broadcast_weights_for_collective()
             futures_inference = policy_generation.update_weights_from_collective()
             # wait for all futures to complete
-            ray.get(futures_train)
-            results = ray.get(futures_inference)
+            _wait_on_futures(futures_train)
+            results = _wait_on_futures(futures_inference)
             update_success = all(result for result in results if result is not None)
 
         # check if update is successful
@@ -985,3 +1006,34 @@ def validate(
     timer.reset()
 
     return val_metrics, timing_metrics
+
+
+def _wait_on_futures(futures: list[Any]) -> list[Any]:
+    """Wait on a list of Ray futures or Ray Serve DeploymentResponses.
+
+    This helper supports both ray.ObjectRef and ray.serve DeploymentResponse objects.
+    Returns the resolved results in order.
+    """
+    results: list[Any] = []
+    for fut in futures:
+        # ray.ObjectRef path
+        try:
+            from ray._raylet import ObjectRef as _ObjectRef  # type: ignore
+            is_obj_ref = isinstance(fut, _ObjectRef)
+        except Exception:
+            is_obj_ref = False
+
+        if is_obj_ref:
+            results.append(ray.get(fut))
+            continue
+
+        # Ray Serve DeploymentResponse path (duck-typed by presence of result())
+        result_method = getattr(fut, "result", None)
+        if callable(result_method):
+            results.append(result_method())
+            continue
+
+        # Fallback: attempt ray.get, will raise helpful error if unsupported
+        results.append(ray.get(fut))
+
+    return results

@@ -1,0 +1,17 @@
+[project]
+name = "vf-policy-judge"
+version = "0.1.0"
+tags = ["text", "transformation", "single-turn", "xml", "policy", "judge"]
+license = "Apache-2.0"
+description = "Test using policy for judge rubric"
+dependencies = [
+    "verifiers>=0.1.2",
+    "vf-exts",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["vf_policy_judge.py"]

@@ -759,6 +759,7 @@ async def run_sample_multi_turn_rollout(
                 "message_log": [current_message_log],
                 "extra_env_info": [current_extra_env_info],
                 "task_name": [task_name],
+                "idx": [sample_idx],
             }
         )
 

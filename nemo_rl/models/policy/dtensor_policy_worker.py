@@ -632,7 +632,7 @@ class DTensorPolicyWorker:
                 ):
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         if self.enable_seq_packing:
-                            input_ids = mb.get("input_ids").cuda()
+                            input_ids = mb.get("input_ids").cuda().long()
                             input_ids, position_ids, _ = pack_sequences(
                                 input_ids=input_ids,
                                 input_lengths=mb["input_lengths"],
@@ -652,7 +652,7 @@ class DTensorPolicyWorker:
                             )
 
                         else:
-                            input_ids = mb.get("input_ids").cuda()
+                            input_ids = mb.get("input_ids").cuda().long()
                             batch_size, seq_len = input_ids.shape
 
                             attention_mask = torch.ones(
@@ -925,7 +925,7 @@ class DTensorPolicyWorker:
                 itertools.chain(mb_iterator, dummy_iterator)
             ):
                 step += 1
-                input_ids = lp_batch.get("input_ids").cuda()
+                input_ids = lp_batch.get("input_ids").cuda().long()
                 input_lengths = lp_batch.get("input_lengths")
 
                 batch_size, seq_len = input_ids.shape

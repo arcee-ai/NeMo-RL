@@ -24,10 +24,10 @@ dependencies = [
     "torch==2.7.1",
     "triton",
     "colored==2.2.3",
-    "ray[default]==2.46.0",
+    "ray[default]==2.48.0",
     # transformers==4.54.0/4.54.1 both fail on rm models
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/811 resolved
-    "transformers>=4.51.0,<4.54.0",
+    "transformers>=4.51.0",
     "wandb",
     "numpy",
     "datasets>=4.0.0",
@@ -67,7 +67,12 @@ vllm = [
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
     "mamba-ssm",
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
-    "causal-conv1d",
+    "causal-conv1d"
+]
+# For the vllm_http backend, we use the latest vllm
+vllm_http = [
+    "vllm==0.10.1.1",
+    "hf-transfer"
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
@@ -167,6 +172,17 @@ default-groups = ["dev", "build"]
 #  --link-mode=copy (slower but more reliable; supresses warning)
 #  --link-mode=symlink (fastest option when uv cache and venv on different file-system; caveat: venv is brittle since it depends on the environment/container)
 link-mode = "copy"
+# Prevent using both vLLM and vLLM-http backends in the same venv
+conflicts = [
+  [
+    { extra = "vllm" },
+    { extra = "vllm_http" },
+  ],
+  [
+    { extra = "vllm_http" },
+    { extra = "mcore" },
+  ]
+]
 
 # Needed when building from source
 [[tool.uv.dependency-metadata]]
