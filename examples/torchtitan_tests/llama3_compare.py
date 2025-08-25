@@ -61,7 +61,7 @@ model_tt.load_state_dict(tt_state_dict)
 print("Evaluate model")
 model_tt.eval()
 
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3-8B")
+tokenizer = AutoTokenizer.from_pretrained("Llama-3-8B")
 
 prompt = "Hello, how are you?"
 
