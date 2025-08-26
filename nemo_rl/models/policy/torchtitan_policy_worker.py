@@ -2,14 +2,19 @@ import os
 from typing import Any, Iterable, Optional
 import ray
 import torch
-from transformers import AutoTokenizer
+from torch.distributed.checkpoint.state_dict import StateDictOptions, set_model_state_dict
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.models.custom.llama3.args import TransformerModelArgs
+from nemo_rl.models.custom.llama3.state_dict_adapter import Llama3StateDictAdapter
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import LogprobOutputSpec, ReferenceLogprobOutputSpec
 from nemo_rl.models.policy.utils import get_runtime_env_for_policy_worker
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
+
+from nemo_rl.models.custom.llama3.model import Transformer as Llama3Model
 
 from accelerate import init_empty_weights
 
@@ -67,15 +72,70 @@ class TorchTitanPolicyWorker:
         # TODO: Sequence packing
         
         # TODO: Make this actually dynamic
-        model_class = torchtitan.models.llama3.model.model.Transformer
+        args_8b = TransformerModelArgs(
+            dim=4096,
+            n_layers=32,
+            n_heads=32,
+            n_kv_heads=8,
+            ffn_dim_multiplier=1.3,
+            multiple_of=1024,
+            rope_theta=500000,
+        )
         
-        with init_empty_weights():
-            self.model = model_class.from_config(
-                model_config,
-                trust_remote_code=True,
+        adapter = Llama3StateDictAdapter(model_args=args_8b, hf_assets_path="Llama-3-8B")
+        
+        if self.rank == 0:
+            print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
+            model = AutoModelForCausalLM.from_pretrained(
+                "Llama-3-8B",
+                device_map="cpu",  # load weights onto CPU initially
+                trust_remote_code=True
             )
+            hf_state_dict = model.state_dict()
+            full_state_dict = adapter.from_hf(hf_state_dict)
+            del model
+        
+        print(f"[Rank {self.rank}] Initializing empty model for FSDP...")
+        with init_empty_weights():
+            self.model = Llama3Model(model_args=args_8b)
+            
+        if self.model.config.pad_token_id is None:
+            self.model.config.pad_token_id = tokenizer.pad_token_id # type: ignore
+        
+        # caching since this property is not always preserved after FSDP
+        self.tokenizer = tokenizer
+        
+        # Move to GPU + shard with FSDP2
+        
+        # TODO: Context parallelism if there is demand for it.        
+        tp_size = self.cfg["dtensor_cfg"]["tensor_parallel_size"]
+        pp_size = self.cfg["dtensor_cfg"]["pipeline_parallel_size"]
+        ep_size = self.cfg["dtensor_cfg"]["expert_parallel_size"]
+        dp_size = world_size // tp_size // pp_size // ep_size
+        
+        # TODO: Is this ordering desirable?
+        device_mesh = torch.distributed.device_mesh.init_device_mesh(
+            "cuda", (dp_size, pp_size, ep_size, tp_size), mesh_dim_names=("dp", "pp", "ep", "tp")
+        )
+        
+        self.model = self._parallelize_model(self.model, device_mesh)
+        
+        print(f"[Rank {self.rank}] Loading state dict from rank 0...")
+        # This will broadcast the state dict from rank 0 to all other ranks
+        # and load it into the FSDP model.
+        set_model_state_dict(
+            self.model,
+            model_state_dict=full_state_dict,
+            options=StateDictOptions(
+                full_state_dict=True,
+                broadcast_from_rank0=True,
+            ),
+        )
         
         raise NotImplementedError("TorchTitanPolicyWorker is not implemented yet")
+    
+    def _parallelize_model(self, model: Llama3Model) -> None:
+        pass
     
     @wrap_with_nvtx_name("torchtitan_policy_worker/train")
     def train(
