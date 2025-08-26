@@ -6,12 +6,15 @@ from torch.distributed.tensor.parallel import (                 # TP utilities
     SequenceParallel,
     ColwiseParallel,
     RowwiseParallel,
-    PrepareModuleInput
+    PrepareModuleInput,
+    parallelize_module
 )
 from torch.distributed.tensor import (                          # optional: custom layouts if you need them
     Shard,
     Replicate,
 )
+
+from nemo_rl.models.custom.llama3.model import Transformer
 
 TP_PLAN = {
     "layers.*.attention_norm": SequenceParallel(),
@@ -34,7 +37,7 @@ TP_PLAN = {
 }
 
 def parallelize_llama(
-        model: nn.Module,
+        model: Transformer,
         mesh: DeviceMesh,
         dp_mesh: DeviceMesh,
         tp_mesh: DeviceMesh,
@@ -52,12 +55,13 @@ def parallelize_llama(
     
     if sequence_parallel:
         raise NotImplementedError("Sequence parallelism is not yet supported for Llama3")
-                
+    
+    parallelize_module(model, tp_mesh, TP_PLAN)
+    
     return fully_shard(
         model,
         mesh=mesh,
-        tp_plan=TP_PLAN,
-        mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=param_dtype),
+        mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
         offload_policy=CPUOffloadPolicy() if cpu_offload else None,
         reshard_after_forward=False
     )
