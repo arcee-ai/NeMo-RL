@@ -19,8 +19,8 @@ from nemo_rl.models.custom.llama3.model import Transformer
 TP_PLAN = {
     "layers.*.attention_norm": SequenceParallel(),
     "layers.*.attention": PrepareModuleInput(
-        input_layouts=Shard(1),
-        desired_input_layouts=Replicate(),
+        input_layouts=(Shard(1), None),
+        desired_input_layouts=(Replicate(), None),
     ),
     "layers.*.attention.wq": ColwiseParallel(),
     "layers.*.attention.wk": ColwiseParallel(),
