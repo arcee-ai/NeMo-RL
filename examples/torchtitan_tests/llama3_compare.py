@@ -1,3 +1,5 @@
+# Simple test script to compare the output of a TT-like model with a HF model and validate equivalence.
+
 from collections import defaultdict
 import json
 import os
