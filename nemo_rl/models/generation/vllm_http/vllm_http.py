@@ -5,6 +5,8 @@ from ray import serve
 from fastapi import FastAPI, Request
 import torch
 
+from nemo_rl.models.custom.model import BaseModelArgs
+
 # Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
 _serve_app = FastAPI()
 
@@ -103,8 +105,12 @@ class VLLMOpenAIServe:
         await self._engine_client.collective_rpc("prepare_refit_info", args=(state_dict_info,))
         return True
 
-    async def admin_update_from_collective(self) -> bool:
-        results = await self._engine_client.collective_rpc("update_weights_from_collective", args=tuple())
+    async def admin_update_from_collective(self,
+        adapter_cls: str | None = None,
+        model_args: BaseModelArgs | None = None,
+        hf_assets_path: str | None = None,
+    ) -> bool:
+        results = await self._engine_client.collective_rpc("update_weights_from_collective", args=(adapter_cls, model_args, hf_assets_path))
         return bool(results and results[0])
 
     async def admin_report_device_id(self) -> list[str]:

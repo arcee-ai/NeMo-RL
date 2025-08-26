@@ -11,6 +11,8 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any
 
+from examples.torchtitan_tests.llama3_compare import hf_state_dict
+
 logger = logging.getLogger()
 
 from .model import BaseModelArgs
@@ -21,6 +23,7 @@ class BaseStateDictAdapter(ABC):
 
     This class defines the interface for converting between native model
     state dict format and other model state dict formats.
+    Note: This class' abstract methods are different from the TorchTitan version!
     Args:
         model_args: for initializing the model's memory space
         hf_assets_path: path to HF assets folder containing tokenizer, model weights, etc.
@@ -29,8 +32,26 @@ class BaseStateDictAdapter(ABC):
     @abstractmethod
     def __init__(self, model_args: BaseModelArgs, hf_assets_path: str | None):
         pass
-
+    
     @abstractmethod
+    def key_to_hf(self, key: str) -> str:
+        """Convert a native model state dict key to a HuggingFace format key.
+        
+        Args:
+            key: The native model state dict key
+            
+        """
+        pass
+    
+    @abstractmethod
+    def key_from_hf(self, key: str) -> str:
+        """Convert a HuggingFace format key to a native model state dict key.
+        
+        Args:
+            key: The HuggingFace format key
+        """
+        pass
+
     def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
         """Convert from native model state dict to HuggingFace format.
 
@@ -40,7 +61,11 @@ class BaseStateDictAdapter(ABC):
         Returns:
             The converted HuggingFace format state dict
         """
-        pass
+        hf_state_dict = {}
+        for key, value in state_dict.items():
+            hf_key = self.key_to_hf(key)
+            hf_state_dict[hf_key] = value
+        return hf_state_dict
 
     @abstractmethod
     def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
@@ -52,7 +77,11 @@ class BaseStateDictAdapter(ABC):
         Returns:
             The converted native model state dict
         """
-        pass
+        state_dict = {}
+        for key, value in hf_state_dict.items():
+            native_key = self.key_from_hf(key)
+            state_dict[native_key] = value
+        return state_dict
 
 
 class StateDictAdapter(BaseStateDictAdapter):

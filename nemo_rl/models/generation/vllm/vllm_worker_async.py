@@ -22,6 +22,7 @@ import torch
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
+from nemo_rl.models.custom.model import BaseModelArgs
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
     GenerationOutputSpec,
@@ -462,7 +463,11 @@ class VllmAsyncGenerationWorker(BaseVllmGenerationWorker):
             traceback.print_exc()
             return False
 
-    async def update_weights_from_collective_async(self) -> bool:
+    async def update_weights_from_collective_async(self,
+        adapter_cls: str | None = None,
+        model_args: BaseModelArgs | None = None,
+        hf_assets_path: str | None = None,
+    ) -> bool:
         """Async version of update_weights_from_collective."""
         try:
             assert self.llm is not None, (
@@ -475,7 +480,7 @@ class VllmAsyncGenerationWorker(BaseVllmGenerationWorker):
                 )
 
             result_or_coro = await self.llm.collective_rpc(
-                "update_weights_from_collective", args=tuple()
+                "update_weights_from_collective", args=(adapter_cls, model_args, hf_assets_path)
             )
 
             if asyncio.iscoroutine(result_or_coro):

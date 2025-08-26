@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from collections import defaultdict
+import importlib
 from typing import Any, Optional
 
 import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
+from nemo_rl.models.custom.model import BaseModelArgs
+from nemo_rl.models.custom.state_dict_adapter import BaseStateDictAdapter
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
 try:
@@ -166,15 +169,40 @@ class VllmInternalWorkerExtension:
     @wrap_with_nvtx_name(
         "vllm_internal_worker_extension/update_weights_from_collective"
     )
-    def update_weights_from_collective(self) -> bool:
+    def update_weights_from_collective(
+        self,
+        adapter_cls: str | None = None,
+        model_args: BaseModelArgs | None = None,
+        hf_assets_path: str | None = None,
+    ) -> bool:
         """Update the model weights from collective communication."""
         assert self.state_dict_info is not None, (
             "state_dict_info is not prepared. "
             "Please call prepare_refit_info when initializing the worker."
         )
+        
+        if adapter_cls is not None:
+            assert model_args is not None and hf_assets_path is not None, (
+                "model_args and hf_assets_path must be provided if adapter_cls is provided"
+            )
+            cls_path_split = adapter_cls.split(".")
+            try:
+                adapter_mod = importlib.import_module(".".join(cls_path_split[:-1]))
+                adapter_cls_imported = getattr(adapter_mod, cls_path_split[-1])
+                adapter = adapter_cls_imported(model_args=model_args, hf_assets_path=hf_assets_path)
+                
+                assert isinstance(adapter, BaseStateDictAdapter), (
+                    f"State dict adapter class {adapter_cls} must inherit from BaseStateDictAdapter"
+                )
+            except Exception as e:
+                raise ValueError(f"Could not import state dict adapter class {adapter_cls}: {e}") from e
+        else:
+            adapter = None
 
         try:
             for name, (shape, dtype) in self.state_dict_info.items():
+                if adapter is not None:
+                    name = adapter.key_to_hf(name)
                 weight = torch.empty(shape, dtype=dtype, device="cuda")
                 self.model_update_group.broadcast(weight, src=0)
                 self.model_runner.model.load_weights(weights=[(name, weight)])

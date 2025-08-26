@@ -10,6 +10,7 @@ from requests.exceptions import RequestException
 import torch
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.ray_actor_environment_registry import get_actor_python_env
+from nemo_rl.models.custom.model import BaseModelArgs
 from nemo_rl.utils.venvs import create_local_venv_on_each_node
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
@@ -303,5 +304,13 @@ class VllmHttpGeneration(GenerationInterface):
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
-    def update_weights_from_collective(self):
-        return [self.get_deployment_handle().admin_update_from_collective.remote()]
+    def update_weights_from_collective(self,
+        adapter_cls: str | None = None,
+        model_args: BaseModelArgs | None = None,
+        hf_assets_path: str | None = None,
+    ):
+        return [self.get_deployment_handle().admin_update_from_collective.remote(
+            adapter_cls=adapter_cls,
+            model_args=model_args,
+            hf_assets_path=hf_assets_path,
+        )]
