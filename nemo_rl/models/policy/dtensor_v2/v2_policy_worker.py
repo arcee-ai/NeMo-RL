@@ -686,20 +686,14 @@ class DTensorV2PolicyWorker:
 
                     with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                         with torch.autocast(device_type="cuda", dtype=self.dtype):
+                            # TODO: support these other args
                             model_args = dict(
-                                input_ids=input_ids,
-                                attention_mask=attention_mask,
-                                position_ids=position_ids,
-                                use_cache=False,
-                                flash_attn_kwargs=flash_attn_kwargs,
+                                tokens=input_ids,
+                                # attention_mask=attention_mask,
+                                # position_ids=position_ids,
+                                # use_cache=False,
+                                # flash_attn_kwargs=flash_attn_kwargs,
                             )
-
-                            if self._is_reward_model:
-                                # `flash_attn_kwarg` is not supported for `LlamaForSequenceClassification`.
-                                # Note that it should be empty anyway since sequence packing
-                                # is not supported for reward models.
-                                assert not flash_attn_kwargs
-                                del model_args["flash_attn_kwargs"]
 
                             outputs = self.model(**model_args)
 
