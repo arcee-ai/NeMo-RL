@@ -1208,7 +1208,9 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
-        state_dict = self.model.state_dict()
+        tt_state_dict = self.model.state_dict()
+        # Convert to HF for refit
+        state_dict = self.adapter.to_hf(tt_state_dict)
 
         if self.is_generation_colocated:
             # Collect info for streaming multiple tensors
@@ -1312,7 +1314,8 @@ class DTensorV2PolicyWorker:
             self.model = self.move_to_cuda(self.model)
 
         # Broadcast the weights for collective communication
-        for _, tensor in self.model.state_dict().items():
+        hf_state_dict = self.adapter.to_hf(self.model.state_dict())
+        for _, tensor in hf_state_dict.items():
             if isinstance(tensor, DTensor):
                 tensor = tensor.full_tensor()
             if self.rank == 0:
