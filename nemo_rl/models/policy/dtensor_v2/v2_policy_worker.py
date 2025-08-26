@@ -695,14 +695,7 @@ class DTensorV2PolicyWorker:
                                 # flash_attn_kwargs=flash_attn_kwargs,
                             )
 
-                            outputs = self.model(**model_args)
-
-                        # Get logprobs
-                        if not hasattr(outputs, "logits"):
-                            logits = self.model.lm_head(outputs.last_hidden_state)
-                        else:
-                            logits = outputs.logits
-                        del outputs
+                            logits = self.model(**model_args)
 
                         # Apply temperature scaling
                         logits = self._apply_temperature_scaling(logits)
