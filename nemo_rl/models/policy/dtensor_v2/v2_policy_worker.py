@@ -82,6 +82,7 @@ from nemo_rl.utils.native_checkpoint import (
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
 from nemo_rl.models.custom.llama3.model import Transformer as Llama3Model
+from nemo_rl.models.custom.llama3.parallelize import parallelize_llama
 
 
 @contextmanager
@@ -179,7 +180,7 @@ class DTensorV2PolicyWorker:
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
 
-        self.cpu_offload = self.cfg["dtensor_cfg"]["cpu_offload"]
+        self.cpu_offload = self.cfg["dtensor_v2_cfg"]["cpu_offload"]
         self.max_grad_norm = self.cfg["max_grad_norm"]
 
         if self.cfg["precision"] == "float32":
@@ -234,6 +235,7 @@ class DTensorV2PolicyWorker:
         adapter = Llama3StateDictAdapter(model_args=args_8b, hf_assets_path="Llama-3-8B")
         
         model_class = Llama3Model
+        model_parallelize_function = parallelize_llama
 
         full_state_dict = None
         if self.rank == 0:
@@ -312,17 +314,20 @@ class DTensorV2PolicyWorker:
         self.cp_size = cp_size
         self.device_mesh = device_mesh
 
-        self.model = _parallelize_model(
+        self.model = model_parallelize_function(
             self.model,
-            self.dp_cp_mesh,
+            self.device_mesh,
+            self.dp_mesh,
             self.tp_mesh,
+            self.ep_mesh,
+            self.pp_mesh,
+            self.cp_mesh,
             param_dtype=self.dtype,
             sequence_parallel=sequence_parallel_enabled,
             cpu_offload=self.cpu_offload,
-            activation_checkpointing=self.cfg["dtensor_cfg"][
+            activation_checkpointing=self.cfg["dtensor_v2_cfg"][
                 "activation_checkpointing"
-            ],
-            custom_parallel_plan=self.cfg["dtensor_cfg"]["custom_parallel_plan"],
+            ]
         )
 
         print(f"[Rank {self.rank}] Loading state dict from rank 0...")
