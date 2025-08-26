@@ -232,7 +232,7 @@ class DTensorV2PolicyWorker:
             rope_theta=500000,
         )
 
-        adapter = Llama3StateDictAdapter(model_args=args_8b, hf_assets_path="Llama-3-8B")
+        self.adapter = Llama3StateDictAdapter(model_args=args_8b, hf_assets_path="Llama-3-8B")
         
         model_class = Llama3Model
         model_parallelize_function = parallelize_llama
@@ -247,7 +247,7 @@ class DTensorV2PolicyWorker:
                 config=model_config,
             )
             hf_state_dict = model.state_dict()
-            full_state_dict = adapter.from_hf(hf_state_dict)
+            full_state_dict = self.adapter.from_hf(hf_state_dict)
             assert full_state_dict is not None, "Failed to convert HF state dict to TT state dict"
             del model
 
