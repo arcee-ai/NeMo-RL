@@ -84,13 +84,13 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             cp_size = config["megatron_cfg"]["context_parallel_size"]
 
             env_vars = config["megatron_cfg"].get("env_vars", {})
-        elif config["torchtitan_cfg"]["enabled"]:
+        elif config["dtensor_v2_cfg"]["enabled"]:
             worker_builder_cls = (
-                "nemo_rl.models.policy.torchtitan_policy_worker.TorchTitanPolicyWorker"
+                "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker"
             )
-            tp_size = config["torchtitan_cfg"]["tensor_parallel_size"]
-            cp_size = config["torchtitan_cfg"]["context_parallel_size"]
-            env_vars = config["torchtitan_cfg"].get("env_vars", {})
+            tp_size = config["dtensor_v2_cfg"]["tensor_parallel_size"]
+            cp_size = config["dtensor_v2_cfg"]["context_parallel_size"]
+            env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
         else:
             assert config["dtensor_cfg"]["enabled"], (
                 "Please either set policy.megatron_cfg.enabled=true to use Megatron training backend, ",

@@ -15,7 +15,7 @@
 from typing import Any, NotRequired, TypedDict, Union
 
 from nemo_rl.models.generation.interfaces import GenerationConfig
-from nemo_rl.models.policy.torchtitan_config import TorchTitanConfig
+from nemo_rl.models.policy.dtensor_v2.v2_config import DTensorV2Config
 
 
 class DTensorConfig(TypedDict):
@@ -148,7 +148,7 @@ class PolicyConfig(TypedDict):
     reward_model_cfg: NotRequired[RewardModelConfig]
     dtensor_cfg: DTensorConfig
     megatron_cfg: NotRequired[MegatronConfig]
-    torchtitan_cfg: NotRequired[TorchTitanConfig]
+    dtensor_v2_cfg: NotRequired[DTensorV2Config]
     dynamic_batching: DynamicBatchingConfig
     sequence_packing: NotRequired[SequencePackingConfig]
     make_sequence_length_divisible_by: int
