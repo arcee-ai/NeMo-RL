@@ -1078,7 +1078,7 @@ class DTensorV2PolicyWorker:
                             ).squeeze(-1)
                             del log_probs
 
-                del outputs, logits
+                del logits
 
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
