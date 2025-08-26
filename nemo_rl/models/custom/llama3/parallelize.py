@@ -62,7 +62,7 @@ def parallelize_llama(
     
     return fully_shard(
         model,
-        mesh=mesh[("dp", "pp")]._flatten(mesh_dim_name="dp_cp"),
+        mesh=mesh[("dp", "pp")]._flatten(mesh_dim_name="dp_pp"),
         mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
         offload_policy=CPUOffloadPolicy() if cpu_offload else None,
         reshard_after_forward=False
