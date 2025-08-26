@@ -86,7 +86,7 @@ class Llama3StateDictAdapter(StateDictAdapter):
                 value = self._permute(value, n_kv_heads, key_value_dim, dim)
 
             if new_key is None:
-                continue
+                return key
             new_key = new_key.format(layer_num)
         else:
             new_key = to_hf_map[key]
@@ -117,7 +117,7 @@ class Llama3StateDictAdapter(StateDictAdapter):
                 value = self._reverse_permute(value, n_kv_heads, key_value_dim, dim)
 
             if new_key is None:
-                continue
+                return key
             new_key = new_key.format(layer_num)
         else:
             new_key = self.from_hf_map[key]
