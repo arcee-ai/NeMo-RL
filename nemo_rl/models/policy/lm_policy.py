@@ -140,16 +140,6 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                     "tensor_parallel",
                 ],
             )
-        
-        # Set up state dict adapter
-        if config["dtensor_v2_cfg"]["enabled"]:
-            self.adapter_cls = config["dtensor_v2_cfg"]["model_config"]["adapter_cls"]
-            self.model_args = config["dtensor_v2_cfg"]["model_config"]["model_args"]
-            self.hf_assets_path = config["dtensor_v2_cfg"]["model_config"]["hf_assets_path"]
-        else:
-            self.adapter_cls = None
-            self.model_args = None
-            self.hf_assets_path = None
 
         pre_init_queue = RayQueue()
         worker_builder = RayWorkerBuilder(

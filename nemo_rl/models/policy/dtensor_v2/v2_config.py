@@ -2,14 +2,8 @@ from typing import NotRequired, TypedDict
 
 from nemo_rl.models.custom.model import BaseModelArgs
 
-class ModelConfig(TypedDict):
-    adapter_cls: str
-    model_args: BaseModelArgs
-    hf_assets_path: str
-
 class DTensorV2Config(TypedDict):
     enabled: bool
-    model_config: ModelConfig
     cpu_offload: NotRequired[bool]
     sequence_parallel: NotRequired[bool]
     activation_checkpointing: NotRequired[bool]
