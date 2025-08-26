@@ -11,8 +11,6 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any
 
-from examples.torchtitan_tests.llama3_compare import hf_state_dict
-
 logger = logging.getLogger()
 
 from .model import BaseModelArgs
