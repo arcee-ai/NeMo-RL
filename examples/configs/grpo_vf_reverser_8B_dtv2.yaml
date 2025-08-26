@@ -112,8 +112,8 @@ policy:
   generation:
     backend: "vllm_http"
     max_new_tokens: 256
-    temperature: 1.0
-    top_p: 1.0
+    temperature: 0.6
+    top_p: 0.9
     top_k: null
     stop_token_ids: null
     stop_strings: null
