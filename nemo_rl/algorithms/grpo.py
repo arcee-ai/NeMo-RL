@@ -471,11 +471,7 @@ def refit_policy_generation(
         else:
             # update weights through nccl
             futures_train = policy.broadcast_weights_for_collective()
-            futures_inference = policy_generation.update_weights_from_collective(
-                adapter_cls=policy.adapter_cls,
-                model_args=policy.model_args,
-                hf_assets_path=policy.hf_assets_path,
-            )
+            futures_inference = policy_generation.update_weights_from_collective()
             # wait for all futures to complete
             _wait_on_futures(futures_train)
             results = _wait_on_futures(futures_inference)
