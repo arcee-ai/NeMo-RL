@@ -90,6 +90,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             )
             tp_size = config["dtensor_v2_cfg"]["tensor_parallel_size"]
             cp_size = config["dtensor_v2_cfg"]["context_parallel_size"]
+            pp_size = config["dtensor_v2_cfg"]["pipeline_parallel_size"]
+            ep_size = config["dtensor_v2_cfg"]["expert_parallel_size"]
             env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
         else:
             assert config["dtensor_cfg"]["enabled"], (
@@ -105,20 +107,49 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
             env_vars = config["dtensor_cfg"].get("env_vars", {})
 
-        self.sharding_annotations = NamedSharding(
-            layout=np.arange(cluster.world_size()).reshape(
-                pp_size,  # PP
-                -1,  # DP
-                cp_size,  # CP
-                tp_size,  # TP
-            ),
-            names=[
-                "pipeline_parallel",
-                "data_parallel",
-                "context_parallel",
-                "tensor_parallel",
-            ],
-        )
+        if config["dtensor_v2_cfg"]["enabled"]:
+            # Different ordering for DTensorV2
+            self.sharding_annotations = NamedSharding(
+                layout=np.arange(cluster.world_size()).reshape(
+                    -1,  # DP
+                    pp_size,  # PP
+                    ep_size,  # EP
+                    tp_size,  # TP
+                    cp_size,  # CP
+                ),
+                names=[
+                    "data_parallel",
+                    "pipeline_parallel",
+                    "expert_parallel",
+                    "tensor_parallel",
+                    "context_parallel",
+                ],
+            )
+        else:
+            self.sharding_annotations = NamedSharding(
+                layout=np.arange(cluster.world_size()).reshape(
+                    pp_size,  # PP
+                    -1,  # DP
+                    cp_size,  # CP
+                    tp_size,  # TP
+                ),
+                names=[
+                    "pipeline_parallel",
+                    "data_parallel",
+                    "context_parallel",
+                    "tensor_parallel",
+                ],
+            )
+        
+        # Set up state dict adapter
+        if config["dtensor_v2_cfg"]["enabled"]:
+            self.adapter_cls = config["dtensor_v2_cfg"]["model_config"]["adapter_cls"]
+            self.model_args = config["dtensor_v2_cfg"]["model_config"]["model_args"]
+            self.hf_assets_path = config["dtensor_v2_cfg"]["model_config"]["hf_assets_path"]
+        else:
+            self.adapter_cls = None
+            self.model_args = None
+            self.hf_assets_path = None
 
         pre_init_queue = RayQueue()
         worker_builder = RayWorkerBuilder(

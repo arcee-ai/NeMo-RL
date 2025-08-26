@@ -18,6 +18,7 @@ import ray
 import torch
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.models.custom.model import BaseModelArgs
 
 
 def verify_right_padding(
@@ -237,6 +238,10 @@ class GenerationInterface(ABC):
         """Update the model weights from the given IPC handles."""
         raise NotImplementedError
 
-    def update_weights_from_collective(self) -> list[ray.ObjectRef]:
+    def update_weights_from_collective(self,
+        adapter_cls: str | None = None,
+        model_args: BaseModelArgs | None = None,
+        hf_assets_path: str | None = None,
+    ) -> list[ray.ObjectRef]:
         """Update the model weights from collective communication."""
         raise NotImplementedError
