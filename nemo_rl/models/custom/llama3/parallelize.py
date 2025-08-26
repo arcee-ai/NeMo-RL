@@ -56,7 +56,6 @@ def parallelize_llama(
     return fully_shard(
         model,
         mesh=mesh,
-        pp_schedule="uniform",
         tp_plan=TP_PLAN,
         mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=param_dtype),
         offload_policy=CPUOffloadPolicy() if cpu_offload else None,
