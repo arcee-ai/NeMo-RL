@@ -755,12 +755,7 @@ class VllmGenerationWorker(BaseVllmGenerationWorker):
             return False
 
     @wrap_with_nvtx_name("vllm_genertion_worker/update_weights_from_collective")
-    def update_weights_from_collective(
-        self,
-        adapter_cls: str | None = None,
-        model_args: BaseModelArgs | None = None,
-        hf_assets_path: str | None = None,
-    ) -> bool:
+    def update_weights_from_collective(self) -> bool:
         """Update the model weights from collective communication."""
         try:
             assert self.llm is not None, (
@@ -773,7 +768,7 @@ class VllmGenerationWorker(BaseVllmGenerationWorker):
                 )
 
             result_or_coro = self.llm.collective_rpc(
-                "update_weights_from_collective", args=(adapter_cls, model_args, hf_assets_path)
+                "update_weights_from_collective", args=tuple()
             )
             worker_result = result_or_coro[0]
 

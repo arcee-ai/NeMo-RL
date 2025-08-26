@@ -304,13 +304,5 @@ class VllmHttpGeneration(GenerationInterface):
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
-    def update_weights_from_collective(self,
-        adapter_cls: str | None = None,
-        model_args: BaseModelArgs | None = None,
-        hf_assets_path: str | None = None,
-    ):
-        return [self.get_deployment_handle().admin_update_from_collective.remote(
-            adapter_cls=adapter_cls,
-            model_args=model_args,
-            hf_assets_path=hf_assets_path,
-        )]
+    def update_weights_from_collective(self):
+        return [self.get_deployment_handle().admin_update_from_collective.remote()]

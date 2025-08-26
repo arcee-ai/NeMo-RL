@@ -713,9 +713,6 @@ class VllmGeneration(GenerationInterface):
 
     def update_weights_from_collective(
         self,
-        adapter_cls: str | None = None,
-        model_args: BaseModelArgs | None = None,
-        hf_assets_path: str | None = None,
     ) -> list[ray.ObjectRef]:
         """Update weights of the policy using collective communication."""
         if not self.worker_group or not self.worker_group.workers:
@@ -731,9 +728,6 @@ class VllmGeneration(GenerationInterface):
         # Use run_all_workers_single_data for methods that don't need data
         futures = self.worker_group.run_all_workers_single_data(
             method_name,
-            adapter_cls=adapter_cls,
-            model_args=model_args,
-            hf_assets_path=hf_assets_path,
             run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
         )
 

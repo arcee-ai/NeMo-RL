@@ -463,11 +463,7 @@ class VllmAsyncGenerationWorker(BaseVllmGenerationWorker):
             traceback.print_exc()
             return False
 
-    async def update_weights_from_collective_async(self,
-        adapter_cls: str | None = None,
-        model_args: BaseModelArgs | None = None,
-        hf_assets_path: str | None = None,
-    ) -> bool:
+    async def update_weights_from_collective_async(self) -> bool:
         """Async version of update_weights_from_collective."""
         try:
             assert self.llm is not None, (
@@ -480,7 +476,7 @@ class VllmAsyncGenerationWorker(BaseVllmGenerationWorker):
                 )
 
             result_or_coro = await self.llm.collective_rpc(
-                "update_weights_from_collective", args=(adapter_cls, model_args, hf_assets_path)
+                "update_weights_from_collective", args=tuple()
             )
 
             if asyncio.iscoroutine(result_or_coro):
