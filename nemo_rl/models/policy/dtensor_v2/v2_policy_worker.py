@@ -980,12 +980,13 @@ class DTensorV2PolicyWorker:
 
                 with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
+                        # TODO: support these other args
                         outputs = self.model(
-                            input_ids=input_ids,
-                            attention_mask=attention_mask_input_all_ones,
-                            position_ids=position_ids,
-                            use_cache=False,
-                            flash_attn_kwargs=flash_attn_kwargs,
+                            tokens=input_ids,
+                            # attention_mask=attention_mask_input_all_ones,
+                            # position_ids=position_ids,
+                            # use_cache=False,
+                            # flash_attn_kwargs=flash_attn_kwargs,
                         )
 
                     logits = outputs.logits
