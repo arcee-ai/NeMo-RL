@@ -684,7 +684,7 @@ class DTensorV2PolicyWorker:
                             cp_no_restore_buffers=set(cp_buffers),
                         )
 
-                    with DTensorPolicyWorker.train_context(context_parallel_ctx):
+                    with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                         with torch.autocast(device_type="cuda", dtype=self.dtype):
                             model_args = dict(
                                 input_ids=input_ids,
@@ -984,7 +984,7 @@ class DTensorV2PolicyWorker:
                         cp_no_restore_buffers=set(cp_buffers),
                     )
 
-                with DTensorPolicyWorker.train_context(context_parallel_ctx):
+                with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         outputs = self.model(
                             input_ids=input_ids,
