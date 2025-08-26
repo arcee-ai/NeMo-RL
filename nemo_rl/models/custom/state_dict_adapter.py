@@ -65,7 +65,6 @@ class BaseStateDictAdapter(ABC):
             hf_state_dict[hf_key] = value
         return hf_state_dict
 
-    @abstractmethod
     def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
         """Obtain native model state dict from HuggingFace format.
 
