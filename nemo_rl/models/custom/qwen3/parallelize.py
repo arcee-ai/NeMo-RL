@@ -36,7 +36,7 @@ PER_LAYER_TP_PLAN = {
         input_layouts=(Shard(1), Shard(1), Shard(1)),
         desired_input_layouts=(Shard(1), Shard(1), Shard(1)),
         use_local_output=True,
-    )
+    ),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
     "ffn_norm": SequenceParallel(),
     "feed_forward": PrepareModuleInput(
