@@ -12,6 +12,8 @@ from torch.distributed.tensor.parallel import (
 from torch.distributed.tensor import (
     Shard,
     Replicate,
+    distribute_tensor,
+    DTensor,
 )
 
 from nemo_rl.models.custom.qwen3.model import Qwen3Model
@@ -39,6 +41,16 @@ PER_LAYER_TP_PLAN = {
     "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
     "feed_forward.w3": ColwiseParallel()
 }
+
+def replicate_all_buffers_as_dtensor(module: torch.nn.Module, tp_mesh):
+    for submodule in module.modules():
+        non_persistent = getattr(submodule, "_non_persistent_buffers_set", set())
+        for name, buf in list(submodule._buffers.items()):
+            if buf is None or isinstance(buf, DTensor):
+                continue
+            is_persistent = name not in non_persistent
+            dt = distribute_tensor(buf, device_mesh=tp_mesh, placements=[Replicate()])
+            submodule.register_buffer(name, dt, persistent=is_persistent)
 
 
 def parallelize_qwen3(
@@ -73,6 +85,8 @@ def parallelize_qwen3(
 
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
+
+    replicate_all_buffers_as_dtensor(model, tp_mesh)
 
     if model.tok_embeddings is not None:
         fully_shard(
