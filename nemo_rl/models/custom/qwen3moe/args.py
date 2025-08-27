@@ -15,7 +15,7 @@ class Qwen3MoEModelArgs(BaseModelArgs):
     
     moe_args: MoEArgs
     decoder_sparse_step: int = 1
-    mlp_only_layers: list[int] = []
+    mlp_only_layers: list[int]
 
     norm_eps: float = 1e-6
     rope_theta: float = 1000000
