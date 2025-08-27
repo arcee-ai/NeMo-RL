@@ -24,7 +24,7 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
         
         if self.moe_enabled:
-            self.moe = MoE(model_args.moe_args, model_args.dim, model_args.hidden_dim)
+            self.moe = MoE(model_args.moe_args, model_args.hidden_dim, model_args.moe_intermediate_size)
         else:
             self.feed_forward = FeedForward(
                 dim=model_args.dim, hidden_dim=model_args.hidden_dim

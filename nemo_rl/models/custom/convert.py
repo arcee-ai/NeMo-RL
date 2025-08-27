@@ -80,6 +80,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             ),
             decoder_sparse_step = getattr(config, "decoder_sparse_step", 1),
             mlp_only_layers = list(getattr(config, "mlp_only_layers", [])),
+            moe_intermediate_size = config.moe_intermediate_size,
         ), Qwen3MoeStateDictAdapter, parallelize_qwen3moe
     else:
         raise ValueError(f"Model type {mt} unknown or not supported")

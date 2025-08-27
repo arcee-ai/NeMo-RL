@@ -16,6 +16,7 @@ class Qwen3MoEModelArgs(BaseModelArgs):
     moe_args: MoEArgs = field(default_factory=MoEArgs)
     decoder_sparse_step: int = 1
     mlp_only_layers: list[int] = field(default_factory=list)
+    moe_intermediate_size: int = 768
 
     norm_eps: float = 1e-6
     rope_theta: float = 1000000
