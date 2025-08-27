@@ -17,7 +17,7 @@ with init_empty_weights():
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
 print("load hf model")
-model_hf = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
+model_hf = AutoModelForCausalLM.from_pretrained(model_name)
 
 print("load state dict into tt")
 model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()))
@@ -91,6 +91,8 @@ input_ids = inputs["input_ids"].to("cuda")
 
 print("run tt model")
 logits_tt = model_tt(input_ids)
+del model_tt
+model_hf.to("cuda")
 print("run hf model")
 logits_hf = model_hf(inputs)
 
