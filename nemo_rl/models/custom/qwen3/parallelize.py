@@ -60,6 +60,9 @@ def parallelize_qwen3(
     if sequence_parallel:
         raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
 
+    if model.tok_embeddings is not None:
+        parallelize_module(model.tok_embeddings, tp_mesh, PER_LAYER_TP_PLAN)
+
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
 
