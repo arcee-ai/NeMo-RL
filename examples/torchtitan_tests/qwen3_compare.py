@@ -11,7 +11,7 @@ from nemo_rl.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from safetensors.torch import load_file
+from nemo_rl.models.custom.attention import init_attention_mask
 
 args_8b = TransformerModelArgs(
     dim=4096,
@@ -37,20 +37,6 @@ print("Load HF model")
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
 model_hf = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B")
 model_hf.eval()
-
-print("Init model and adapter")
-
-model_tt = Transformer(model_args=args_8b)
-adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path="Qwen/Qwen3-8B")
-
-print("Convert HF state dict to TT state dict")
-tt_state_dict = adapter.from_hf(model_hf.state_dict())
-
-print("Load TT state dict into model")
-model_tt.load_state_dict(tt_state_dict)
-
-print("Evaluate model")
-model_tt.eval()
 
 prompt = """Two generations now had pass'd away,
 Wise by his rules, and happy by his sway;
@@ -108,6 +94,23 @@ Grant that the gods his matchless force have given;
 Has foul reproach a privilege from heaven?"""
 
 input_ids = tokenizer.encode(prompt, return_tensors="pt")
+
+dummy_batch = torch.empty(1, input_ids.size(1), 1, 1, dtype=torch.int32)
+init_attention_mask(batch=dummy_batch, eos_id=tokenizer.eos_token_id)
+
+print("Init model and adapter")
+
+model_tt = Transformer(model_args=args_8b)
+adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path="Qwen/Qwen3-8B")
+
+print("Convert HF state dict to TT state dict")
+tt_state_dict = adapter.from_hf(model_hf.state_dict())
+
+print("Load TT state dict into model")
+model_tt.load_state_dict(tt_state_dict)
+
+print("Evaluate model")
+model_tt.eval()
 
 logits_tt = model_tt(input_ids)
 probs_tt = torch.softmax(logits_tt[:, -1, :], dim=-1)
