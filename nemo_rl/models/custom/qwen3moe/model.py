@@ -109,7 +109,7 @@ class Qwen3MoEModel(nn.Module):
             self.model_args.rope_theta,
         )
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
+    def forward(self, input_ids: torch.Tensor):
         h = self.tok_embeddings(input_ids) if self.tok_embeddings is not None else input_ids
         
         for layer in self.layers.values():
