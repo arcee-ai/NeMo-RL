@@ -9,7 +9,7 @@ from nemo_rl.models.custom.llama3.args import TransformerModelArgs as LlamaModel
 from nemo_rl.models.custom.llama3.state_dict_adapter import Llama3StateDictAdapter
 from nemo_rl.models.custom.llama3.parallelize import parallelize_llama
 
-from nemo_rl.models.custom.qwen3.model import Qwen3Model as Qwen3Model
+from nemo_rl.models.custom.qwen3.model import Qwen3Model
 from nemo_rl.models.custom.qwen3.args import Qwen3ModelArgs
 from nemo_rl.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
 from nemo_rl.models.custom.qwen3.parallelize import parallelize_qwen3

@@ -14,7 +14,7 @@ from torch.distributed.tensor import (
     Replicate,
 )
 
-from nemo_rl.models.custom.qwen3.model import Transformer
+from nemo_rl.models.custom.qwen3.model import Qwen3Model
 
 
 TP_PLAN = {
@@ -42,7 +42,7 @@ TP_PLAN = {
 
 
 def parallelize_qwen3(
-    model: Transformer,
+    model: Qwen3Model,
     mesh: DeviceMesh,
     dp_mesh: DeviceMesh,
     tp_mesh: DeviceMesh,
