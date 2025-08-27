@@ -86,7 +86,7 @@ def apply_rotary_emb(
     # xk:  [bsz, seq_len, num_kv_heads, head_dim]
     xq_out = (xq * cos) + (rotate_half(xq) * sin)
     xk_out = (xk * cos) + (rotate_half(xk) * sin)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
+    return xq_out, xk_out
 
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
