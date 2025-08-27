@@ -10,11 +10,14 @@ config = AutoConfig.from_pretrained(model_name)
 
 model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_config(config)
 
+print("create tt model")
 model_tt = model_class(model_args).to("cuda")
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
+print("load hf model")
 model_hf = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
 
+print("load state dict into tt")
 model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()))
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -82,7 +85,9 @@ Has foul reproach a privilege from heaven?"""
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
 input_ids = inputs["input_ids"].to("cuda")
 
+print("run tt model")
 logits_tt = model_tt(input_ids)
+print("run hf model")
 logits_hf = model_hf(inputs)
 
 tt = logits_tt.detach().to(torch.float32)
