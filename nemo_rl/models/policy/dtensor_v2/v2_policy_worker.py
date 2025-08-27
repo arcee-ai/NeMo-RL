@@ -1187,12 +1187,13 @@ class DTensorV2PolicyWorker:
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
         tt_state_dict = self.model.state_dict()
         # Convert to HF for refit
-        state_dict = self.adapter.to_hf(tt_state_dict)
+        hf_state_dict = self.adapter.to_hf(tt_state_dict)
 
         if self.is_generation_colocated:
             # Collect info for streaming multiple tensors
             self.refit_param_info = []
-            for name, tensor in state_dict.items():
+            for name, tensor in hf_state_dict.items():
+                print(f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}")
                 # dtensor's numel will return complete tensor instead of only local tensor
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
@@ -1200,7 +1201,7 @@ class DTensorV2PolicyWorker:
         else:
             # Collect info for collective communication
             state_dict_info = {}
-            for name, tensor in state_dict.items():
+            for name, tensor in hf_state_dict.items():
                 print(f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}")
                 state_dict_info[name] = (tensor.shape, self.dtype)
 
