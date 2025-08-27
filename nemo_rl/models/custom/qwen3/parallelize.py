@@ -23,7 +23,7 @@ from nemo_rl.models.custom.qwen3.model import Qwen3Model
 PER_LAYER_TP_PLAN = {
     "attention_norm": SequenceParallel(),
     "attention": PrepareModuleInput(
-        input_layouts=(Shard(1), Replicate()),
+        input_layouts=(Shard(1), None),
         desired_input_layouts=(Replicate(), None),
     ),
     "attention.wq": ColwiseParallel(use_local_output=False),
