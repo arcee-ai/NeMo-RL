@@ -112,6 +112,7 @@ model_tt.load_state_dict(tt_state_dict)
 print("Evaluate model")
 model_hf.to("cuda")
 model_tt.to("cuda")
+input_ids = input_ids.to("cuda")
 
 model_tt.eval()
 model_hf.eval()
