@@ -89,7 +89,7 @@ inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
 input_ids = inputs["input_ids"]
 
 print("run hf model")
-logits_hf = model_hf(input_ids)
+logits_hf = model_hf(input_ids).logits
 print("run tt model")
 logits_tt = model_tt(input_ids.to("cuda"))
 
