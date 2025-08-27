@@ -88,10 +88,10 @@ Has foul reproach a privilege from heaven?"""
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
 input_ids = inputs["input_ids"]
 
-print("run tt model")
-logits_tt = model_tt(input_ids)
 print("run hf model")
-logits_hf = model_hf(inputs)
+logits_hf = model_hf(input_ids)
+print("run tt model")
+logits_tt = model_tt(input_ids.to("cuda"))
 
 tt = logits_tt.detach().to(torch.float32)
 hf = logits_hf.detach().to(torch.float32)
