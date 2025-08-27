@@ -60,7 +60,7 @@ def parallelize_qwen3(
     if sequence_parallel:
         raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
 
-    for layer in model.layers:
+    for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
 
     return fully_shard(
