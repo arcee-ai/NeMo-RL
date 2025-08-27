@@ -29,8 +29,8 @@ PER_LAYER_TP_PLAN = {
     "attention.wq": ColwiseParallel(),
     "attention.wk": ColwiseParallel(),
     "attention.wv": ColwiseParallel(),
-    "attention.q_norm": NoParallel(),
-    "attention.k_norm": NoParallel(),
+    "attention.q_norm": NoParallel(use_local_output=True),
+    "attention.k_norm": NoParallel(use_local_output=True),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
     "attention.sdpa": PrepareModuleInput(
         input_layouts=(Shard(1), Shard(1), Shard(1)),
