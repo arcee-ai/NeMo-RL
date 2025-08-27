@@ -22,24 +22,23 @@ from nemo_rl.models.custom.qwen3.model import Qwen3Model
 PER_LAYER_TP_PLAN = {
     "attention_norm": SequenceParallel(),
     "attention": PrepareModuleInput(
-        input_layouts=(Shard(1), None),
+        input_layouts=(Shard(1), Replicate()),
         desired_input_layouts=(Replicate(), Replicate()),
     ),
-    "attention.wq": ColwiseParallel(),
-    "attention.wk": ColwiseParallel(),
-    "attention.wv": ColwiseParallel(),
+    "attention.wq": ColwiseParallel(use_local_output=False),
+    "attention.wk": ColwiseParallel(use_local_output=False),
+    "attention.wv": ColwiseParallel(use_local_output=False),
+    "attention.q_norm": NoParallel(use_local_output=False),
+    "attention.k_norm": NoParallel(use_local_output=False),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-    # q/k head RMSNorm are per-head ops; replicate or sequence parallel is fine.
-    "attention.q_norm": SequenceParallel(),
-    "attention.k_norm": SequenceParallel(),
     "ffn_norm": SequenceParallel(),
     "feed_forward": PrepareModuleInput(
-        input_layouts=Shard(1),
-        desired_input_layouts=Replicate(),
+        input_layouts=(Shard(1),),
+        desired_input_layouts=(Replicate(),),
     ),
     "feed_forward.w1": ColwiseParallel(),
     "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-    "feed_forward.w3": ColwiseParallel()
+    "feed_forward.w3": ColwiseParallel(),
 }
 
 def replicate_all_buffers_as_dtensor(module: torch.nn.Module, tp_mesh):
