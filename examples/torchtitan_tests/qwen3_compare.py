@@ -14,15 +14,15 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from nemo_rl.models.custom.attention import init_attention_mask
 
 args_8b = Qwen3ModelArgs(
-    dim=4096,
-    n_layers=36,
-    n_heads=32,
+    dim=1024,
+    n_layers=28,
+    n_heads=16,
     n_kv_heads=8,
     vocab_size=151936,
     norm_eps=1e-6,
     rope_theta=1_000_000,
     head_dim=128,
-    hidden_dim=12288,
+    hidden_dim=3072,
     max_seq_len=40960,
     use_flex_attn=True,
     attn_mask_type="causal",
