@@ -9,6 +9,7 @@ from nemo_rl.models.custom.llama3.args import TransformerModelArgs as LlamaModel
 from nemo_rl.models.custom.llama3.state_dict_adapter import Llama3StateDictAdapter
 from nemo_rl.models.custom.llama3.parallelize import parallelize_llama
 
+from nemo_rl.models.custom.moe import MoEArgs
 from nemo_rl.models.custom.qwen3.model import Qwen3Model
 from nemo_rl.models.custom.qwen3.args import Qwen3ModelArgs
 from nemo_rl.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
@@ -66,7 +67,17 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             max_seq_len = config.max_position_embeddings,
             eos_id = int(config.eos_token_id) if config.eos_token_id is not None else 0,
             enable_weight_tying = config.tie_word_embeddings,
-            moe_args = Qwen3MoEModelArgs().moe_args,  # start with defaults; can be overridden by caller
+            moe_args = MoEArgs(
+                num_experts = config.num_experts,
+                num_shared_experts = 0,
+                score_func = "softmax",
+                route_norm = False,
+                route_scale = 1,
+                score_before_experts = False,
+                top_k = config.num_experts_per_tok,
+                use_grouped_mm = True,
+                load_balance_coeff = None
+            ),
             decoder_sparse_step = getattr(config, "decoder_sparse_step", 1),
             mlp_only_layers = list(getattr(config, "mlp_only_layers", [])),
         ), Qwen3MoeStateDictAdapter, parallelize_qwen3moe
