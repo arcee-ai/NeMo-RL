@@ -21,7 +21,7 @@ TP_PLAN = {
     "layers.*.attention_norm": SequenceParallel(),
     "layers.*.attention": PrepareModuleInput(
         input_layouts=(Shard(1), None),
-        desired_input_layouts=(Replicate(), None),
+        desired_input_layouts=(Replicate(), Replicate()),
     ),
     "layers.*.attention.wq": ColwiseParallel(),
     "layers.*.attention.wk": ColwiseParallel(),
@@ -37,7 +37,7 @@ TP_PLAN = {
     ),
     "layers.*.feed_forward.w1": ColwiseParallel(),
     "layers.*.feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-    "layers.*.feed_forward.w3": ColwiseParallel(),
+    "layers.*.feed_forward.w3": ColwiseParallel()
 }
 
 
