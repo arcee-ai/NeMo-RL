@@ -193,6 +193,7 @@ class VllmHttpWorkerExtension:
 
         try:
             for name, (shape, dtype) in self.state_dict_info.items():
+                print(f"Receiving weight {name} with shape {shape} and dtype {dtype}")
                 weight = torch.empty(shape, dtype=dtype, device="cuda")
                 self.model_update_group.broadcast(weight, src=0)
                 self.model_runner.model.load_weights(weights=[(name, weight)])
