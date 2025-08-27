@@ -1202,7 +1202,6 @@ class DTensorV2PolicyWorker:
             # Collect info for collective communication
             state_dict_info = {}
             for name, tensor in hf_state_dict.items():
-                print(f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}")
                 state_dict_info[name] = (tensor.shape, self.dtype)
 
             return state_dict_info
