@@ -75,7 +75,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
                 route_scale = 1,
                 score_before_experts = False,
                 top_k = config.num_experts_per_tok,
-                use_grouped_mm = True,
+                use_grouped_mm = False,
                 load_balance_coeff = None
             ),
             decoder_sparse_step = getattr(config, "decoder_sparse_step", 1),
