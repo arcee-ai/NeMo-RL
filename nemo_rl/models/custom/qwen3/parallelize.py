@@ -18,6 +18,10 @@ from nemo_rl.models.custom.qwen3.model import Qwen3Model
 
 
 TP_PLAN = {
+    "layers.*": PrepareModuleInput(
+        input_layouts=(Shard(1), None),
+        desired_input_layouts=(Replicate(), Replicate()),
+    ),
     "layers.*.attention_norm": SequenceParallel(),
     "layers.*.attention": PrepareModuleInput(
         input_layouts=(Shard(1), None),
