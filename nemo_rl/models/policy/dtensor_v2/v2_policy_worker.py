@@ -1200,8 +1200,13 @@ class DTensorV2PolicyWorker:
         else:
             # Collect info for collective communication
             state_dict_info = {}
+            ordered_param_names: list[str] = []
             for name, tensor in state_dict.items():
                 state_dict_info[name] = (tensor.shape, self.dtype)
+                ordered_param_names.append(name)
+
+            # Persist a stable ordering for later broadcast to match receiver expectations
+            self._refit_param_order = ordered_param_names
 
             return state_dict_info
 
@@ -1227,7 +1232,14 @@ class DTensorV2PolicyWorker:
 
         # Broadcast the weights for collective communication
         hf_state_dict = self.adapter.to_hf(self.model.state_dict())
-        for _, tensor in hf_state_dict.items():
+
+        # Use the previously captured stable parameter order if available
+        if hasattr(self, "_refit_param_order") and self._refit_param_order is not None:
+            items_iter = ((name, hf_state_dict[name]) for name in self._refit_param_order)
+        else:
+            items_iter = hf_state_dict.items()
+
+        for _, tensor in items_iter:
             if isinstance(tensor, DTensor):
                 tensor = tensor.full_tensor()
             if self.rank == 0:
