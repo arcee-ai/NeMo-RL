@@ -4,7 +4,7 @@ import torch.nn as nn
 from nemo_rl.models.custom.moe import MoE
 from nemo_rl.models.custom.qwen3moe.args import Qwen3MoEModelArgs
 
-from nemo_rl.models.custom.qwen3.model import Attention, FeedForward
+from nemo_rl.models.custom.qwen3.model import Attention, FeedForward, precompute_rope_cache
 
 class TransformerBlock(nn.Module):
     def __init__(self, layer_id: int, model_args: Qwen3MoEModelArgs):
@@ -98,6 +98,13 @@ class Qwen3MoEModel(nn.Module):
                 a=-2 * cutoff_factor,
                 b=2 * cutoff_factor,
             )
+
+    def _precompute_rope_cache(self) -> torch.Tensor:
+        return precompute_rope_cache(
+            self.model_args.head_dim,
+            self.model_args.max_seq_len,
+            self.model_args.rope_theta,
+        )
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
         h = self.tok_embeddings(input_ids) if self.tok_embeddings is not None else input_ids
