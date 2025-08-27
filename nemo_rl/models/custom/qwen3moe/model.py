@@ -12,10 +12,12 @@ class TransformerBlock(nn.Module):
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
         
-        # TODO: how does qwen3 actually decide this
-        self.moe_enabled = (layer_id >= layer_id % model_args.decoder_sparse_step == 0) and \
-            (layer_id not in model_args.mlp_only_layers) and \
-            (model_args.moe_args.num_experts > 0)
+        # Match HF: MoE if not in mlp_only_layers, num_experts > 0, and (layer_id+1) % decoder_sparse_step == 0
+        self.moe_enabled = (
+            (layer_id not in model_args.mlp_only_layers)
+            and (model_args.moe_args.num_experts > 0)
+            and ((layer_id + 1) % model_args.decoder_sparse_step == 0)
+        )
         
         # TODO: make moe config a superclass of non-moe config?
         self.attention = Attention(model_args) # type: ignore
@@ -24,7 +26,8 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
         
         if self.moe_enabled:
-            self.moe = MoE(model_args.moe_args, model_args.hidden_dim, model_args.moe_intermediate_size)
+            # For MoE layers, experts operate on model hidden size (dim) and expand to moe_intermediate_size
+            self.moe = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
         else:
             self.feed_forward = FeedForward(
                 dim=model_args.dim, hidden_dim=model_args.hidden_dim
