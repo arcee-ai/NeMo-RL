@@ -29,9 +29,11 @@ args_8b = Qwen3ModelArgs(
     eos_id=151645,
 )
 
+model_name = "Qwen/Qwen3-0.6B"
+
 print("Load HF model")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
-model_hf = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B")
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model_hf = AutoModelForCausalLM.from_pretrained(model_name)
 model_hf.eval()
 
 prompt = """Two generations now had pass'd away,
@@ -94,7 +96,7 @@ input_ids = tokenizer.encode(prompt, return_tensors="pt")
 print("Init model and adapter")
 
 model_tt = Qwen3Model(model_args=args_8b)
-adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path="Qwen/Qwen3-8B")
+adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path=model_name)
 
 dummy_batch = torch.empty(1, input_ids.size(1), 1, 1, dtype=torch.int32)
 init_attention_mask(batch=dummy_batch, eos_id=tokenizer.eos_token_id)
