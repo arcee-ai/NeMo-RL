@@ -98,6 +98,18 @@ class FlexAttention(torch.nn.Module):
         return causal_mask
 
     @staticmethod
+    def _get_sliding_causal_mask_mod(window: int) -> _mask_mod_signature:
+        if window is None or window <= 0:
+            raise ValueError("sliding window must be positive")
+
+        def sliding_causal_mask(
+            b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+        ):
+            return (q_idx >= kv_idx) & (kv_idx >= (q_idx - window + 1))
+
+        return sliding_causal_mask
+
+    @staticmethod
     def _get_block_causal_mask_mod(
         batch: torch.Tensor, eos_id: int
     ) -> _mask_mod_signature:
@@ -171,6 +183,15 @@ class FlexAttention(torch.nn.Module):
                         )
                     batch_dimension = batch.shape[0]
                     mask_mod = FlexAttention._get_block_causal_mask_mod(batch, eos_id)
+                case "sliding_causal":
+                    if fixed_block_size is None or fixed_block_size <= 0:
+                        raise RuntimeError(
+                            "sliding_causal requires a positive fixed_block_size as window"
+                        )
+                    batch_dimension = 1
+                    mask_mod = FlexAttention._get_sliding_causal_mask_mod(
+                        fixed_block_size
+                    )
                 case _:
                     raise RuntimeError(f"Shouldn't reach here. {attn_mask_type}")
 
@@ -225,7 +246,9 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 
 def build_attention(
-    use_flex_attn: bool, attn_mask_type: str, fixed_block_size: int | None = None
+    use_flex_attn: bool,
+    attn_mask_type: str,
+    fixed_block_size: int | None = None,
 ):
     if use_flex_attn:
         return FlexAttention(attn_mask_type, fixed_block_size)
