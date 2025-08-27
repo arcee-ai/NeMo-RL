@@ -1229,9 +1229,14 @@ class DTensorV2PolicyWorker:
                 "using non-colocated generation since it will have an extra onload and offload at refit stage."
             )
             self.model = self.move_to_cuda(self.model)
+        
+        if hasattr(self.model, "_orig_mod"):
+            tt_state_dict = self.model._orig_mod.state_dict()
+        else:
+            tt_state_dict = self.model.state_dict()
 
         # Broadcast the weights for collective communication
-        hf_state_dict = self.adapter.to_hf(self.model.state_dict())
+        hf_state_dict = self.adapter.to_hf(tt_state_dict)
         for name, tensor in hf_state_dict.items():
             if isinstance(tensor, DTensor):
                 tensor = tensor.full_tensor()
