@@ -1185,7 +1185,10 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
-        tt_state_dict = self.model.state_dict()
+        if hasattr(self.model, "_orig_mod"):
+            tt_state_dict = self.model._orig_mod.state_dict()
+        else:
+            tt_state_dict = self.model.state_dict()
         # Convert to HF for refit
         hf_state_dict = self.adapter.to_hf(tt_state_dict)
 

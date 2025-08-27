@@ -5,6 +5,7 @@
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
 
 import re
+import logging
 from typing import Any
 
 from nemo_rl.models.custom.state_dict_adapter import StateDictAdapter
@@ -46,15 +47,14 @@ class Qwen3StateDictAdapter(StateDictAdapter):
                 layer_num = re.search(r"\d+", key).group(0)
                 new_key = to_hf_map.get(abstract_key)
                 if new_key is None:
-                    print(f"Key {key} not found in to_hf_map")
+                    logging.warning(f"Key {key} not found in to_hf_map. Skipping.")
                     hf_state_dict[key] = value
                     continue
                 new_key = new_key.format(layer_num)
             else:
                 new_key = to_hf_map.get(key)
                 if new_key is None:
-                    print(f"Key {key} not found in to_hf_map")
-                    hf_state_dict[key] = value
+                    logging.warning(f"Key {key} not found in to_hf_map. Skipping.")
                     continue
             hf_state_dict[new_key] = value
         return hf_state_dict
@@ -67,13 +67,13 @@ class Qwen3StateDictAdapter(StateDictAdapter):
                 layer_num = re.search(r"\d+", key).group(0)
                 new_key = self.from_hf_map.get(abstract_key)
                 if new_key is None:
-                    state_dict[key] = value
+                    logging.warning(f"Key {key} not found in from_hf_map. Skipping.")
                     continue
                 new_key = new_key.format(layer_num)
             else:
                 new_key = self.from_hf_map.get(key)
                 if new_key is None:
-                    state_dict[key] = value
+                    logging.warning(f"Key {key} not found in from_hf_map. Skipping.")
                     continue
             state_dict[new_key] = value
         return state_dict
