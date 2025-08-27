@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from nemo_rl.models.custom.model import BaseModelArgs
 from nemo_rl.models.custom.moe import MoEArgs
@@ -13,9 +13,9 @@ class Qwen3MoEModelArgs(BaseModelArgs):
     head_dim: int = 128
     hidden_dim: int = 3072
     
-    moe_args: MoEArgs
+    moe_args: MoEArgs = field(default_factory=MoEArgs)
     decoder_sparse_step: int = 1
-    mlp_only_layers: list[int]
+    mlp_only_layers: list[int] = field(default_factory=list)
 
     norm_eps: float = 1e-6
     rope_theta: float = 1000000
