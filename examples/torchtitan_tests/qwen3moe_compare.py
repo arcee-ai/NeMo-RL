@@ -20,7 +20,7 @@ print("load hf model")
 model_hf = AutoModelForCausalLM.from_pretrained(model_name)
 
 print("load state dict into tt")
-model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()))
+model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()), assign=True)
 
 model_tt.to("cuda")
 
