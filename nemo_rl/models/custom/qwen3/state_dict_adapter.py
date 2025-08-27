@@ -65,11 +65,13 @@ class Qwen3StateDictAdapter(StateDictAdapter):
                 layer_num = re.search(r"\d+", key).group(0)
                 new_key = self.from_hf_map.get(abstract_key)
                 if new_key is None:
+                    state_dict[key] = value
                     continue
                 new_key = new_key.format(layer_num)
             else:
                 new_key = self.from_hf_map.get(key)
                 if new_key is None:
+                    state_dict[key] = value
                     continue
             state_dict[new_key] = value
         return state_dict
