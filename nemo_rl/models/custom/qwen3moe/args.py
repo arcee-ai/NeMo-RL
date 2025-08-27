@@ -13,7 +13,7 @@ class Qwen3MoEModelArgs(BaseModelArgs):
     head_dim: int = 128
     hidden_dim: int = 3072
     
-    moe_args: MoEArgs = MoEArgs()
+    moe_args: MoEArgs
     decoder_sparse_step: int = 1
     mlp_only_layers: list[int] = []
 
