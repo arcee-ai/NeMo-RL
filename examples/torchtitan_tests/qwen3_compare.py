@@ -34,14 +34,14 @@ args_8b = TransformerModelArgs(
 )
 
 print("Load HF model")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B-Instruct")
-model_hf = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+model_hf = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B")
 model_hf.eval()
 
 print("Init model and adapter")
 
 model_tt = Transformer(model_args=args_8b)
-adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path="Qwen/Qwen3-8B-Instruct")
+adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path="Qwen/Qwen3-8B")
 
 print("Convert HF state dict to TT state dict")
 tt_state_dict = adapter.from_hf(model_hf.state_dict())
