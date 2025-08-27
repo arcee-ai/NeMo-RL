@@ -246,7 +246,7 @@ class DTensorV2PolicyWorker:
                 model_args=model_args
             )
         
-        def strip_compile_prefix(state_dict: dict[str, torch.Tensor], prefix: str, _) -> dict[str, torch.Tensor]:
+        def strip_compile_prefix(self, state_dict: dict[str, torch.Tensor], prefix: str, _) -> dict[str, torch.Tensor]:
             stripped = {}
             for key, value in state_dict.items():
                 if "_orig_mod." in key:
