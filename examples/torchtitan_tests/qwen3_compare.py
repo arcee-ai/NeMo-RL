@@ -110,7 +110,11 @@ print("Load TT state dict into model")
 model_tt.load_state_dict(tt_state_dict)
 
 print("Evaluate model")
+model_hf.to("cuda")
+model_tt.to("cuda")
+
 model_tt.eval()
+model_hf.eval()
 
 logits_tt = model_tt(input_ids)
 probs_tt = torch.softmax(logits_tt[:, -1, :], dim=-1)
