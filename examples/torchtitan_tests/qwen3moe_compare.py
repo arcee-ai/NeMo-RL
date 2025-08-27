@@ -85,7 +85,7 @@ Grant that the gods his matchless force have given;
 Has foul reproach a privilege from heaven?"""
 
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
-input_ids = inputs["input_ids"].to("cuda")
+input_ids = inputs["input_ids"]
 
 print("run tt model")
 logits_tt = model_tt(input_ids)
