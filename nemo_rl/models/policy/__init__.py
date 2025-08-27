@@ -146,7 +146,7 @@ class PolicyConfig(TypedDict):
     ]  # used in static batched (framework) generation
     precision: str
     reward_model_cfg: NotRequired[RewardModelConfig]
-    dtensor_cfg: DTensorConfig
+    dtensor_cfg: NotRequired[DTensorConfig]
     megatron_cfg: NotRequired[MegatronConfig]
     dtensor_v2_cfg: NotRequired[DTensorV2Config]
     dynamic_batching: DynamicBatchingConfig
