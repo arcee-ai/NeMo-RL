@@ -10,6 +10,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.distributed.tensor import DTensor
 
 from nemo_rl.models.custom.attention import build_attention
 
@@ -62,6 +63,8 @@ def reshape_for_broadcast(rope_cache: torch.Tensor, x: torch.Tensor) -> torch.Te
     ndim = x.ndim
     assert ndim > 1
     _, seqlen, _, head_dim = x.shape
+    if isinstance(rope_cache, DTensor):
+        rope_cache = rope_cache.full_tensor()
     rope_cache = rope_cache[0:seqlen]
     # The shape of rope_cache is (seqlen, head_dim * 2) because we concate cos and sin
     assert rope_cache.shape == (seqlen, head_dim * 2)
