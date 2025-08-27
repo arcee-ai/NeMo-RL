@@ -1,3 +1,4 @@
+from accelerate import init_empty_weights
 import torch
 import torch.nn.functional as F
 
@@ -11,7 +12,8 @@ config = AutoConfig.from_pretrained(model_name)
 model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_config(config)
 
 print("create tt model")
-model_tt = model_class(model_args).to("cuda")
+with init_empty_weights():
+    model_tt = model_class(model_args).to("cuda")
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
 print("load hf model")
