@@ -6,6 +6,7 @@
 
 from abc import abstractmethod
 from dataclasses import dataclass
+from typing import Literal
 
 from torch import nn
 

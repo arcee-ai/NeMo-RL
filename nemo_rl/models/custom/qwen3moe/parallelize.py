@@ -13,11 +13,9 @@ from nemo_rl.models.custom.utils import NoParallel
 from torch.distributed.tensor import (
     Shard,
     Replicate,
-    distribute_tensor,
-    DTensor,
 )
 
-from nemo_rl.models.custom.qwen3.model import Qwen3Model
+from nemo_rl.models.custom.qwen3moe.model import Qwen3MoEModel
 
 
 PER_LAYER_TP_PLAN = {
@@ -33,28 +31,13 @@ PER_LAYER_TP_PLAN = {
     "attention.k_norm": NoParallel(use_local_output=True),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
     "ffn_norm": SequenceParallel(),
-    "feed_forward": PrepareModuleInput(
-        input_layouts=(Shard(1),),
-        desired_input_layouts=(Replicate(),),
-    ),
-    "feed_forward.w1": ColwiseParallel(),
-    "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-    "feed_forward.w3": ColwiseParallel(),
+    # MoE block: keep local for now (no EP yet)
+    "moe": NoParallel(use_local_output=True),
 }
 
-def replicate_all_buffers_as_dtensor(module: torch.nn.Module, tp_mesh):
-    for submodule in module.modules():
-        non_persistent = getattr(submodule, "_non_persistent_buffers_set", set())
-        for name, buf in list(submodule._buffers.items()):
-            if buf is None or isinstance(buf, DTensor):
-                continue
-            is_persistent = name not in non_persistent
-            dt = distribute_tensor(buf, device_mesh=tp_mesh, placements=[Replicate()])
-            submodule.register_buffer(name, dt, persistent=is_persistent)
 
-
-def parallelize_qwen3(
-    model: Qwen3Model,
+def parallelize_qwen3moe(
+    model: Qwen3MoEModel,
     mesh: DeviceMesh,
     dp_mesh: DeviceMesh,
     tp_mesh: DeviceMesh,
@@ -67,10 +50,10 @@ def parallelize_qwen3(
     activation_checkpointing: bool = False,
 ):
     if activation_checkpointing:
-        raise NotImplementedError("Activation checkpointing is not yet supported for Qwen3")
+        raise NotImplementedError("Activation checkpointing is not yet supported for Qwen3MoE")
 
     if sequence_parallel:
-        raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
+        raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3MoE")
 
     fsdp_config = {
         "mesh": mesh[("dp", "pp")],
@@ -80,10 +63,15 @@ def parallelize_qwen3(
         "reshard_after_forward": False,
     }
 
+    # Per-layer TP plan
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
-    
-    parallelize_module(model.norm, tp_mesh, {
+
+    # Top-level modules: embeddings, norm, output
+    parallelize_module(
+        model,
+        tp_mesh,
+        {
             "tok_embeddings": RowwiseParallel(
                 input_layouts=Replicate(),
                 output_layouts=Shard(1),
@@ -94,22 +82,22 @@ def parallelize_qwen3(
                 output_layouts=Replicate(),
                 use_local_output=True,
             ),
-        },)
+        },
+    )
 
-    # replicate_all_buffers_as_dtensor(model, tp_mesh)
-    
     # compile each layer
     torch._dynamo.config.capture_scalar_outputs = True
     for layer_name, layer in model.layers.items():
         layer = torch.compile(layer, fullgraph=True)
         model.layers.register_module(layer_name, layer)
 
+    # FSDP sharding
     if model.tok_embeddings is not None:
         fully_shard(
             model.tok_embeddings,
             **fsdp_config
         )
-    
+
     for layer_name, layer in model.layers.items():
         fully_shard(
             layer,
