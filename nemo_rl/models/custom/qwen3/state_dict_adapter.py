@@ -8,11 +8,11 @@ import re
 from typing import Any
 
 from nemo_rl.models.custom.state_dict_adapter import StateDictAdapter
-from .args import TransformerModelArgs
+from .args import Qwen3ModelArgs
 
 
 class Qwen3StateDictAdapter(StateDictAdapter):
-    def __init__(self, model_args: TransformerModelArgs, hf_assets_path: str | None):
+    def __init__(self, model_args: Qwen3ModelArgs, hf_assets_path: str | None):
         super().__init__(model_args, hf_assets_path)
         self.model_args = model_args
         self.hf_assets_path = hf_assets_path
