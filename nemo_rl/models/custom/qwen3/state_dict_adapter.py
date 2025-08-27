@@ -47,6 +47,7 @@ class Qwen3StateDictAdapter(StateDictAdapter):
                 new_key = to_hf_map.get(abstract_key)
                 if new_key is None:
                     hf_state_dict[key] = value
+                    continue
                 new_key = new_key.format(layer_num)
             else:
                 new_key = to_hf_map.get(key)
