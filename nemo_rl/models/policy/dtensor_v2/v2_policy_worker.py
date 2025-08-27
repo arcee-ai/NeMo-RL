@@ -1207,77 +1207,12 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
-        """Prepare the weights for IPC.
-
-        This function:
-        - Prepares the state_dict of the model.
-        - Collects the info for streaming multiple tensors.
-
-        Returns:
-            list: The list of parameters sizes.
-            float: The total available memory in bytes.
-        """
-        from nemo_rl.utils.nvml import get_free_memory_bytes
-
-        # Manually move model to cuda for cpu offload case
-        if self.cpu_offload:
-            self.model = self.move_to_cuda(self.model)
-
-        # Get state_dict
-        self._held_sharded_state_dict_reference: dict[str, torch.Tensor] = (
-            self.model.state_dict()
-        )
-
-        # Collect current available memory for refit
-        ## Get current device index from torch
-        device_idx = torch.cuda.current_device()
-        ## Get device free memory using NVML
-        total_available_bytes = get_free_memory_bytes(device_idx)
-        ## Use 80% of the free memory for safety
-        memory_ratio = os.getenv("NRL_REFIT_BUFFER_MEMORY_RATIO", "0.8")
-        total_available_bytes *= float(memory_ratio)
-
-        return self.refit_param_info, total_available_bytes
+        raise NotImplementedError("Not implemented for DTensorV2")
 
     @torch.no_grad()
     @wrap_with_nvtx_name("dtensor_policy_worker/get_weights_ipc_handles")
     def get_weights_ipc_handles(self, keys: Iterable[str]) -> dict[str, Any]:
-        assert self._held_sharded_state_dict_reference is not None, (
-            "prepare_weights_for_ipc must be called before get_weights_ipc_handles"
-        )
-
-        # Clean up the held tensors to reduce peak memory
-        if self._held_streamed_param_reference is not None:
-            del self._held_streamed_param_reference
-            self._held_streamed_param_reference = None
-
-        converted_params = {}
-        for key in keys:
-            # Get full_tensor for dtensor (GPU > 1)
-            tensor = self._held_sharded_state_dict_reference[key]
-            if isinstance(tensor, DTensor):
-                full_tensor = tensor.full_tensor()
-            else:
-                full_tensor = tensor
-            # Convert parameters to the configured dtype
-            converted_params[key] = full_tensor.to(self.dtype, non_blocking=True)
-
-        # Temporary record the full tensor for cleanup
-        # It is needed for cleanup the last full_tensor in the refit process
-        self._held_streamed_param_reference = converted_params
-
-        # Get device UUID for IPC
-        device_uuid = self.report_device_id()
-        # Create handles for the tensors
-        all_handles = []
-        for key, p in converted_params.items():
-            handle = get_handle_from_tensor(p)
-            all_handles.append((key, handle))
-
-        # (pack_tensor_for_ipc: bool, handles: list)
-        serialized = (False, all_handles)
-
-        return {device_uuid: serialized}
+        raise NotImplementedError("Not implemented for DTensorV2")
 
     @torch.no_grad()
     def broadcast_weights_for_collective(self) -> None:
