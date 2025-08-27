@@ -21,7 +21,7 @@ def precompute_rope_cache(
 ) -> torch.Tensor:
     freqs = 1.0 / (base ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
     # Create position indexes `[0, 1, ..., max_seq_len - 1]`
-    t = torch.arange(max_seq_len, dtype=freqs.dtype, device=freqs.device)
+    t = torch.arange(max_seq_len, dtype=freqs.dtype)
 
     # Outer product of theta and position index; output tensor has
     # a shape of [max_seq_len, dim // 2]
@@ -79,8 +79,8 @@ def apply_rotary_emb(
     rope_cache = reshape_for_broadcast(rope_cache, xq)
 
     # [bsz, seq_len, 1, head_dim]
-    cos = rope_cache[..., :head_dim].to(dtype=xq.dtype, device=xq.device)
-    sin = rope_cache[..., head_dim:].to(dtype=xq.dtype, device=xq.device)
+    cos = rope_cache[..., :head_dim].to(dtype=xq.dtype)
+    sin = rope_cache[..., head_dim:].to(dtype=xq.dtype)
 
     # xq:  [bsz, seq_len, num_heads, head_dim]
     # xk:  [bsz, seq_len, num_kv_heads, head_dim]
