@@ -85,7 +85,7 @@ class Qwen3MoEModel(nn.Module):
             nn.init.normal_(self.tok_embeddings.weight)
         for layer in self.layers.values():
             if layer is not None:
-                layer.init_weights(buffer_device=buffer_device)
+                layer.init_weights()
         if self.norm is not None:
             self.norm.reset_parameters()
         final_out_std = self.model_args.dim**-0.5
