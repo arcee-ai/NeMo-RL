@@ -80,11 +80,21 @@ def parallelize_qwen3(
         "reshard_after_forward": False,
     }
 
-    if model.tok_embeddings is not None:
-        parallelize_module(model.tok_embeddings, tp_mesh, PER_LAYER_TP_PLAN)
-
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
+    
+    parallelize_module(model.norm, tp_mesh, {
+            "tok_embeddings": RowwiseParallel(
+                input_layouts=Replicate(),
+                output_layouts=Shard(1),
+            ),
+            "norm": SequenceParallel(),
+            "output": ColwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
+                use_local_output=True,
+            ),
+        },)
 
     replicate_all_buffers_as_dtensor(model, tp_mesh)
 
