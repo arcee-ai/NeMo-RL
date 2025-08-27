@@ -245,18 +245,6 @@ class DTensorV2PolicyWorker:
             self.model = model_class(
                 model_args=model_args
             )
-        
-        def strip_compile_prefix(self, state_dict: dict[str, torch.Tensor], prefix: str, _) -> dict[str, torch.Tensor]:
-            stripped = {}
-            for key, value in state_dict.items():
-                if "_orig_mod." in key:
-                    new_key = key.replace("_orig_mod.", "")
-                    stripped[new_key] = value
-                else:
-                    stripped[key] = value
-            return stripped
-
-        self.model._register_state_dict_hook(strip_compile_prefix)
 
         # TODO: Find equivalent of this in TT-type model
         # if self.model.config.pad_token_id is None:

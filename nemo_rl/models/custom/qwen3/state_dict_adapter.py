@@ -42,6 +42,8 @@ class Qwen3StateDictAdapter(StateDictAdapter):
         to_hf_map = {v: k for k, v in self.from_hf_map.items()}
         hf_state_dict: dict[str, Any] = {}
         for key, value in state_dict.items():
+            # Strip name mangling from torch.compile
+            key = key.replace("_orig_mod.", "")
             if "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 layer_num = re.search(r"\d+", key).group(0)
