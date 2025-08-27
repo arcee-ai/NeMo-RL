@@ -14,7 +14,6 @@ model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_co
 print("create tt model")
 with init_empty_weights():
     model_tt = model_class(model_args)
-model_tt.to("cuda")
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
 print("load hf model")
@@ -22,6 +21,8 @@ model_hf = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
 
 print("load state dict into tt")
 model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()))
+
+model_tt.to("cuda")
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
