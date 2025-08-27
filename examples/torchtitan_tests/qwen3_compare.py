@@ -5,15 +5,15 @@ import json
 import os
 import torch
 import torch.nn.functional as F
-from nemo_rl.models.custom.qwen3.model import Transformer
-from nemo_rl.models.custom.qwen3.args import TransformerModelArgs
+from nemo_rl.models.custom.qwen3.model import Qwen3Model
+from nemo_rl.models.custom.qwen3.args import Qwen3ModelArgs
 from nemo_rl.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from nemo_rl.models.custom.attention import init_attention_mask
 
-args_8b = TransformerModelArgs(
+args_8b = Qwen3ModelArgs(
     dim=4096,
     n_layers=36,
     n_heads=32,
@@ -22,14 +22,10 @@ args_8b = TransformerModelArgs(
     norm_eps=1e-6,
     rope_theta=1_000_000,
     head_dim=128,
-    intermediate_size=12288,
+    hidden_dim=12288,
     max_seq_len=40960,
     use_flex_attn=True,
     attn_mask_type="causal",
-    attention_dropout=0.0,
-    use_sliding_window=False,
-    sliding_window=4096,   # ignored when use_sliding_window=False
-    max_window_layers=36,
     eos_id=151645,
 )
 
@@ -97,7 +93,7 @@ input_ids = tokenizer.encode(prompt, return_tensors="pt")
 
 print("Init model and adapter")
 
-model_tt = Transformer(model_args=args_8b)
+model_tt = Qwen3Model(model_args=args_8b)
 adapter = Qwen3StateDictAdapter(model_args=args_8b, hf_assets_path="Qwen/Qwen3-8B")
 
 dummy_batch = torch.empty(1, input_ids.size(1), 1, 1, dtype=torch.int32)

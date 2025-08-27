@@ -6,38 +6,29 @@
 
 from dataclasses import dataclass
 
+from nemo_rl.models.custom.model import BaseModelArgs
 
 @dataclass
-class TransformerModelArgs:
-    dim: int = 4096
-    n_layers: int = 32
-    n_heads: int = 32
-    n_kv_heads: int | None = 32
+class Qwen3ModelArgs(BaseModelArgs):
+
+    dim: int = 1024
+    n_layers: int = 28
+    n_heads: int = 16
+    n_kv_heads: int = 8
     vocab_size: int = 151936
-    # Qwen3 uses RMSNorm with eps 1e-6
-    norm_eps: float = 1e-6
-    rope_theta: float = 10000
-
-    # Explicit head dimension (Qwen3 default is 128)
     head_dim: int = 128
-    # Explicit intermediate size (Qwen3-8B uses 22016)
-    intermediate_size: int = 22016
+    hidden_dim: int = 3072
 
-    # Sequence length and initialization
-    max_seq_len: int = 32768
+    norm_eps: float = 1e-6
+    rope_theta: float = 1000000
+    qk_norm: bool = True
+    max_seq_len: int = 4096
     depth_init: bool = True
 
-    # Attention controls
-    use_flex_attn: bool = True
+    use_flex_attn: bool = False
     attn_mask_type: str = "causal"
-    attention_dropout: float = 0.0
+    eos_id: int = 151645
 
-    # Sliding window attention controls
-    use_sliding_window: bool = False
-    sliding_window: int = 4096
-    max_window_layers: int = 28
-
-    # Misc
-    eos_id: int = 0
+    enable_weight_tying: bool = False
 
 
