@@ -329,7 +329,7 @@ def expert_parallel(func: Callable) -> Callable:
             w2 = w2.to_local()
             w3 = w3.to_local()
 
-        from torchtitan.experiments.kernels.moe.indices import generate_permute_indices
+        from nemo_rl.models.custom.kernels.moe_indices import generate_permute_indices
 
         experts_per_ep_rank = w1.shape[0]
         num_ep_ranks = num_tokens_per_expert.shape[0] // experts_per_ep_rank
