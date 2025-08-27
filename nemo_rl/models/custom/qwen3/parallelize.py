@@ -24,7 +24,7 @@ PER_LAYER_TP_PLAN = {
     "attention_norm": SequenceParallel(),
     "attention": PrepareModuleInput(
         input_layouts=(Shard(1), Replicate()),
-        desired_input_layouts=(Replicate(), Replicate()),
+        desired_input_layouts=(Replicate(), None),
     ),
     "attention.wq": ColwiseParallel(use_local_output=False),
     "attention.wk": ColwiseParallel(use_local_output=False),
