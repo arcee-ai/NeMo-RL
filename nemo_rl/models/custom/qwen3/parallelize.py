@@ -96,8 +96,10 @@ def parallelize_qwen3(
             ),
         },)
 
-    replicate_all_buffers_as_dtensor(model, tp_mesh)
+    # replicate_all_buffers_as_dtensor(model, tp_mesh)
     
+    # compile each layer
+    torch._dynamo.config.capture_scalar_outputs = True
     for layer_name, layer in model.layers.items():
         layer = torch.compile(layer, fullgraph=True)
         model.layers.register_module(layer_name, layer)
