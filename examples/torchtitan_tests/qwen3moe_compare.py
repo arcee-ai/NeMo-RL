@@ -26,6 +26,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 model_hf.eval()
 model_tt.eval()
+model_tt.to("cuda")
 
 tokenizer.padding_side = "left"
 
