@@ -1193,6 +1193,7 @@ class DTensorV2PolicyWorker:
             # Collect info for streaming multiple tensors
             self.refit_param_info = []
             for name, tensor in state_dict.items():
+                print(f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}")
                 # dtensor's numel will return complete tensor instead of only local tensor
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
