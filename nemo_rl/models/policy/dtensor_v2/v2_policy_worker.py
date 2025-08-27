@@ -47,8 +47,6 @@ from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.algorithms.loss_functions import SequencePackingLossWrapper
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.models.custom.llama3.args import TransformerModelArgs
-from nemo_rl.models.custom.llama3.state_dict_adapter import Llama3StateDictAdapter
 from nemo_rl.models.dtensor.parallelize import (
     _parallelize_model,
     clip_grad_by_total_norm_,
@@ -81,8 +79,7 @@ from nemo_rl.utils.native_checkpoint import (
 )
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
-from nemo_rl.models.custom.llama3.model import Transformer as Llama3Model
-from nemo_rl.models.custom.llama3.parallelize import parallelize_llama
+from nemo_rl.models.custom.convert import get_model_config
 
 
 @contextmanager
@@ -222,20 +219,9 @@ class DTensorV2PolicyWorker:
         
         
         # TODO: Make this not hardcoded to llama3
-        args_8b = TransformerModelArgs(
-            dim=4096,
-            n_layers=32,
-            n_heads=32,
-            n_kv_heads=8,
-            ffn_dim_multiplier=1.3,
-            multiple_of=1024,
-            rope_theta=500000,
-        )
+        model_class, model_args, adapter_class, model_parallelize_function = get_model_config(model_config)
 
-        self.adapter = Llama3StateDictAdapter(model_args=args_8b, hf_assets_path="Llama-3-8B")
-        
-        model_class = Llama3Model
-        model_parallelize_function = parallelize_llama
+        self.adapter = adapter_class(model_args=model_args, hf_assets_path=model_name)
 
         full_state_dict = None
         if self.rank == 0:
@@ -257,7 +243,7 @@ class DTensorV2PolicyWorker:
 
         with init_empty_weights():
             self.model = model_class(
-                model_args=args_8b
+                model_args=model_args
             )
 
         # TODO: Find equivalent of this in TT-type model

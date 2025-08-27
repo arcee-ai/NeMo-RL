@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from torch import nn
 
+from transformers import PreTrainedModel
 
 @dataclass
 class BaseModelArgs:

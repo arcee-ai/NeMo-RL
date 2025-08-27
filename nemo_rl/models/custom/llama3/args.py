@@ -8,9 +8,11 @@
 
 from dataclasses import dataclass
 
+from nemo_rl.models.custom.model import BaseModelArgs
+
 
 @dataclass
-class TransformerModelArgs:
+class TransformerModelArgs(BaseModelArgs):
     dim: int = 4096
     n_layers: int = 32
     n_heads: int = 32
