@@ -1229,7 +1229,6 @@ class DTensorV2PolicyWorker:
         # Broadcast the weights for collective communication
         hf_state_dict = self.adapter.to_hf(self.model.state_dict())
         for name, tensor in hf_state_dict.items():
-            print(f"Broadcasting weight {name} with shape {tensor.shape} and dtype {tensor.dtype}")
             if isinstance(tensor, DTensor):
                 tensor = tensor.full_tensor()
             if self.rank == 0:
