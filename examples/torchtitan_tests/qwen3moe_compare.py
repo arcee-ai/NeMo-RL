@@ -13,7 +13,8 @@ model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_co
 
 print("create tt model")
 with init_empty_weights():
-    model_tt = model_class(model_args).to("cuda")
+    model_tt = model_class(model_args)
+model_tt.to("cuda")
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
 print("load hf model")
