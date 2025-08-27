@@ -17,31 +17,27 @@ from torch.distributed.tensor import (
 from nemo_rl.models.custom.qwen3.model import Qwen3Model
 
 
-TP_PLAN = {
-    "layers.*": PrepareModuleInput(
+PER_LAYER_TP_PLAN = {
+    "attention_norm": SequenceParallel(),
+    "attention": PrepareModuleInput(
         input_layouts=(Shard(1), None),
         desired_input_layouts=(Replicate(), Replicate()),
     ),
-    "layers.*.attention_norm": SequenceParallel(),
-    "layers.*.attention": PrepareModuleInput(
-        input_layouts=(Shard(1), None),
-        desired_input_layouts=(Replicate(), Replicate()),
-    ),
-    "layers.*.attention.wq": ColwiseParallel(),
-    "layers.*.attention.wk": ColwiseParallel(),
-    "layers.*.attention.wv": ColwiseParallel(),
-    "layers.*.attention.wo": RowwiseParallel(output_layouts=Shard(1)),
+    "attention.wq": ColwiseParallel(),
+    "attention.wk": ColwiseParallel(),
+    "attention.wv": ColwiseParallel(),
+    "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
     # q/k head RMSNorm are per-head ops; replicate or sequence parallel is fine.
-    "layers.*.attention.q_norm": SequenceParallel(),
-    "layers.*.attention.k_norm": SequenceParallel(),
-    "layers.*.ffn_norm": SequenceParallel(),
-    "layers.*.feed_forward": PrepareModuleInput(
+    "attention.q_norm": SequenceParallel(),
+    "attention.k_norm": SequenceParallel(),
+    "ffn_norm": SequenceParallel(),
+    "feed_forward": PrepareModuleInput(
         input_layouts=Shard(1),
         desired_input_layouts=Replicate(),
     ),
-    "layers.*.feed_forward.w1": ColwiseParallel(),
-    "layers.*.feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-    "layers.*.feed_forward.w3": ColwiseParallel()
+    "feed_forward.w1": ColwiseParallel(),
+    "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
+    "feed_forward.w3": ColwiseParallel()
 }
 
 
@@ -64,7 +60,8 @@ def parallelize_qwen3(
     if sequence_parallel:
         raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
 
-    parallelize_module(model, tp_mesh, TP_PLAN)
+    for layer in model.layers:
+        parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
 
     return fully_shard(
         model,
