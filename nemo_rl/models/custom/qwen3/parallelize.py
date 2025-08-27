@@ -60,18 +60,32 @@ def parallelize_qwen3(
     if sequence_parallel:
         raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
 
+    fsdp_config = {
+        "mesh": mesh[("dp", "pp")],
+        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
+        "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
+        # TODO: set to True when PP is not being used
+        "reshard_after_forward": False,
+    }
+
     if model.tok_embeddings is not None:
         parallelize_module(model.tok_embeddings, tp_mesh, PER_LAYER_TP_PLAN)
 
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
 
-    return fully_shard(
-        model,
-        mesh=mesh[("dp", "pp")]._flatten(mesh_dim_name="dp_pp"),
-        mp_policy=MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
-        offload_policy=CPUOffloadPolicy() if cpu_offload else None,
-        reshard_after_forward=False,
-    )
+    if model.tok_embeddings is not None:
+        fully_shard(
+            model.tok_embeddings,
+            **fsdp_config
+        )
+    
+    for layer_name, layer in model.layers.items():
+        fully_shard(
+            layer,
+            **fsdp_config
+        )
+
+    return fully_shard(model, **fsdp_config)
 
 
