@@ -93,8 +93,8 @@ logits_hf = model_hf(input_ids).logits
 print("run tt model")
 logits_tt = model_tt(input_ids.to("cuda"))
 
-tt = logits_tt.detach().to(torch.float32)
-hf = logits_hf.detach().to(torch.float32)
+tt = logits_tt.detach().to(torch.float32).to("cpu")
+hf = logits_hf.detach().to(torch.float32).to("cpu")
 
 B, T, V = tt.shape
 tt_flat = tt.reshape(-1, V)
