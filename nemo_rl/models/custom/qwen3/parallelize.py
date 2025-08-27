@@ -9,6 +9,7 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleInput,
     parallelize_module,
 )
+from nemo_rl.models.custom.utils import NoParallel
 from torch.distributed.tensor import (
     Shard,
     Replicate,
