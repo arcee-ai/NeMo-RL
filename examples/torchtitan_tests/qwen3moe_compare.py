@@ -10,10 +10,10 @@ config = AutoConfig.from_pretrained(model_name)
 
 model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_config(config)
 
-model_tt = model_class(model_args)
+model_tt = model_class(model_args).to("cuda")
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
-model_hf = AutoModelForCausalLM.from_pretrained(model_name)
+model_hf = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
 
 model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()))
 
@@ -80,8 +80,7 @@ Grant that the gods his matchless force have given;
 Has foul reproach a privilege from heaven?"""
 
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
-input_ids = inputs["input_ids"]
-
+input_ids = inputs["input_ids"].to("cuda")
 
 logits_tt = model_tt(input_ids)
 logits_hf = model_hf(inputs)
