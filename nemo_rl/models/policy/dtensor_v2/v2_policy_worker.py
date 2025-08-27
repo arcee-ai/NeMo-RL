@@ -242,9 +242,9 @@ class DTensorV2PolicyWorker:
         # The actual weights will be broadcast from rank 0.
 
         with init_empty_weights():
-            self.model = model_class(
+            self.model = torch.compile(model_class(
                 model_args=model_args
-            )
+            ))
 
         # TODO: Find equivalent of this in TT-type model
         # if self.model.config.pad_token_id is None:
