@@ -91,21 +91,20 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
 
         for key, value in hf_state_dict.items():
             # MoE experts per-expert weights → grouped tensors
-            state_dict[key] = value
-            # m = self._re_moe_expert.match(key)
-            # if m is not None:
-            #     layer_idx = m.group(1)
-            #     expert_idx = int(m.group(2))
-            #     which = m.group(3)
-            #     if which == "gate_proj":
-            #         native_key = f"layers.{layer_idx}.moe.experts.w1"
-            #     elif which == "up_proj":
-            #         native_key = f"layers.{layer_idx}.moe.experts.w3"
-            #     else:
-            #         native_key = f"layers.{layer_idx}.moe.experts.w2"
-            #     bucket = experts_accumulator.setdefault(native_key, {})
-            #     bucket[expert_idx] = value
-            #     continue
+            m = self._re_moe_expert.match(key)
+            if m is not None:
+                layer_idx = m.group(1)
+                expert_idx = int(m.group(2))
+                which = m.group(3)
+                if which == "gate_proj":
+                    native_key = f"layers.{layer_idx}.moe.experts.w1"
+                elif which == "up_proj":
+                    native_key = f"layers.{layer_idx}.moe.experts.w3"
+                else:
+                    native_key = f"layers.{layer_idx}.moe.experts.w2"
+                bucket = experts_accumulator.setdefault(native_key, {})
+                bucket[expert_idx] = value
+                continue
 
             # MoE router gate
             m = self._re_moe_router.match(key)
@@ -147,10 +146,10 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
                 state_dict[new_key] = value
 
         # Assemble grouped expert tensors
-        for native_key, slices in experts_accumulator.items():
-            max_idx = max(slices.keys())
-            ordered = [slices[i] for i in range(max_idx + 1)]
-            state_dict[native_key] = torch.stack(ordered, dim=0)
+        # for native_key, slices in experts_accumulator.items():
+        #     max_idx = max(slices.keys())
+        #     ordered = [slices[i] for i in range(max_idx + 1)]
+        #     state_dict[native_key] = torch.stack(ordered, dim=0)
 
         return state_dict
 
