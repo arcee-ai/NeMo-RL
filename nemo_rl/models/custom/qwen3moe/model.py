@@ -289,12 +289,13 @@ class TransformerBlock(nn.Module):
     def init_weights(self, buffer_device: torch.device | None = None):
         # for norm in (self.attention_norm, self.ffn_norm):
         #     norm.reset_parameters()
-        self.attention.init_weights(self.weight_init_std)
+        # self.attention.init_weights(self.weight_init_std)
         if self.moe_enabled:
             pass
             #self.moe.init_weights(self.weight_init_std, buffer_device)
         else:
-            self.feed_forward.init_weights(self.weight_init_std)
+            pass
+            # self.feed_forward.init_weights(self.weight_init_std)
 
 class Qwen3MoEModel(nn.Module):
     def __init__(self, args: Qwen3MoEModelArgs):
