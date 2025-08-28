@@ -4,7 +4,8 @@ import torch.nn as nn
 from nemo_rl.models.custom.moe import MoE
 from nemo_rl.models.custom.qwen3moe.args import Qwen3MoEModelArgs
 
-from nemo_rl.models.custom.qwen3.model import Attention, FeedForward, precompute_rope_cache
+from nemo_rl.models.custom.qwen3.model import Attention, FeedForward
+from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from nemo_rl.models.custom.attention import init_attention_mask
 
 class TransformerBlock(nn.Module):
@@ -104,11 +105,41 @@ class Qwen3MoEModel(nn.Module):
             )
 
     def _precompute_rope_cache(self) -> torch.Tensor:
-        return precompute_rope_cache(
-            self.model_args.head_dim,
-            self.model_args.max_seq_len,
-            self.model_args.rope_theta,
+        # Build a minimal config object for HF RoPE init functions
+        class _Cfg:
+            rope_theta: float
+            head_dim: int
+            hidden_size: int
+            num_attention_heads: int
+            max_position_embeddings: int
+            rope_scaling: dict
+
+        cfg = _Cfg()
+        cfg.rope_theta = self.model_args.rope_theta
+        cfg.head_dim = self.model_args.head_dim
+        cfg.hidden_size = self.model_args.dim
+        cfg.num_attention_heads = self.model_args.n_heads
+        cfg.max_position_embeddings = self.model_args.max_seq_len
+        cfg.rope_scaling = (
+            self.model_args.rope_scaling
+            if self.model_args.rope_scaling is not None
+            else {"rope_type": "default"}
         )
+
+        rope_type = cfg.rope_scaling.get("rope_type", cfg.rope_scaling.get("type", "default"))
+        init_fn = ROPE_INIT_FUNCTIONS.get(rope_type, ROPE_INIT_FUNCTIONS["default"])
+
+        device = torch.device("cpu")
+        inv_freq, attention_scaling = init_fn(cfg, device, seq_len=self.model_args.max_seq_len)
+        # Compute cos/sin with attention scaling and concatenate to match apply_rotary_emb expectations
+        seq_len = self.model_args.max_seq_len
+        position_ids = torch.arange(seq_len, device=device, dtype=torch.float32)
+        freqs = torch.outer(position_ids, inv_freq.float())  # (seq_len, head_dim/2)
+        emb = torch.cat([freqs, freqs], dim=-1)
+        cos = emb.cos() * attention_scaling
+        sin = emb.sin() * attention_scaling
+        rope_cache = torch.cat([cos, sin], dim=-1)  # (seq_len, head_dim)
+        return rope_cache
 
     def forward(self, input_ids: torch.Tensor):
         h = self.tok_embeddings(input_ids) if self.tok_embeddings is not None else input_ids

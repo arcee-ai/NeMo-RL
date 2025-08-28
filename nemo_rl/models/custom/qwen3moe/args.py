@@ -20,6 +20,7 @@ class Qwen3MoEModelArgs(BaseModelArgs):
 
     norm_eps: float = 1e-6
     rope_theta: float = 1000000
+    rope_scaling: dict | None = None
     qk_norm: bool = True
     max_seq_len: int = 4096
     depth_init: bool = True
