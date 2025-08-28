@@ -12,12 +12,12 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
 
         self.from_hf_map = {
             "model.embed_tokens.weight": "tok_embeddings.weight",
-            # "model.layers.{}.self_attn.q_proj.weight": "layers.{}.attention.wq.weight",
-            # "model.layers.{}.self_attn.k_proj.weight": "layers.{}.attention.wk.weight",
-            # "model.layers.{}.self_attn.v_proj.weight": "layers.{}.attention.wv.weight",
-            # "model.layers.{}.self_attn.o_proj.weight": "layers.{}.attention.wo.weight",
-            # "model.layers.{}.self_attn.q_norm.weight": "layers.{}.attention.q_norm.weight",
-            # "model.layers.{}.self_attn.k_norm.weight": "layers.{}.attention.k_norm.weight",
+            "model.layers.{}.self_attn.q_proj.weight": "layers.{}.attention.q_proj.weight",
+            "model.layers.{}.self_attn.k_proj.weight": "layers.{}.attention.k_proj.weight",
+            "model.layers.{}.self_attn.v_proj.weight": "layers.{}.attention.v_proj.weight",
+            "model.layers.{}.self_attn.o_proj.weight": "layers.{}.attention.o_proj.weight",
+            "model.layers.{}.self_attn.q_norm.weight": "layers.{}.attention.q_norm.weight",
+            "model.layers.{}.self_attn.k_norm.weight": "layers.{}.attention.k_norm.weight",
             "model.layers.{}.input_layernorm.weight": "layers.{}.attention_norm.weight",
             "model.layers.{}.post_attention_layernorm.weight": "layers.{}.ffn_norm.weight",
             # Dense MLP path when a layer is non-MoE
