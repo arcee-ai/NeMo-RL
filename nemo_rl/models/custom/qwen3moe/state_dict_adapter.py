@@ -110,7 +110,8 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
             m = self._re_moe_router.match(key)
             if m is not None:
                 layer_idx = m.group(1)
-                state_dict[f"layers.{layer_idx}.moe.router.gate.weight"] = value
+                #state_dict[f"layers.{layer_idx}.moe.router.gate.weight"] = value
+                state_dict[f"layers.{layer_idx}.moe.gate.weight"] = value
                 continue
 
             # Dense MLP path
