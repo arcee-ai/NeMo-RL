@@ -118,7 +118,7 @@ class TransformerBlock(nn.Module):
         
         if self.moe_enabled:
             # For MoE layers, experts operate on model hidden size (dim) and expand to moe_intermediate_size
-            self.mlp = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
+            self.moe = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
             # self.mlp = Qwen3MoeSparseMoeBlock(
             #     model_args.moe_args.num_experts,
             #     model_args.moe_args.top_k,
@@ -128,7 +128,7 @@ class TransformerBlock(nn.Module):
             #     model_args.moe_intermediate_size
             # )
         else:
-            self.mlp = Qwen3MoeMLP(model_args.dim, model_args.hidden_dim)
+            self.ffn = Qwen3MoeMLP(model_args.dim, model_args.hidden_dim)
         
         if model_args.depth_init:
             self.weight_init_std = 0.02 / (2 * (layer_id + 1)) ** 0.5
@@ -147,7 +147,10 @@ class TransformerBlock(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.ffn_norm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
+        if self.moe_enabled:
+            hidden_states = self.moe(hidden_states)
+        else:
+            hidden_states = self.ffn(hidden_states)
         hidden_states = residual + hidden_states
 
         return hidden_states
