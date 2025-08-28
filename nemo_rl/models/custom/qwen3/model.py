@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from nemo_rl.models.custom.attention import build_attention
+from nemo_rl.models.custom.attention import build_attention, init_attention_mask
 
 from .args import Qwen3ModelArgs
 
@@ -152,7 +152,11 @@ class Attention(nn.Module):
         self.wo = nn.Linear(
             model_args.n_heads * self.head_dim, model_args.dim, bias=False
         )
-        self.sdpa = build_attention(model_args.use_flex_attn, model_args.attn_mask_type)
+        self.sdpa = build_attention(
+            model_args.use_flex_attn,
+            model_args.attn_mask_type,
+            model_args.fixed_block_size
+        )
 
     def init_weights(self, init_std: float):
         for linear in (self.wq, self.wk, self.wv):
@@ -430,6 +434,11 @@ class Qwen3Model(nn.Module):
         """
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
+        
+        if self.model_args.use_flex_attn:
+            # FlexAttention only needs seq_len; pass a dummy 4D tensor with the correct [B, S]
+            dummy = torch.empty(h.shape[0], h.shape[1], 1, 1, device=h.device)
+            init_attention_mask(dummy, eos_id=None)
 
         for layer in self.layers.values():
             h = layer(h, self.rope_cache)

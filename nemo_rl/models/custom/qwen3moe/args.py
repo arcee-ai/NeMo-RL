@@ -26,6 +26,7 @@ class Qwen3MoEModelArgs(BaseModelArgs):
 
     use_flex_attn: bool = False
     attn_mask_type: str = "causal"
+    fixed_block_size: int | None = None
     eos_id: int = 151645
 
     enable_weight_tying: bool = False

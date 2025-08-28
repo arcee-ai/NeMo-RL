@@ -5,6 +5,7 @@ from nemo_rl.models.custom.moe import MoE
 from nemo_rl.models.custom.qwen3moe.args import Qwen3MoEModelArgs
 
 from nemo_rl.models.custom.qwen3.model import Attention, FeedForward, precompute_rope_cache
+from nemo_rl.models.custom.attention import init_attention_mask
 
 class TransformerBlock(nn.Module):
     def __init__(self, layer_id: int, model_args: Qwen3MoEModelArgs):
@@ -111,6 +112,11 @@ class Qwen3MoEModel(nn.Module):
 
     def forward(self, input_ids: torch.Tensor):
         h = self.tok_embeddings(input_ids) if self.tok_embeddings is not None else input_ids
+        
+        if self.model_args.use_flex_attn:
+            # FlexAttention only needs seq_len; pass a dummy 4D tensor with the correct [B, S]
+            dummy = torch.empty(h.shape[0], h.shape[1], 1, 1, device=h.device)
+            init_attention_mask(dummy, eos_id=None)
         
         for layer in self.layers.values():
             h = layer(h, self.rope_cache)
