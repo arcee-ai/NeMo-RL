@@ -52,7 +52,6 @@ for key in state_dict_tt.keys():
         if de_numbered not in seen:
             print(f"state_dict_tt has key {key} but model_tt does not")
             failed = True
-        else:
             seen.append(de_numbered)
 if failed:
     raise ValueError("state_dict_tt and model_tt do not have the same keys")
