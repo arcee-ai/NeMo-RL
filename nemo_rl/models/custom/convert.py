@@ -39,6 +39,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             eos_id = int(config.eos_token_id) if getattr(config, "eos_token_id", None) is not None else 0
         ), Llama3StateDictAdapter, parallelize_llama
     elif mt == "qwen3":
+        uses_sliding_causal = getattr(config, "sliding_window", None) is not None
         return Qwen3Model, Qwen3ModelArgs(
             dim = config.hidden_size,
             n_layers = config.num_hidden_layers,
@@ -52,11 +53,12 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             max_seq_len = config.max_position_embeddings,
             eos_id = int(config.eos_token_id) if getattr(config, "eos_token_id", None) is not None else 0,
             enable_weight_tying = config.tie_word_embeddings,
-            attn_mask_type = "sliding_causal",
+            attn_mask_type = "sliding_causal" if uses_sliding_causal else "causal",
             use_flex_attn = True,
-            fixed_block_size = config.sliding_window,
+            fixed_block_size = config.sliding_window if uses_sliding_causal else None,
         ), Qwen3StateDictAdapter, parallelize_qwen3
     elif mt == "qwen3_moe":
+        uses_sliding_causal = getattr(config, "sliding_window", None) is not None
         return Qwen3MoEModel, Qwen3MoEModelArgs(
             dim = config.hidden_size,
             n_layers = config.num_hidden_layers,
@@ -70,9 +72,9 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             max_seq_len = config.max_position_embeddings,
             eos_id = int(config.eos_token_id) if config.eos_token_id is not None else 0,
             enable_weight_tying = config.tie_word_embeddings,
-            attn_mask_type = "sliding_causal",
+            attn_mask_type = "sliding_causal" if uses_sliding_causal else "causal",
             use_flex_attn = True,
-            fixed_block_size = config.sliding_window,
+            fixed_block_size = config.sliding_window if uses_sliding_causal else None,
             moe_args = MoEArgs(
                 num_experts = config.num_experts,
                 num_shared_experts = 0,
