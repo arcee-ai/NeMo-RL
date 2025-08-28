@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from nemo_rl.models.custom.convert import get_model_config
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-model_name = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+model_name = "Qwen/Qwen3-8B"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if device == "cuda":
