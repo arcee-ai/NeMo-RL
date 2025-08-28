@@ -141,7 +141,7 @@ class TransformerBlock(nn.Module):
         hidden_states = self.attention_norm(hidden_states)
 
         # Self Attention
-        hidden_states, _ = self.attention(hidden_states, rope_cache)
+        hidden_states = self.attention(hidden_states, rope_cache)
         hidden_states = residual + hidden_states
 
         # Fully Connected
