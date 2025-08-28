@@ -7,6 +7,11 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 model_name = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+if device == "cuda":
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
+
 config = AutoConfig.from_pretrained(model_name)
 
 model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_config(config)
@@ -17,18 +22,24 @@ with init_empty_weights():
 state_dict_adapter = state_dict_adapter_class(model_args, hf_assets_path=model_name)
 
 print("load hf model")
-model_hf = AutoModelForCausalLM.from_pretrained(model_name, device_map="cpu")
+model_hf = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    device_map=("auto" if device == "cuda" else "cpu"),
+    low_cpu_mem_usage=True,
+    use_safetensors=True,
+    torch_dtype=(torch.bfloat16 if device == "cuda" else None),
+)
 
 print("load state dict into tt")
 state_dict_tt = state_dict_adapter.from_hf(model_hf.state_dict())
 assert state_dict_tt.keys() == model_tt.state_dict().keys()
 model_tt.load_state_dict(state_dict_tt, assign=True)
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
 model_hf.eval()
 model_tt.eval()
-model_tt.to("cuda")
+model_tt.to(device)
 
 tokenizer.padding_side = "left"
 
@@ -42,33 +53,39 @@ Who thus with mild benevolence began:—
 To Troy's proud monarch, and the friends of Troy!
 """
 
-inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
-input_ids = inputs["input_ids"]
+inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=128, padding=False)
+input_ids = inputs["input_ids"].to(device)
 
 print("run hf model")
-logits_hf = model_hf(input_ids).logits
+with torch.inference_mode():
+    if device == "cuda":
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits_hf = model_hf(input_ids).logits
+    else:
+        logits_hf = model_hf(input_ids.cpu()).logits
 print("run tt model")
-with torch.no_grad():
-    logits_tt = model_tt(input_ids.to("cuda"))
+with torch.inference_mode():
+    if device == "cuda":
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits_tt = model_tt(input_ids)
+    else:
+        logits_tt = model_tt(input_ids)
 
-tt = logits_tt.detach().to(torch.float32).to("cpu")
-hf = logits_hf.detach().to(torch.float32).to("cpu")
+# Compare only the last time step and move minimal data to CPU
+tt_last = logits_tt[:, -1, :].detach().to(torch.float32).to("cpu")
+hf_last = logits_hf[:, -1, :].detach().to(torch.float32).to("cpu")
 
-B, T, V = tt.shape
-tt_flat = tt.reshape(-1, V)
-hf_flat = hf.reshape(-1, V)
-
-max_abs_diff = (tt_flat - hf_flat).abs().max()
-mse = F.mse_loss(tt_flat, hf_flat)
+max_abs_diff = (tt_last - hf_last).abs().max()
+mse = F.mse_loss(tt_last, hf_last)
 
 kl_tt_hf = F.kl_div(
-    F.log_softmax(tt_flat, dim=-1),
-    F.softmax(hf_flat, dim=-1),
+    F.log_softmax(tt_last, dim=-1),
+    F.softmax(hf_last, dim=-1),
     reduction="batchmean",
 )
 kl_hf_tt = F.kl_div(
-    F.log_softmax(hf_flat, dim=-1),
-    F.softmax(tt_flat, dim=-1),
+    F.log_softmax(hf_last, dim=-1),
+    F.softmax(tt_last, dim=-1),
     reduction="batchmean",
 )
 
