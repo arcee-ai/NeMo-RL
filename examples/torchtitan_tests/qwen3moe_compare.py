@@ -35,7 +35,7 @@ state_dict_tt = state_dict_adapter.from_hf(model_hf.state_dict())
 failed = False
 
 import re
-number_pattern = "\\.{[0-9]+:[0-9]+}\\."
+number_pattern = "\\.[0-9]+\\."
 seen = []
 for key in model_tt.state_dict().keys():
     de_numbered = re.sub(number_pattern, "[N]", key)
