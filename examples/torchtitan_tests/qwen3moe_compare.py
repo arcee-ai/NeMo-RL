@@ -33,14 +33,28 @@ model_hf = AutoModelForCausalLM.from_pretrained(
 print("load state dict into tt")
 state_dict_tt = state_dict_adapter.from_hf(model_hf.state_dict())
 failed = False
+
+import re
+number_pattern = "\\.{[0-9]+:[0-9]+}\\."
+seen = []
 for key in model_tt.state_dict().keys():
+    de_numbered = re.sub(number_pattern, "[N]", key)
     if key not in state_dict_tt.keys():
-        print(f"model_tt has key {key} but state_dict_tt does not")
-        failed = True
+        if de_numbered not in seen:
+            print(f"model_tt has key {key} but state_dict_tt does not")
+            failed = True
+        else:
+            seen.append(de_numbered)
+
+seen = []
 for key in state_dict_tt.keys():
+    de_numbered = re.sub(number_pattern, "[N]", key)
     if key not in model_tt.state_dict().keys():
-        print(f"state_dict_tt has key {key} but model_tt does not")
-        failed = True
+        if de_numbered not in seen:
+            print(f"state_dict_tt has key {key} but model_tt does not")
+            failed = True
+        else:
+            seen.append(de_numbered)
 if failed:
     raise ValueError("state_dict_tt and model_tt do not have the same keys")
 model_tt.load_state_dict(state_dict_tt, assign=True)
