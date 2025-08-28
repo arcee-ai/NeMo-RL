@@ -45,10 +45,14 @@ class TransformerBlock(nn.Module):
         h = self.attention_norm(x)
         h = self.attention(h, rope_cache)
         h = residual + h
+        
+        residual = h
+        h = self.ffn_norm(h)
         if self.moe_enabled:
-            h = h + self.moe(self.ffn_norm(h))
+            h = h + self.moe(h)
         else:
-            h = h + self.feed_forward(self.ffn_norm(h))
+            h = h + self.feed_forward(h)
+        h = residual + h
         return h
     
     def init_weights(self, buffer_device: torch.device | None = None):
