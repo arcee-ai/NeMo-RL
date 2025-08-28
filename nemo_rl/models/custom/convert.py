@@ -54,7 +54,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             eos_id = int(config.eos_token_id) if getattr(config, "eos_token_id", None) is not None else 0,
             enable_weight_tying = config.tie_word_embeddings,
             attn_mask_type = "sliding_causal" if uses_sliding_causal else "causal",
-            use_flex_attn = True,
+            use_flex_attn = uses_sliding_causal,
             fixed_block_size = config.sliding_window if uses_sliding_causal else None,
         ), Qwen3StateDictAdapter, parallelize_qwen3
     elif mt == "qwen3_moe":
@@ -74,7 +74,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             eos_id = int(config.eos_token_id) if config.eos_token_id is not None else 0,
             enable_weight_tying = config.tie_word_embeddings,
             attn_mask_type = "sliding_causal" if uses_sliding_causal else "causal",
-            use_flex_attn = True,
+            use_flex_attn = uses_sliding_causal,
             fixed_block_size = config.sliding_window if uses_sliding_causal else None,
             moe_args = MoEArgs(
                 num_experts = config.num_experts,
