@@ -32,10 +32,17 @@ model_hf = AutoModelForCausalLM.from_pretrained(
 
 print("load state dict into tt")
 state_dict_tt = state_dict_adapter.from_hf(model_hf.state_dict())
+failed = False
 for key in model_tt.state_dict().keys():
-    assert key in state_dict_tt.keys(), f"model_tt has key {key} but state_dict_tt does not"
+    if key not in state_dict_tt.keys():
+        print(f"model_tt has key {key} but state_dict_tt does not")
+        failed = True
 for key in state_dict_tt.keys():
-    assert key in model_tt.state_dict().keys(), f"state_dict_tt has key {key} but model_tt does not"
+    if key not in model_tt.state_dict().keys():
+        print(f"state_dict_tt has key {key} but model_tt does not")
+        failed = True
+if failed:
+    raise ValueError("state_dict_tt and model_tt do not have the same keys")
 model_tt.load_state_dict(state_dict_tt, assign=True)
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
