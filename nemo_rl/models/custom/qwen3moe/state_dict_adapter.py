@@ -91,6 +91,7 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
 
         for key, value in hf_state_dict.items():
             # MoE experts per-expert weights → grouped tensors
+            state_dict[key] = value
             # m = self._re_moe_expert.match(key)
             # if m is not None:
             #     layer_idx = m.group(1)
