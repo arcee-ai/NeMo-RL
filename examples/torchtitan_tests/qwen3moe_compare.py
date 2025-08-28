@@ -28,7 +28,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 model_hf.eval()
 model_tt.eval()
-model_tt.to("cuda")
+# model_tt.to("cuda")
 
 tokenizer.padding_side = "left"
 
@@ -48,7 +48,7 @@ input_ids = inputs["input_ids"]
 print("run hf model")
 logits_hf = model_hf(input_ids).logits
 print("run tt model")
-logits_tt = model_tt(input_ids.to("cuda"))
+logits_tt = model_tt(input_ids)
 
 tt = logits_tt.detach().to(torch.float32).to("cpu")
 hf = logits_hf.detach().to(torch.float32).to("cpu")
