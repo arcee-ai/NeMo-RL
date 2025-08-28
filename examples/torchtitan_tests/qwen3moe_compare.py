@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from nemo_rl.models.custom.convert import get_model_config
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-model_name = "kalomaze/Qwen3-16B-A3B"
+model_name = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
 config = AutoConfig.from_pretrained(model_name)
 
