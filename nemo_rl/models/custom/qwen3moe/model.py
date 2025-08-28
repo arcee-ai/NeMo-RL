@@ -74,8 +74,8 @@ class TransformerBlock(nn.Module):
         return h
     
     def init_weights(self, buffer_device: torch.device | None = None):
-        for norm in (self.attention_norm, self.ffn_norm):
-            norm.reset_parameters()
+        # for norm in (self.attention_norm, self.ffn_norm):
+        #     norm.reset_parameters()
         self.attention.init_weights(self.weight_init_std)
         if self.moe_enabled:
             self.moe.init_weights(self.weight_init_std, buffer_device)
