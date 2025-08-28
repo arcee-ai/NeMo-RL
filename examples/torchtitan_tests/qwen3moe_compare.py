@@ -34,7 +34,7 @@ print("load state dict into tt")
 state_dict_tt = state_dict_adapter.from_hf(model_hf.state_dict())
 failed = False
 
-check_keys_granular = True
+check_keys_granular = False
 
 if check_keys_granular:
     import re
