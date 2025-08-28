@@ -118,15 +118,15 @@ class TransformerBlock(nn.Module):
         
         if self.moe_enabled:
             # For MoE layers, experts operate on model hidden size (dim) and expand to moe_intermediate_size
-            #self.moe = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
-            self.mlp = Qwen3MoeSparseMoeBlock(
-                model_args.moe_args.num_experts,
-                model_args.moe_args.top_k,
-                True,
-                model_args.dim,
-                model_args.hidden_dim,
-                model_args.moe_intermediate_size
-            )
+            self.mlp = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
+            # self.mlp = Qwen3MoeSparseMoeBlock(
+            #     model_args.moe_args.num_experts,
+            #     model_args.moe_args.top_k,
+            #     True,
+            #     model_args.dim,
+            #     model_args.hidden_dim,
+            #     model_args.moe_intermediate_size
+            # )
         else:
             self.mlp = Qwen3MoeMLP(model_args.dim, model_args.hidden_dim)
         
