@@ -13,9 +13,13 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
         self.from_hf_map = {
             "model.embed_tokens.weight": "tok_embeddings.weight",
             "model.layers.{}.self_attn.q_proj.weight": "layers.{}.attention.q_proj.weight",
+            "model.layers.{}.self_attn.q_proj.bias": "layers.{}.attention.q_proj.bias",
             "model.layers.{}.self_attn.k_proj.weight": "layers.{}.attention.k_proj.weight",
+            "model.layers.{}.self_attn.k_proj.bias": "layers.{}.attention.k_proj.bias",
             "model.layers.{}.self_attn.v_proj.weight": "layers.{}.attention.v_proj.weight",
+            "model.layers.{}.self_attn.v_proj.bias": "layers.{}.attention.v_proj.bias",
             "model.layers.{}.self_attn.o_proj.weight": "layers.{}.attention.o_proj.weight",
+            "model.layers.{}.self_attn.o_proj.bias": "layers.{}.attention.o_proj.bias",
             "model.layers.{}.self_attn.q_norm.weight": "layers.{}.attention.q_norm.weight",
             "model.layers.{}.self_attn.k_norm.weight": "layers.{}.attention.k_norm.weight",
             "model.layers.{}.input_layernorm.weight": "layers.{}.attention_norm.weight",
