@@ -248,7 +248,17 @@ class TransformerBlock(nn.Module):
         
         # TODO: make moe config a superclass of non-moe config?
         # self.attention = Attention(model_args) # type: ignore
-        self.attention = Qwen3MoeAttention(layer_id, model_args.dim, model_args.n_heads, model_args.n_heads, model_args.norm_eps, False, 0.0, None, model_args.head_dim)
+        self.attention = Qwen3MoeAttention(
+            layer_idx=layer_id,
+            dim=model_args.dim,
+            num_attn_heads=model_args.n_heads,
+            num_key_value_heads=model_args.n_kv_heads,
+            rms_norm_eps=model_args.norm_eps,
+            attention_bias=False,
+            attention_dropout=0.0,
+            sliding_window=None,
+            head_dim=model_args.head_dim
+        )
         
         self.attention_norm = HFRMSNorm(model_args.dim, eps=model_args.norm_eps)
         self.ffn_norm = HFRMSNorm(model_args.dim, eps=model_args.norm_eps)
