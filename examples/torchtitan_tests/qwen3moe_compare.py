@@ -41,7 +41,7 @@ for key in model_tt.state_dict().keys():
     de_numbered = re.sub(number_pattern, "[N]", key)
     if key not in state_dict_tt.keys():
         if de_numbered not in seen:
-            print(f"model_tt has key {key} but state_dict_tt does not")
+            print(f"model_tt has key {de_numbered} but state_dict_tt does not")
             failed = True
         else:
             seen.append(de_numbered)
