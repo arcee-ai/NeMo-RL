@@ -9,6 +9,7 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleInput,
     parallelize_module,
 )
+from nemo_rl.models.custom.expert_parallel import ExpertParallel
 from nemo_rl.models.custom.utils import NoParallel
 from torch.distributed.tensor import (
     Shard,
@@ -31,8 +32,7 @@ PER_LAYER_TP_PLAN = {
     "attention.k_norm": NoParallel(use_local_output=True),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
     "ffn_norm": SequenceParallel(),
-    # MoE block: keep local for now (no EP yet)
-    "moe": NoParallel(use_local_output=True),
+    "moe": ExpertParallel(),
 }
 
 
