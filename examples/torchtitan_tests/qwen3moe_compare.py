@@ -40,52 +40,7 @@ All view'd with awe the venerable man;
 Who thus with mild benevolence began:—
 "What shame, what woe is this to Greece! what joy
 To Troy's proud monarch, and the friends of Troy!
-That adverse gods commit to stern debate
-The best, the bravest, of the Grecian state.
-Young as ye are, this youthful heat restrain,
-Nor think your Nestor's years and wisdom vain.
-A godlike race of heroes once I knew,
-Such as no more these aged eyes shall view!
-Lives there a chief to match Pirithous' fame,
-Dryas the bold, or Ceneus' deathless name;
-Theseus, endued with more than mortal might,
-Or Polyphemus, like the gods in fight?
-With these of old, to toils of battle bred,
-In early youth my hardy days I led;
-Fired with the thirst which virtuous envy breeds,
-And smit with love of honourable deeds,
-Strongest of men, they pierced the mountain boar,
-Ranged the wild deserts red with monsters' gore,
-And from their hills the shaggy Centaurs tore:
-Yet these with soft persuasive arts I sway'd;
-When Nestor spoke, they listen'd and obey'd.
-If in my youth, even these esteem'd me wise;
-Do you, young warriors, hear my age advise.
-Atrides, seize not on the beauteous slave;
-That prize the Greeks by common suffrage gave:
-Nor thou, Achilles, treat our prince with pride;
-Let kings be just, and sovereign power preside.
-20 The Iliad of Homer
-Thee, the first honours of the war adorn,
-Like gods in strength, and of a goddess born;
-Him, awful majesty exalts above
-The powers of earth, and sceptred sons of Jove.
-Let both unite with well-consenting mind,
-So shall authority with strength be join'd.
-Leave me, O king! to calm Achilles' rage;
-Rule thou thyself, as more advanced in age.
-Forbid it, gods! Achilles should be lost,
-The pride of Greece, and bulwark of our host."
-This said, he ceased. The king of men replies:
-"Thy years are awful, and thy words are wise.
-But that imperious, that unconquer'd soul,
-No laws can limit, no respect control.
-Before his pride must his superiors fall;
-His word the law, and he the lord of all?
-Him must our hosts, our chiefs, ourself obey?
-What king can bear a rival in his sway?
-Grant that the gods his matchless force have given;
-Has foul reproach a privilege from heaven?"""
+"""
 
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
 input_ids = inputs["input_ids"]
