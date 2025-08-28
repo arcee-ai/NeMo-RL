@@ -104,7 +104,7 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
                 #     native_key = f"layers.{layer_idx}.moe.experts.w2"
                 # bucket = experts_accumulator.setdefault(native_key, {})
                 # bucket[expert_idx] = value
-                state_dict[f"layers.{layer_idx}.moe.experts.{expert_idx}.{which}.weight"] = value
+                state_dict[f"layers.{layer_idx}.mlp.experts.{expert_idx}.{which}.weight"] = value
                 continue
 
             # MoE router gate
@@ -112,7 +112,7 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
             if m is not None:
                 layer_idx = m.group(1)
                 #state_dict[f"layers.{layer_idx}.moe.router.gate.weight"] = value
-                state_dict[f"layers.{layer_idx}.moe.gate.weight"] = value
+                state_dict[f"layers.{layer_idx}.mlp.gate.weight"] = value
                 continue
 
             # Dense MLP path

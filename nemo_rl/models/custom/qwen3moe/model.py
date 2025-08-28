@@ -119,35 +119,38 @@ class TransformerBlock(nn.Module):
         if self.moe_enabled:
             # For MoE layers, experts operate on model hidden size (dim) and expand to moe_intermediate_size
             #self.moe = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
-            self.moe = Qwen3MoeSparseMoeBlock(
+            self.mlp = Qwen3MoeSparseMoeBlock(
                 model_args.moe_args.num_experts,
                 model_args.moe_args.top_k,
                 True,
-                model_args.dim, model_args.hidden_dim,
+                model_args.dim,
+                model_args.hidden_dim,
                 model_args.moe_intermediate_size
             )
         else:
-            self.feed_forward = Qwen3MoeMLP(model_args.dim, model_args.hidden_dim)
+            self.mlp = Qwen3MoeMLP(model_args.dim, model_args.hidden_dim)
         
         if model_args.depth_init:
             self.weight_init_std = 0.02 / (2 * (layer_id + 1)) ** 0.5
         else:
             self.weight_init_std = 0.02 / (2 * model_args.n_layers) ** 0.5
             
-    def forward(self, x: torch.Tensor, rope_cache: torch.Tensor):
-        residual = x
-        h = self.attention_norm(x)
-        h = self.attention(h, rope_cache)
-        h = residual + h
-        
-        residual = h
-        h = self.ffn_norm(h)
-        if self.moe_enabled:
-            h = h + self.moe(h)
-        else:
-            h = h + self.feed_forward(h)
-        h = residual + h
-        return h
+    def forward(self, hidden_states: torch.Tensor, rope_cache: torch.Tensor):
+        residual = hidden_states
+
+        hidden_states = self.input_layernorm(hidden_states)
+
+        # Self Attention
+        hidden_states, _ = self.attention(hidden_states, rope_cache)
+        hidden_states = residual + hidden_states
+
+        # Fully Connected
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        return hidden_states
     
     def init_weights(self, buffer_device: torch.device | None = None):
         # for norm in (self.attention_norm, self.ffn_norm):
