@@ -71,13 +71,13 @@ class TransformerBlock(nn.Module):
             # self.feed_forward.init_weights(self.weight_init_std)
 
 class Qwen3MoEModel(nn.Module):
-    def __init__(self, args: Qwen3MoEModelArgs):
+    def __init__(self, model_args: Qwen3MoEModelArgs):
         super().__init__()
-        self.model_args = args
-        self.vocab_size = args.vocab_size
-        self.n_layers = args.n_layers
-        self.eos_id = args.eos_id
-        self.head_dim = args.head_dim
+        self.model_args = model_args
+        self.vocab_size = model_args.vocab_size
+        self.n_layers = model_args.n_layers
+        self.eos_id = model_args.eos_id
+        self.head_dim = model_args.head_dim
         
         self.tok_embeddings = nn.Embedding(self.vocab_size, self.model_args.dim)
         
