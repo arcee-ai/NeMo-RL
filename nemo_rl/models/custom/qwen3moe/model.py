@@ -138,7 +138,7 @@ class TransformerBlock(nn.Module):
     def forward(self, hidden_states: torch.Tensor, rope_cache: torch.Tensor):
         residual = hidden_states
 
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.attention_norm(hidden_states)
 
         # Self Attention
         hidden_states, _ = self.attention(hidden_states, rope_cache)
@@ -146,7 +146,7 @@ class TransformerBlock(nn.Module):
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.ffn_norm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
