@@ -27,6 +27,20 @@ class HFRMSNorm(nn.Module):
     def extra_repr(self):
         return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
+class Qwen3MoeMLP(nn.Module):
+    def __init__(self, dim: int, hidden_dim: int):
+        super().__init__()
+        self.hidden_size = dim
+        self.intermediate_size = hidden_dim
+        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
+        self.act_fn = nn.SiLU()
+
+    def forward(self, x):
+        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        return down_proj
+
 class TransformerBlock(nn.Module):
     def __init__(self, layer_id: int, model_args: Qwen3MoEModelArgs):
         super().__init__()
@@ -49,9 +63,7 @@ class TransformerBlock(nn.Module):
             # For MoE layers, experts operate on model hidden size (dim) and expand to moe_intermediate_size
             self.moe = MoE(model_args.moe_args, model_args.dim, model_args.moe_intermediate_size)
         else:
-            self.feed_forward = FeedForward(
-                dim=model_args.dim, hidden_dim=model_args.hidden_dim
-            )
+            self.feed_forward = Qwen3MoeMLP(model_args.dim, model_args.hidden_dim)
         
         if model_args.depth_init:
             self.weight_init_std = 0.02 / (2 * (layer_id + 1)) ** 0.5
