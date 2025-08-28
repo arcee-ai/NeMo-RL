@@ -12,144 +12,6 @@ from nemo_rl.models.custom.attention import init_attention_mask
 
 from transformers.models.qwen3_moe.modeling_qwen3_moe import create_causal_mask
 
-def rotate_half(x):
-    """Rotates half the hidden dims of the input."""
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    return torch.cat((-x2, x1), dim=-1)
-
-def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
-    """Applies Rotary Position Embedding to the query and key tensors.
-
-    Args:
-        q (`torch.Tensor`): The query tensor.
-        k (`torch.Tensor`): The key tensor.
-        cos (`torch.Tensor`): The cosine part of the rotary embedding.
-        sin (`torch.Tensor`): The sine part of the rotary embedding.
-        position_ids (`torch.Tensor`, *optional*):
-            Deprecated and unused.
-        unsqueeze_dim (`int`, *optional*, defaults to 1):
-            The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
-            sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
-            that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
-            k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
-            cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
-            the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
-    Returns:
-        `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
-    """
-    cos = cos.unsqueeze(unsqueeze_dim)
-    sin = sin.unsqueeze(unsqueeze_dim)
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
-
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """
-    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
-    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
-    """
-    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
-    if n_rep == 1:
-        return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
-
-def eager_attention_forward(
-    module: "Qwen3MoeAttention",
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: Optional[torch.Tensor],
-    scaling: float,
-    dropout: float = 0.0
-):
-    key_states = repeat_kv(key, module.num_key_value_groups)
-    value_states = repeat_kv(value, module.num_key_value_groups)
-
-    attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
-    if attention_mask is not None:
-        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-        attn_weights = attn_weights + causal_mask
-
-    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
-    attn_weights = nn.functional.dropout(attn_weights, p=dropout, training=module.training)
-    attn_output = torch.matmul(attn_weights, value_states)
-    attn_output = attn_output.transpose(1, 2).contiguous()
-
-    return attn_output, attn_weights
-
-class Qwen3MoeAttention(nn.Module):
-    """Multi-headed attention from 'Attention Is All You Need' paper"""
-
-    def __init__(
-        self,
-        layer_idx: int,
-        dim: int,
-        num_attn_heads: int,
-        num_key_value_heads: int,
-        rms_norm_eps: float,
-        attention_bias: bool,
-        attention_dropout: float,
-        sliding_window: int | None,
-        head_dim: int
-    ):
-        super().__init__()
-        self.layer_idx = layer_idx
-        self.head_dim = head_dim
-        self.num_key_value_groups = num_attn_heads // num_key_value_heads
-        self.scaling = self.head_dim**-0.5
-        self.attention_dropout = attention_dropout
-        self.is_causal = True
-
-        self.q_proj = nn.Linear(
-            dim, num_attn_heads * self.head_dim, bias=attention_bias
-        )
-        self.k_proj = nn.Linear(
-            dim, num_key_value_heads * self.head_dim, bias=attention_bias
-        )
-        self.v_proj = nn.Linear(
-            dim, num_key_value_heads * self.head_dim, bias=attention_bias
-        )
-        self.o_proj = nn.Linear(
-            num_attn_heads * self.head_dim, dim, bias=attention_bias
-        )
-        self.q_norm = HFRMSNorm(self.head_dim, eps=rms_norm_eps)  # unlike olmo, only on the head dim!
-        self.k_norm = HFRMSNorm(self.head_dim, eps=rms_norm_eps)  # thus post q_norm does not need reshape
-        self.sliding_window = sliding_window
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
-        attention_mask: Optional[torch.Tensor]
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
-        input_shape = hidden_states.shape[:-1]
-        hidden_shape = (*input_shape, -1, self.head_dim)
-
-        query_states = self.q_norm(self.q_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
-        key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
-        value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-
-        cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-
-        attention_interface = eager_attention_forward
-
-        attn_output, attn_weights = attention_interface(
-            self,
-            query_states,
-            key_states,
-            value_states,
-            attention_mask,
-            scaling=self.scaling,
-            dropout=0.0 if not self.training else self.attention_dropout,
-        )
-
-        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
-        attn_output = self.o_proj(attn_output)
-        return attn_output
-
 class HFRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -249,18 +111,7 @@ class TransformerBlock(nn.Module):
         )
         
         # TODO: make moe config a superclass of non-moe config?
-        # self.attention = Attention(model_args) # type: ignore
-        self.attention = Qwen3MoeAttention(
-            layer_idx=layer_id,
-            dim=model_args.dim,
-            num_attn_heads=model_args.n_heads,
-            num_key_value_heads=model_args.n_kv_heads,
-            rms_norm_eps=model_args.norm_eps,
-            attention_bias=False,
-            attention_dropout=0.0,
-            sliding_window=None,
-            head_dim=model_args.head_dim
-        )
+        self.attention = Attention(model_args) # type: ignore
         
         self.attention_norm = HFRMSNorm(model_args.dim, eps=model_args.norm_eps)
         self.ffn_norm = HFRMSNorm(model_args.dim, eps=model_args.norm_eps)
@@ -286,9 +137,7 @@ class TransformerBlock(nn.Module):
     def forward(self, x: torch.Tensor, rope_cache: torch.Tensor):
         residual = x
         h = self.attention_norm(x)
-        from nemo_rl.models.custom.attention import FlexAttention
-        block_mask = FlexAttention.block_masks[("causal", None)]
-        h = self.attention(h, rope_cache, block_mask)
+        h = self.attention(h, rope_cache)
         h = residual + h
         
         residual = h
