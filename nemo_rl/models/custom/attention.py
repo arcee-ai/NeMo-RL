@@ -67,7 +67,7 @@ class FlexAttention(torch.nn.Module):
         self, attn_mask_type: str, fixed_block_size: int | None = None
     ) -> None:
         super().__init__()
-        if attn_mask_type not in ["causal", "block_causal"]:
+        if attn_mask_type not in ["causal", "block_causal", "sliding_causal"]:
             raise ValueError(f"Unrecognized attn_mask_type {attn_mask_type}.")
         self.attn_mask_type = attn_mask_type
         self.fixed_block_size = fixed_block_size

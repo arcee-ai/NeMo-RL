@@ -51,7 +51,10 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             rope_theta = config.rope_theta,
             max_seq_len = config.max_position_embeddings,
             eos_id = int(config.eos_token_id) if getattr(config, "eos_token_id", None) is not None else 0,
-            enable_weight_tying = config.tie_word_embeddings
+            enable_weight_tying = config.tie_word_embeddings,
+            attn_mask_type = "sliding_causal",
+            use_flex_attn = True,
+            fixed_block_size = config.sliding_window,
         ), Qwen3StateDictAdapter, parallelize_qwen3
     elif mt == "qwen3_moe":
         return Qwen3MoEModel, Qwen3MoEModelArgs(
@@ -69,6 +72,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             enable_weight_tying = config.tie_word_embeddings,
             attn_mask_type = "sliding_causal",
             use_flex_attn = True,
+            fixed_block_size = config.sliding_window,
             moe_args = MoEArgs(
                 num_experts = config.num_experts,
                 num_shared_experts = 0,
