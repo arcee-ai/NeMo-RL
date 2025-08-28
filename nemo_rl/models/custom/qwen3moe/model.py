@@ -41,7 +41,10 @@ class TransformerBlock(nn.Module):
             self.weight_init_std = 0.02 / (2 * model_args.n_layers) ** 0.5
             
     def forward(self, x: torch.Tensor, rope_cache: torch.Tensor):
-        h = x + self.attention(self.attention_norm(x), rope_cache)
+        residual = x
+        h = self.attention_norm(x)
+        h = self.attention(h, rope_cache)
+        h = residual + h
         if self.moe_enabled:
             h = h + self.moe(self.ffn_norm(h))
         else:
