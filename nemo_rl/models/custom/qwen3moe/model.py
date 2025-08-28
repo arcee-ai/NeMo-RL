@@ -10,6 +10,8 @@ from nemo_rl.models.custom.qwen3.model import Attention, FeedForward
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from nemo_rl.models.custom.attention import init_attention_mask
 
+from transformers.models.qwen3_moe.modeling_qwen3_moe import create_causal_mask
+
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
@@ -284,7 +286,9 @@ class TransformerBlock(nn.Module):
     def forward(self, x: torch.Tensor, rope_cache: torch.Tensor):
         residual = x
         h = self.attention_norm(x)
-        h = self.attention(h, rope_cache)
+        from nemo_rl.models.custom.attention import FlexAttention
+        block_mask = FlexAttention.block_masks[("causal", None)]
+        h = self.attention(h, rope_cache, block_mask)
         h = residual + h
         
         residual = h
