@@ -8,13 +8,31 @@ from nemo_rl.models.custom.qwen3.model import Attention, FeedForward
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from nemo_rl.models.custom.attention import init_attention_mask
 
+class HFRMSNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
+        """
+        Qwen3MoeRMSNorm is equivalent to T5LayerNorm
+        """
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
+
+    def extra_repr(self):
+        return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
+
 class TransformerBlock(nn.Module):
     def __init__(self, layer_id: int, model_args: Qwen3MoEModelArgs):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
         
-        # Match HF: MoE if not in mlp_only_layers, num_experts > 0, and (layer_id+1) % decoder_sparse_step == 0
         self.moe_enabled = (
             (layer_id not in model_args.mlp_only_layers)
             and (model_args.moe_args.num_experts > 0)
@@ -24,8 +42,8 @@ class TransformerBlock(nn.Module):
         # TODO: make moe config a superclass of non-moe config?
         self.attention = Attention(model_args) # type: ignore
         
-        self.attention_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
-        self.ffn_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
+        self.attention_norm = HFRMSNorm(model_args.dim, eps=model_args.norm_eps)
+        self.ffn_norm = HFRMSNorm(model_args.dim, eps=model_args.norm_eps)
         
         if self.moe_enabled:
             # For MoE layers, experts operate on model hidden size (dim) and expand to moe_intermediate_size
