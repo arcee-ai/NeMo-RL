@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from nemo_rl.models.custom.convert import get_model_config
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-model_name = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+model_name = "kalomaze/Qwen3-16B-A3B"
 
 config = AutoConfig.from_pretrained(model_name)
 
@@ -20,7 +20,9 @@ print("load hf model")
 model_hf = AutoModelForCausalLM.from_pretrained(model_name, device_map="cpu")
 
 print("load state dict into tt")
-model_tt.load_state_dict(state_dict_adapter.from_hf(model_hf.state_dict()), assign=True)
+state_dict_tt = state_dict_adapter.from_hf(model_hf.state_dict())
+assert state_dict_tt.keys() == model_tt.state_dict().keys()
+model_tt.load_state_dict(state_dict_tt, assign=True)
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
