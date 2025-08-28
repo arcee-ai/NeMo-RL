@@ -96,14 +96,15 @@ class Qwen3MoeStateDictAdapter(StateDictAdapter):
                 layer_idx = m.group(1)
                 expert_idx = int(m.group(2))
                 which = m.group(3)
-                if which == "gate_proj":
-                    native_key = f"layers.{layer_idx}.moe.experts.w1"
-                elif which == "up_proj":
-                    native_key = f"layers.{layer_idx}.moe.experts.w3"
-                else:
-                    native_key = f"layers.{layer_idx}.moe.experts.w2"
-                bucket = experts_accumulator.setdefault(native_key, {})
-                bucket[expert_idx] = value
+                # if which == "gate_proj":
+                #     native_key = f"layers.{layer_idx}.moe.experts.w1"
+                # elif which == "up_proj":
+                #     native_key = f"layers.{layer_idx}.moe.experts.w3"
+                # else:
+                #     native_key = f"layers.{layer_idx}.moe.experts.w2"
+                # bucket = experts_accumulator.setdefault(native_key, {})
+                # bucket[expert_idx] = value
+                state_dict[f"layers.{layer_idx}.moe.experts.{expert_idx}.{which}.weight"] = value
                 continue
 
             # MoE router gate
