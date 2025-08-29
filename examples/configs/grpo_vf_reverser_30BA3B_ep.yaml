@@ -39,7 +39,7 @@ policy:
   train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 1
-  max_total_sequence_length: 512
+  max_total_sequence_length: 256
   precision: "bfloat16"
 
   dtensor_cfg:
@@ -56,7 +56,7 @@ policy:
     cpu_offload: False
     sequence_parallel: false
     activation_checkpointing: false
-    tensor_parallel_size: 4
+    tensor_parallel_size: 2
     context_parallel_size: 1
     pipeline_parallel_size: 1
     expert_parallel_size: 2
@@ -110,8 +110,8 @@ policy:
     - milestones: [50]
 
   generation:
-    backend: "vllm"
-    max_new_tokens: 256
+    backend: "vllm_http"
+    max_new_tokens: 128
     temperature: 1.0
     top_p: 1.0
     top_k: null
@@ -121,16 +121,16 @@ policy:
     vllm_cfg:
       async_engine: false
       precision: ${policy.precision}
-      tensor_parallel_size: 4
+      tensor_parallel_size: 1
       pipeline_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
       extra_cli_args: []
     colocated:
-      enabled: true
+      enabled: false
       resources:
-        gpus_per_node: null
+        gpus_per_node: 2
         num_nodes: null
 
 data:
