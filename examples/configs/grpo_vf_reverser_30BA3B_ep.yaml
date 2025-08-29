@@ -126,7 +126,7 @@ policy:
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
-      extra_cli_args: []
+      extra_cli_args: ["--trust-remote-code"]
     colocated:
       enabled: false
       resources:
