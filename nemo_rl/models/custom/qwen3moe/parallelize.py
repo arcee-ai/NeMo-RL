@@ -10,14 +10,15 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 from nemo_rl.models.custom.expert_parallel import ExpertParallel
-from nemo_rl.models.custom.utils import NoParallel
+from nemo_rl.models.custom.utils import NoParallel, PrepareModuleInputOutput
 from torch.distributed.tensor import (
     Shard,
+    Partial,
     Replicate,
 )
 
 from nemo_rl.models.custom.qwen3moe.model import Qwen3MoEModel
-
+from nemo_rl.models.custom.moe import MoE
 
 PER_LAYER_TP_PLAN = {
     "attention_norm": SequenceParallel(),
@@ -31,11 +32,17 @@ PER_LAYER_TP_PLAN = {
     "attention.q_norm": NoParallel(use_local_output=True),
     "attention.k_norm": NoParallel(use_local_output=True),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-    "ffn_norm": SequenceParallel()
-}
-
-PER_LAYER_EP_PLAN = {
-    "moe": ExpertParallel(),
+    "ffn_norm": SequenceParallel(),
+    # moe stuff
+    "moe": PrepareModuleInputOutput(
+        input_layouts=(Shard(1),),
+        desired_input_layouts=(Replicate(),),
+        use_local_input=True,
+        output_layouts=(Partial(),),
+        desired_output_layouts=(Shard(1),),
+    ),
+    # replicate computation for the router
+    "moe.router.gate": NoParallel(),
 }
 
 
@@ -69,10 +76,10 @@ def parallelize_qwen3moe(
     # Per-layer TP plan
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
-    
-    # Now, apply EP
-    for layer_name, layer in model.layers.items():
-        parallelize_module(layer, ep_mesh, PER_LAYER_EP_PLAN)
+        
+        if hasattr(layer, "moe"):
+            moe_layer: MoE = layer.moe
+            parallelize_module(moe_layer.experts, ep_mesh, ExpertParallel())
 
     # Top-level modules: embeddings, norm, output
     parallelize_module(
