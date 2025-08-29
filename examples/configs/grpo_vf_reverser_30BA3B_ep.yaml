@@ -110,7 +110,7 @@ policy:
     - milestones: [50]
 
   generation:
-    backend: "vllm_http"
+    backend: "vllm"
     max_new_tokens: 256
     temperature: 1.0
     top_p: 1.0
@@ -128,9 +128,9 @@ policy:
       enforce_eager: False
       extra_cli_args: []
     colocated:
-      enabled: false
+      enabled: true
       resources:
-        gpus_per_node: 2
+        gpus_per_node: null
         num_nodes: null
 
 data:
@@ -160,5 +160,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 6
+  gpus_per_node: 8
   num_nodes: 1
