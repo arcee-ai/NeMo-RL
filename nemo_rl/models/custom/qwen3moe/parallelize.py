@@ -31,7 +31,10 @@ PER_LAYER_TP_PLAN = {
     "attention.q_norm": NoParallel(use_local_output=True),
     "attention.k_norm": NoParallel(use_local_output=True),
     "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-    "ffn_norm": SequenceParallel(),
+    "ffn_norm": SequenceParallel()
+}
+
+PER_LAYER_EP_PLAN = {
     "moe": ExpertParallel(),
 }
 
@@ -66,6 +69,10 @@ def parallelize_qwen3moe(
     # Per-layer TP plan
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
+    
+    # Now, apply EP
+    for layer_name, layer in model.layers.items():
+        parallelize_module(layer, ep_mesh, PER_LAYER_EP_PLAN)
 
     # Top-level modules: embeddings, norm, output
     parallelize_module(
