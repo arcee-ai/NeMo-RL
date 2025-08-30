@@ -28,7 +28,7 @@ class VllmHttpWorkerExtension:
         from nemo_rl.vllm_comms.pynccl import PyNcclCommunicator
         from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
 
-        local_rank = torch.distributed.get_rank()
+        local_rank = self.rank
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster
         
         print(f"vLLM worker ext @ init_collective: rank_prefix={rank_prefix}, ip={ip}, port={port}, world_size={world_size} on device {self.device} and rank {rank}")
