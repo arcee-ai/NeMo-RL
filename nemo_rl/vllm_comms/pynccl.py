@@ -84,6 +84,12 @@ class PyNcclCommunicator:
             self.comm: ncclComm_t = self.nccl.ncclCommInitRank(
                 self.world_size, self.unique_id, self.rank)
 
+            stream = current_stream()
+            data = torch.zeros(1, device=device)
+            self.all_reduce(data)
+            stream.synchronize()
+            del data
+
     def all_reduce(self, in_tensor: torch.Tensor, op: ReduceOp = ReduceOp.SUM, stream=None) -> torch.Tensor:
         if self.disabled:
             return None  # type: ignore[return-value]
