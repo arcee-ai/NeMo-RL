@@ -19,6 +19,7 @@ import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import Any, Generator, Iterable, Optional, Set, Union, cast
+import logging
 
 import ray
 import torch
@@ -485,6 +486,7 @@ class DTensorV2PolicyWorker:
         from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
 
         if self.rank == 0:
+            logging.info(f"Initializing collective communication on trainer rank 0 using PyNCCL")
             pg = StatelessProcessGroup.create(
                 host=ip, port=port, rank=0, world_size=world_size
             )
