@@ -490,8 +490,10 @@ class DTensorV2PolicyWorker:
             pg = StatelessProcessGroup.create(
                 host=ip, port=port, rank=0, world_size=world_size
             )
+            logging.info(f"Created StatelessProcessGroup (rank {self.rank}, world_size {world_size})")
             device = torch.cuda.current_device()
             self.model_update_group = PyNcclCommunicator(pg, device=device)
+            logging.info(f"Initialized PyNcclCommunicator (rank {self.rank}, world_size {world_size})")
 
     def is_alive(self) -> bool:
         return True
