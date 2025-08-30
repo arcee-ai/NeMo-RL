@@ -28,7 +28,7 @@ class VllmHttpWorkerExtension:
         from nemo_rl.vllm_comms.pynccl import PyNcclCommunicator
         from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
 
-        local_rank = self.rank
+        local_rank = torch.distributed.get_rank()
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster
         
         print(f"vLLM worker ext @ init_collective: rank_prefix={rank_prefix}, ip={ip}, port={port}, world_size={world_size} on device {self.device} and rank {rank}")
@@ -36,6 +36,11 @@ class VllmHttpWorkerExtension:
         pg = StatelessProcessGroup.create(
             host=ip, port=port, rank=rank, world_size=world_size
         )
+        # Ensure all participants reach rendezvous before NCCL init
+        try:
+            pg.barrier()
+        except Exception:
+            pass
         self.model_update_group = PyNcclCommunicator(  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__ so assignments like this should be ignored
             pg, device=self.device
         )
