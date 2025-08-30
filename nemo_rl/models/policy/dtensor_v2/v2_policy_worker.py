@@ -486,7 +486,7 @@ class DTensorV2PolicyWorker:
         from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
 
         if self.rank == 0:
-            logging.info(f"Initializing collective communication on trainer rank 0 using PyNCCL")
+            logging.info(f"Initializing collective communication on trainer using PyNCCL (rank {self.rank}, world_size {world_size})")
             pg = StatelessProcessGroup.create(
                 host=ip, port=port, rank=0, world_size=world_size
             )
