@@ -491,6 +491,10 @@ class DTensorV2PolicyWorker:
                 host=ip, port=port, rank=0, world_size=world_size
             )
             logging.info(f"Created StatelessProcessGroup (rank {self.rank}, world_size {world_size})")
+            try:
+                pg.barrier()
+            except Exception:
+                pass
             device = torch.cuda.current_device()
             self.model_update_group = PyNcclCommunicator(pg, device=device)
             logging.info(f"Initialized PyNcclCommunicator (rank {self.rank}, world_size {world_size})")
