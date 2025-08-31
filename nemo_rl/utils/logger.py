@@ -49,7 +49,8 @@ _rich_logging_configured = False
 class WandbConfig(TypedDict):
     project: NotRequired[str]
     name: NotRequired[str]
-
+    entity: NotRequired[str]
+    tags: NotRequired[list[str]]
 
 class TensorboardConfig(TypedDict):
     log_dir: NotRequired[str]

@@ -113,6 +113,10 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
 
     if data_cls == "HelpSteer3":
         data = hf_datasets.HelpSteer3Dataset()
+    elif data_cls == "ShareGptPreference":
+        data = hf_datasets.ShareGptPreferenceDataset(
+            data_config["train_data_path"], data_config["val_data_path"]
+        )
     else:
         raise ValueError(f"Unknown dataset class: {data_cls}")
     print(

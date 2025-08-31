@@ -21,6 +21,7 @@ from nemo_rl.data.hf_datasets.openmathinstruct2 import OpenMathInstruct2Dataset
 from nemo_rl.data.hf_datasets.prompt_response_dataset import (
     PromptResponseDataset,
 )
+from nemo_rl.data.hf_datasets.sharegpt_preference import ShareGptPreferenceDataset
 from nemo_rl.data.hf_datasets.squad import SquadDataset
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "OpenAIFormatDataset",
     "OpenMathInstruct2Dataset",
     "PromptResponseDataset",
+    "ShareGptPreferenceDataset",
     "SquadDataset",
     "COMMON_CHAT_TEMPLATES",
 ]
