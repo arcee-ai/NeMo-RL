@@ -62,7 +62,7 @@ class VllmHttpGeneration(GenerationInterface):
         # TODO: I really don't like this. Find a way around torch dtype serialization.
         runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
         # TODO: bodge to force NCCL version match
-        # runtime_env["env_vars"]["VLLM_NCCL_SO_PATH"] = f"{os.path.dirname(torch.__file__)}/lib/libnccl.so.2"
+        runtime_env["env_vars"]["NRL_NCCL_SO_PATH"] = f"{os.path.dirname(torch.__file__)}/lib/libnccl.so.2"
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
         self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
