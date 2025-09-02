@@ -54,12 +54,12 @@ uv run --no-project use_existing_torch.py
 
 # Install dependencies
 echo "Installing dependencies..."
+cd ../..
 uv pip install --upgrade pip
 uv pip install numpy setuptools setuptools_scm
 
 # Install vLLM using precompiled wheel
 echo "Installing vLLM with precompiled wheel..."
-cd ../..
 uv pip install --no-build-isolation -e 3rdparty/vllm
 
 echo "Build completed successfully!"
