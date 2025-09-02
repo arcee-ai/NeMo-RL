@@ -70,7 +70,7 @@ vllm = [
     "causal-conv1d"
 ]
 # For the vllm_http backend, we use the latest vllm
-vllm_http = [
+vllm-http = [
     "vllm==0.10.1.1",
     "hf-transfer"
 ]
