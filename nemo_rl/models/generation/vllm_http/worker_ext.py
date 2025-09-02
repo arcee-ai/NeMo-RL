@@ -36,11 +36,6 @@ class VllmHttpWorkerExtension:
         pg = StatelessProcessGroup.create(
             host=ip, port=port, rank=rank, world_size=world_size
         )
-        # Ensure all participants reach rendezvous before NCCL init
-        try:
-            pg.barrier()
-        except Exception:
-            pass
         self.model_update_group = PyNcclCommunicator(  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__ so assignments like this should be ignored
             pg, device=self.device
         )
