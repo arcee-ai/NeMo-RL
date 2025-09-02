@@ -60,7 +60,7 @@ policy:
     tensor_parallel_size: 2
     context_parallel_size: 1
     pipeline_parallel_size: 1
-    expert_parallel_size: 2
+    expert_parallel_size: 4
     custom_parallel_plan: null
   
   megatron_cfg:
