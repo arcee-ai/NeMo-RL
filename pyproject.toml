@@ -46,7 +46,7 @@ dependencies = [
     "matplotlib",
     "plotly",
     "mlflow",
-    "verifiers",
+    "verifiers==0.1.3",
     "vf-exts",
 ]
 
