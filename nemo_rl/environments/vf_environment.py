@@ -72,7 +72,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             # If state is None, initialize a new state mimicking how the verifiers rollout system would.
             if meta.get("state", None) is None:
                 prompt, completion = split_prompt_completion(messages)
-                meta["state"] = self.env.setup_state({
+                meta["state"] = await self.env.setup_state({
                     "prompt": prompt,
                     "completion": completion,
                     "answer": meta.get("answer", None),
@@ -134,14 +134,15 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         
         for messages, meta in zip(message_log_batch, metadata):
             # Step verifiers environment.
-            responses, new_state = self.env.env_response(messages, meta["state"])
+            responses, new_state = await self.env.env_response(messages, meta["state"])
             meta["state"].update(new_state)
             observations.append(responses)
             
             if len(responses) == 0:
                 observations.append({"role": "environment", "content": "generic termination feedback"})
             
-            if self.env.is_completed(messages, meta["state"]) or meta["state"]["turn"] >= self.env.max_turns:
+            env_is_completed = await self.env.is_completed(messages, meta["state"])
+            if env_is_completed or meta["state"]["turn"] >= self.env.max_turns:
                 # Rollout marked complete - calculate rewards and finalize.
                 
                 if meta.get("_grpo_gid", None) in grouped_rewards:
