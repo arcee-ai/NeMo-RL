@@ -25,10 +25,10 @@ class VllmHttpWorkerExtension:
         self, rank_prefix: int, ip: str, port: int, world_size: int
     ) -> None:
         """Initialize the collective communication."""
-        # from nemo_rl.vllm_comms.pynccl import PyNcclCommunicator
-        # from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
-        from vllm.distributed.utils import StatelessProcessGroup
-        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+        from nemo_rl.vllm_comms.pynccl import PyNcclCommunicator
+        from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
+        # from vllm.distributed.utils import StatelessProcessGroup
+        # from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
 
         local_rank = torch.distributed.get_rank()
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster
