@@ -10,7 +10,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 from nemo_rl.models.custom.expert_parallel import ExpertParallel
-from nemo_rl.models.custom.utils import NoParallel, PrepareModuleInputOutput
+from nemo_rl.models.custom.utils import NoParallel, PrepareModuleInputOutput, ReordererSequenceParallel
 from torch.distributed.tensor import (
     Shard,
     Partial,
@@ -43,6 +43,7 @@ PER_LAYER_TP_PLAN = {
     ),
     # replicate computation for the router
     "moe.router.gate": NoParallel(),
+    "moe.reorderer": ReordererSequenceParallel(),
 }
 
 
