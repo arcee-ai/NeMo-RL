@@ -495,8 +495,8 @@ class DTensorPolicyWorker:
 
     def init_collective(self, ip: str, port: int, world_size: int) -> None:
         """Initialize the collective communication."""
-        from nemo_rl.vllm_comms.pynccl import PyNcclCommunicator
-        from nemo_rl.vllm_comms.stateless_pg import StatelessProcessGroup
+        from vllm.distributed.utils import StatelessProcessGroup
+        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
 
         if self.rank == 0:
             pg = StatelessProcessGroup.create(
