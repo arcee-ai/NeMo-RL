@@ -153,7 +153,7 @@ def get_device_mesh_info(
         mesh_shape.append(pp_size)
         mesh_dim_names.append("pp")
     if dp_size > 1 or always_include_dp:
-        mesh_shape.append(dp_size)
+        mesh_shape.append(max(1, dp_size))
         mesh_dim_names.append("dp_replicate")
         # mesh flattening
         dp_names.append("dp_replicate")
