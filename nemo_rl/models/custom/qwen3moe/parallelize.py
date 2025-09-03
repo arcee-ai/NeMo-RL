@@ -130,7 +130,7 @@ def parallelize_qwen3moe(
         assert hasattr(layer, "moe")
         
         # TODO: pass this directly, this is kind of ugly
-        ep_degree = dp_mod_ep_mesh.size() // mesh["dp_in_ep"].size()
+        ep_degree = dp_mod_ep_mesh.size() // mesh["dp_shard_in_ep"].size()
         if (
             dp_mod_ep_mesh.size() * ep_degree
             > layer.moe.experts.num_experts
