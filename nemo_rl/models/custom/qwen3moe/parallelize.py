@@ -66,14 +66,6 @@ def parallelize_qwen3moe(
     if sequence_parallel:
         raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3MoE")
 
-    fsdp_config = {
-        "mesh": mesh[("dp", "pp")],
-        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
-        "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
-        # TODO: set to True when PP is not being used
-        "reshard_after_forward": False,
-    }
-
     # Per-layer TP plan
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
@@ -105,6 +97,14 @@ def parallelize_qwen3moe(
     for layer_name, layer in model.layers.items():
         layer = torch.compile(layer, fullgraph=True)
         model.layers.register_module(layer_name, layer)
+
+    fsdp_config = {
+        "mesh": mesh["dp"],
+        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
+        "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
+        # TODO: set to True when PP is not being used
+        "reshard_after_forward": False,
+    }
 
     # FSDP sharding
     if model.tok_embeddings is not None:
