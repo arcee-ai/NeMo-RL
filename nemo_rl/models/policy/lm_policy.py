@@ -122,9 +122,16 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             
             logging.info(f"Creating mesh with shape {mesh_info['mesh_shape']} and dim names {mesh_info['mesh_dim_names']}")
             
+            # remap a bit to fit existing system
+            remap = {
+                "dp_replicate": "data_parallel"
+                # TODO: add more if necessary
+            }
+            sharding_names = [remap.get(name, name) for name in mesh_info["mesh_dim_names"]]
+            
             self.sharding_annotations = NamedSharding(
                 layout=np.arange(cluster.world_size()).reshape(*mesh_info["mesh_shape"]),
-                names=mesh_info["mesh_dim_names"],
+                names=sharding_names,
             )
         else:
             self.sharding_annotations = NamedSharding(
@@ -224,12 +231,6 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
-    def _get_dp_size(self):
-        if self.cfg["dtensor_v2_cfg"]["enabled"]:
-            return self.sharding_annotations.get_axis_size("dp_replicate")
-        else:
-            return self.sharding_annotations.get_axis_size("data_parallel")
-
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
     ) -> BatchedDataDict[LogprobOutputSpec]:
@@ -240,7 +241,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
-        dp_size = self._get_dp_size()
+        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
         sharded_data: list[SlicedDataDict]
         unsorted_data_indices: list[int]
 
@@ -304,7 +305,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         Returns: Identical to get_logprobs.
         """
-        dp_size = self._get_dp_size()
+        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
         sharded_data: list[SlicedDataDict]
         unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
@@ -372,7 +373,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         batch_size = gbs or self.cfg["train_global_batch_size"]
         micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
         # Shard and replicate the batch
-        dp_size = self._get_dp_size()
+        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
         if self.use_dynamic_batches:
             self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
@@ -466,7 +467,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "Missing required input fields"
         )
 
-        dp_size = self._get_dp_size()
+        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
         sharded_data = data.shard_by_batch_size(dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_sharded_data(
             "generate",
