@@ -112,6 +112,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             dp_shard_in_ep = ep_size // (cp_size * tp_size)
             dp_shard_mod_ep = (cp_size * tp_size) // ep_size
             
+            dp_shard_in_ep = max(dp_shard_in_ep, 1)
+            dp_shard_mod_ep = max(dp_shard_mod_ep, 1)
+            
             self.sharding_annotations = NamedSharding(
                 layout=np.arange(cluster.world_size()).reshape(
                     pp_size,  # PP
