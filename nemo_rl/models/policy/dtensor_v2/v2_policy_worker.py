@@ -326,7 +326,7 @@ class DTensorV2PolicyWorker:
         self.cp_size = self.cfg["dtensor_v2_cfg"]["context_parallel_size"]
         self.pp_size = self.cfg["dtensor_v2_cfg"]["pipeline_parallel_size"]
         self.ep_size = self.cfg["dtensor_v2_cfg"]["expert_parallel_size"]
-        self.dp_size = world_size // (self.tp_size*self.cp_size*self.pp_size)
+        self.dp_size = world_size // (self.tp_size*self.cp_size*self.pp_size*self.ep_size)
         
         if self.cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
