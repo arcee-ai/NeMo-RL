@@ -109,6 +109,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             env_vars = config["dtensor_cfg"].get("env_vars", {})
 
         if config["dtensor_v2_cfg"]["enabled"]:
+            dp_size = cluster.world_size() // (tp_size * cp_size * pp_size)
             # Different ordering for DTensorV2
             mesh_info = get_device_mesh_info(
                 tp_size,
