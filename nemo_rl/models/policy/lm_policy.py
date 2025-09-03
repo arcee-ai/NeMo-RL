@@ -224,6 +224,12 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
+    def _get_dp_size(self):
+        if self.cfg["dtensor_v2_cfg"]["enabled"]:
+            return self.sharding_annotations.get_axis_size("dp_replicate")
+        else:
+            return self.sharding_annotations.get_axis_size("data_parallel")
+
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
     ) -> BatchedDataDict[LogprobOutputSpec]:
@@ -234,7 +240,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        dp_size = self._get_dp_size()
         sharded_data: list[SlicedDataDict]
         unsorted_data_indices: list[int]
 
@@ -298,7 +304,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         Returns: Identical to get_logprobs.
         """
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        dp_size = self._get_dp_size()
         sharded_data: list[SlicedDataDict]
         unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
@@ -366,7 +372,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         batch_size = gbs or self.cfg["train_global_batch_size"]
         micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
         # Shard and replicate the batch
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        dp_size = self._get_dp_size()
         if self.use_dynamic_batches:
             self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
@@ -460,7 +466,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "Missing required input fields"
         )
 
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        dp_size = self._get_dp_size()
         sharded_data = data.shard_by_batch_size(dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_sharded_data(
             "generate",
