@@ -47,6 +47,7 @@ from nemo_rl.utils.flops_tracker import (
     get_default_hf_config,
     get_theoretical_tflops,
 )
+from nemo_rl.models.policy.dtensor_v2.v2_policy_worker import get_device_mesh_info
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
