@@ -124,7 +124,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             
             # remap a bit to fit existing system
             remap = {
-                "dp_replicate": "data_parallel"
+                "dp_replicate": "data_parallel",
+                "cp": "context_parallel",
+                "tp": "tensor_parallel",
+                "pp": "pipeline_parallel"
                 # TODO: add more if necessary
             }
             sharding_names = [remap.get(name, name) for name in mesh_info["mesh_dim_names"]]
