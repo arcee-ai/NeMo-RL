@@ -15,6 +15,7 @@ import os
 import warnings
 from collections import defaultdict
 from typing import Any, Optional, Union
+import logging
 
 import numpy as np
 import ray
@@ -119,16 +120,11 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 dp_size,
             )
             
+            logging.info(f"Creating mesh with shape {mesh_info['mesh_shape']} and dim names {mesh_info['mesh_dim_names']}")
+            
             self.sharding_annotations = NamedSharding(
                 layout=np.arange(cluster.world_size()).reshape(*mesh_info["mesh_shape"]),
-                names=[
-                    "pipeline_parallel",
-                    "data_parallel",
-                    "dp_shard_mod_ep",
-                    "dp_shard_in_ep",
-                    "context_parallel",
-                    "tensor_parallel",
-                ],
+                names=mesh_info["mesh_dim_names"],
             )
         else:
             self.sharding_annotations = NamedSharding(
