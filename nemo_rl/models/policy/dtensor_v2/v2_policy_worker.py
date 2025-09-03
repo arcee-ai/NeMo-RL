@@ -136,6 +136,7 @@ def get_device_mesh_info(
     ep_size: int,
     pp_size: int,
     dp_size: int,
+    always_include_dp: bool = True
 ):
     dp_shard_in_ep = ep_size // (cp_size * tp_size)
     dp_shard_mod_ep = (cp_size * tp_size) // ep_size
@@ -151,7 +152,7 @@ def get_device_mesh_info(
     if pp_size > 1:
         mesh_shape.append(pp_size)
         mesh_dim_names.append("pp")
-    if dp_size > 1:
+    if dp_size > 1 or always_include_dp:
         mesh_shape.append(dp_size)
         mesh_dim_names.append("dp_replicate")
         # mesh flattening
