@@ -113,7 +113,7 @@ def parallelize_qwen3moe(
             **fsdp_config
         )
     
-    dp_mod_ep_mesh = mesh["dp_mod_ep"]
+    dp_mod_ep_mesh = mesh["dp_shard_mod_ep"]
 
     for layer_name, layer in model.layers.items():
         fsdp_mod_ep_config = fsdp_config.copy()
