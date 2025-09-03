@@ -259,13 +259,13 @@ class DTensorV2PolicyWorker:
         #    (Initialize device mesh, shard submodules, then shard entire model)
         # ------------------------------------------------
 
-        tp_size = self.cfg["dtensor_v2_cfg"]["tensor_parallel_size"]
-        cp_size = self.cfg["dtensor_v2_cfg"]["context_parallel_size"]
-        pp_size = self.cfg["dtensor_v2_cfg"]["pipeline_parallel_size"]
-        ep_size = self.cfg["dtensor_v2_cfg"]["expert_parallel_size"]
-        dp_size = world_size // (tp_size*cp_size*pp_size)
+        self.tp_size = self.cfg["dtensor_v2_cfg"]["tensor_parallel_size"]
+        self.cp_size = self.cfg["dtensor_v2_cfg"]["context_parallel_size"]
+        self.pp_size = self.cfg["dtensor_v2_cfg"]["pipeline_parallel_size"]
+        self.ep_size = self.cfg["dtensor_v2_cfg"]["expert_parallel_size"]
+        self.dp_size = world_size // (self.tp_size*self.cp_size*self.pp_size)
         
-        if cp_size > 1 and self.enable_seq_packing:
+        if self.cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
                 "Context parallel is not supported for sequence packing. Refer to https://github.com/NVIDIA/NeMo-RL/blob/main/docs/model-quirks.md#context-parallel-with-fsdp2 for more details."
             )
@@ -276,21 +276,21 @@ class DTensorV2PolicyWorker:
                 "[WARNING]: sequence_parallel=True, but tp_size=1 which has no effect. Enable tp_size > 1 to use sequence parallelism."
             )
 
-        if cp_size > 1:
-            assert not (tp_size > 1 and sequence_parallel_enabled), (
+        if self.cp_size > 1:
+            assert not (self.tp_size > 1 and sequence_parallel_enabled), (
                 "It's a known issue that context parallel can't be used together with sequence parallel in DTensor worker. "
                 "Please either set cp_size = 1 or disable sequence parallel. "
                 "See https://github.com/NVIDIA-NeMo/RL/issues/659 for more details."
             )
         
-        assert ep_size % cp_size == 0, "Expert parallel size must be divisible by context parallel size"
+        assert self.ep_size % self.cp_size == 0, "Expert parallel size must be divisible by context parallel size"
         
-        dp_shard_in_ep = ep_size // (cp_size * tp_size)
-        dp_shard_mod_ep = (cp_size * tp_size) // ep_size
+        self.dp_shard_in_ep = self.ep_size // (self.cp_size * self.tp_size)
+        self.dp_shard_mod_ep = (self.cp_size * self.tp_size) // self.ep_size
 
         device_mesh = torch.distributed.device_mesh.init_device_mesh(
             "cuda",
-            (pp_size, dp_size, dp_shard_mod_ep, dp_shard_in_ep, cp_size, tp_size),
+            (self.pp_size, self.dp_size, self.dp_shard_mod_ep, self.dp_shard_in_ep, self.cp_size, self.tp_size),
             mesh_dim_names=("pp", "dp_replicate", "dp_shard_mod_ep", "dp_shard_in_ep", "cp", "tp")
         )
         
@@ -306,9 +306,6 @@ class DTensorV2PolicyWorker:
             device_mesh["tp"],
             device_mesh["cp"],
         )
-        self.dp_size = dp_size
-        self.tp_size = tp_size
-        self.cp_size = cp_size
         self.device_mesh = device_mesh
 
         self.model = model_parallelize_function(
