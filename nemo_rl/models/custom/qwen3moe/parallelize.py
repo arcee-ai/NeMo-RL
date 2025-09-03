@@ -159,7 +159,8 @@ def parallelize_qwen3moe(
         )
     
     fully_shard(model.norm, **fsdp_config)
-
+    fully_shard(model.output, **fsdp_config)
+    
     fully_shard(model, **fsdp_config)
     
     # bizarre torchtitan fsdp logic
