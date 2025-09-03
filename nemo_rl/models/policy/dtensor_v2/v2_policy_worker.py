@@ -263,7 +263,7 @@ class DTensorV2PolicyWorker:
         cp_size = self.cfg["dtensor_v2_cfg"]["context_parallel_size"]
         pp_size = self.cfg["dtensor_v2_cfg"]["pipeline_parallel_size"]
         ep_size = self.cfg["dtensor_v2_cfg"]["expert_parallel_size"]
-        dp_size = world_size // tp_size // pp_size // ep_size
+        dp_size = world_size // (tp_size*cp_size*pp_size)
         
         if cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
@@ -282,12 +282,22 @@ class DTensorV2PolicyWorker:
                 "Please either set cp_size = 1 or disable sequence parallel. "
                 "See https://github.com/NVIDIA-NeMo/RL/issues/659 for more details."
             )
+        
+        assert ep_size % cp_size == 0, "Expert parallel size must be divisible by context parallel size"
+        
+        dp_shard_in_ep = ep_size // (cp_size * tp_size)
+        dp_shard_mod_ep = (cp_size * tp_size) // ep_size
 
         device_mesh = torch.distributed.device_mesh.init_device_mesh(
-            "cuda", (dp_size, pp_size, ep_size, cp_size, tp_size), mesh_dim_names=("dp", "pp", "ep", "cp", "tp")
+            "cuda",
+            (pp_size, dp_size, dp_shard_mod_ep, dp_shard_in_ep, cp_size, tp_size),
+            mesh_dim_names=("pp", "dp_replicate", "dp_shard_mod_ep", "dp_shard_in_ep", "cp", "tp")
         )
-
-        self.dp_cp_mesh = device_mesh[("dp", "cp")]._flatten(mesh_dim_name="dp_cp")
+        
+        device_mesh[("dp_replicate", "dp_shard_mod_ep", "dp_shard_in_ep")]._flatten(mesh_dim_name="dp")
+        device_mesh[("dp_shard_mod_ep", "dp_shard_in_ep", "cp")]._flatten(mesh_dim_name="dp_shard_cp")
+        device_mesh[("dp_shard_mod_ep", "dp_shard_in_ep", "cp", "tp")]._flatten(mesh_dim_name="dp_cp")
+        device_mesh[("dp_shard_in_ep", "cp", "tp")]._flatten(mesh_dim_name="ep")
 
         self.dp_mesh, self.pp_mesh, self.ep_mesh, self.tp_mesh, self.cp_mesh = (
             device_mesh["dp"],
