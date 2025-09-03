@@ -136,7 +136,7 @@ def get_device_mesh_info(
     ep_size: int,
     pp_size: int,
     dp_size: int,
-    always_include_dp: bool = True
+    always_include_all: bool = True
 ):
     dp_shard_in_ep = ep_size // (cp_size * tp_size)
     dp_shard_mod_ep = (cp_size * tp_size) // ep_size
@@ -149,22 +149,22 @@ def get_device_mesh_info(
     dp_cp_names = []
     ep_names = []
     
-    if pp_size > 1:
+    if pp_size > 1 or always_include_all:
         mesh_shape.append(pp_size)
         mesh_dim_names.append("pp")
-    if dp_size > 1 or always_include_dp:
+    if dp_size > 1 or always_include_all:
         mesh_shape.append(max(1, dp_size))
         mesh_dim_names.append("dp_replicate")
         # mesh flattening
         dp_names.append("dp_replicate")
-    if dp_shard_mod_ep > 1:
+    if dp_shard_mod_ep > 1 or always_include_all:
         mesh_shape.append(dp_shard_mod_ep)
         mesh_dim_names.append("dp_shard_mod_ep")
         # mesh flattening
         dp_names.append("dp_shard_mod_ep")
         dp_shard_cp_names.append("dp_shard_mod_ep")
         dp_cp_names.append("dp_shard_mod_ep")
-    if dp_shard_in_ep > 1:
+    if dp_shard_in_ep > 1 or always_include_all:
         mesh_shape.append(dp_shard_in_ep)
         mesh_dim_names.append("dp_shard_in_ep")
         # mesh flattening
@@ -172,19 +172,21 @@ def get_device_mesh_info(
         dp_shard_cp_names.append("dp_shard_in_ep")
         dp_cp_names.append("dp_shard_in_ep")
         ep_names.append("dp_shard_in_ep")
-    if cp_size > 1:
+    if cp_size > 1 or always_include_all:
         mesh_shape.append(cp_size)
         mesh_dim_names.append("cp")
         # mesh flattening
         dp_shard_cp_names.append("cp")
         dp_cp_names.append("cp")
         ep_names.append("cp")
-    if tp_size > 1:
+    if tp_size > 1 or always_include_all:
         mesh_shape.append(tp_size)
         mesh_dim_names.append("tp")
         # mesh flattening
         dp_cp_names.append("tp")
         ep_names.append("tp")
+    
+    mesh_shape = [max(1, s) for s in mesh_shape]
     
     return {
         "mesh_shape": mesh_shape,
