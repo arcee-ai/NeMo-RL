@@ -158,6 +158,55 @@ def parallelize_qwen3moe(
             **fsdp_config
         )
 
-    return fully_shard(model, **fsdp_config)
+    fully_shard(model, **fsdp_config)
+    
+    # bizarre torchtitan fsdp logic
+    # forward
+    transformer_blocks = list(model.layers.values())
+    next_transformer_blocks = transformer_blocks[1:] + [None]
+
+    if model.tok_embeddings is not None and model.layers is not None:
+        model.tok_embeddings.set_modules_to_forward_prefetch([transformer_blocks[0]])
+
+    for transformer_block, next_transformer_block in zip(
+        transformer_blocks, next_transformer_blocks
+    ):
+        if next_transformer_block is not None:
+            if next_transformer_block.moe_enabled:
+                transformer_block.set_modules_to_forward_prefetch(
+                    [next_transformer_block, next_transformer_block.moe.experts]
+                )
+            else:
+                transformer_block.set_modules_to_forward_prefetch(
+                    [next_transformer_block]
+                )
+        elif model.norm is not None and model.output is not None:
+            transformer_block.set_modules_to_forward_prefetch(
+                [model.norm, model.output]
+            )
+
+    # backward
+    reversed_transformer_blocks = list(reversed(model.layers.values()))
+    prev_transformer_blocks = reversed_transformer_blocks[1:] + [None]
+
+    if model.norm is not None and model.output is not None and model.layers is not None:
+        model.output.set_modules_to_backward_prefetch([reversed_transformer_blocks[0]])
+
+    for transformer_block, prev_transformer_block in zip(
+        reversed_transformer_blocks, prev_transformer_blocks
+    ):
+        if prev_transformer_block is not None:
+            if prev_transformer_block.moe_enabled:
+                transformer_block.set_modules_to_backward_prefetch(
+                    [prev_transformer_block, prev_transformer_block.moe.experts]
+                )
+            else:
+                transformer_block.set_modules_to_backward_prefetch(
+                    [prev_transformer_block]
+                )
+        elif model.tok_embeddings is not None:
+            transformer_block.set_modules_to_backward_prefetch([model.tok_embeddings])
+    
+    return model
 
 
