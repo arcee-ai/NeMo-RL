@@ -157,8 +157,6 @@ def parallelize_qwen3moe(
             layer,
             **fsdp_config
         )
-
-    fully_shard(model, **fsdp_config)
     
     # bizarre torchtitan fsdp logic
     # forward
@@ -207,6 +205,6 @@ def parallelize_qwen3moe(
         elif model.tok_embeddings is not None:
             transformer_block.set_modules_to_backward_prefetch([model.tok_embeddings])
     
-    return model
+    return fully_shard(model, **fsdp_config)
 
 
