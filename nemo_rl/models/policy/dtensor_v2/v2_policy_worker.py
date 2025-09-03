@@ -288,8 +288,8 @@ class DTensorV2PolicyWorker:
         self.dp_shard_in_ep = self.ep_size // (self.cp_size * self.tp_size)
         self.dp_shard_mod_ep = (self.cp_size * self.tp_size) // self.ep_size
         
-        self.dp_shard_in_ep = max(self.dp_shard_in_ep, 1)
-        self.dp_shard_mod_ep = max(self.dp_shard_mod_ep, 1)
+        # self.dp_shard_in_ep = max(self.dp_shard_in_ep, 1)
+        # self.dp_shard_mod_ep = max(self.dp_shard_mod_ep, 1)
 
         device_mesh = torch.distributed.device_mesh.init_device_mesh(
             "cuda",
