@@ -109,21 +109,16 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         if config["dtensor_v2_cfg"]["enabled"]:
             # Different ordering for DTensorV2
-            dp_shard_in_ep = ep_size // (cp_size * tp_size)
-            dp_shard_mod_ep = (cp_size * tp_size) // ep_size
-            
-            dp_shard_in_ep = max(dp_shard_in_ep, 1)
-            dp_shard_mod_ep = max(dp_shard_mod_ep, 1)
+            mesh_info = get_device_mesh_info(
+                tp_size,
+                cp_size,
+                ep_size,
+                pp_size,
+                dp_size,
+            )
             
             self.sharding_annotations = NamedSharding(
-                layout=np.arange(cluster.world_size()).reshape(
-                    pp_size,  # PP
-                    -1,  # DP
-                    dp_shard_mod_ep,  # EP
-                    dp_shard_in_ep,  # EP
-                    cp_size,  # CP
-                    tp_size,  # TP
-                ),
+                layout=np.arange(cluster.world_size()).reshape(*mesh_info["mesh_shape"]),
                 names=[
                     "pipeline_parallel",
                     "data_parallel",

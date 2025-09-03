@@ -130,6 +130,69 @@ def get_cpu_state_dict(
     torch.cuda.synchronize()
     return new_state_dict
 
+def get_device_mesh_info(
+    tp_size: int,
+    cp_size: int,
+    ep_size: int,
+    pp_size: int,
+    dp_size: int,
+):
+    dp_shard_in_ep = ep_size // (cp_size * tp_size)
+    dp_shard_mod_ep = (cp_size * tp_size) // ep_size
+    
+    mesh_shape = []
+    mesh_dim_names = []
+    
+    dp_names = []
+    dp_shard_cp_names = []
+    dp_cp_names = []
+    ep_names = []
+    
+    if pp_size > 1:
+        mesh_shape.append(pp_size)
+        mesh_dim_names.append("pp")
+    if dp_size > 1:
+        mesh_shape.append(dp_size)
+        mesh_dim_names.append("dp_replicate")
+        # mesh flattening
+        dp_names.append("dp_replicate")
+    if dp_shard_mod_ep > 1:
+        mesh_shape.append(dp_shard_mod_ep)
+        mesh_dim_names.append("dp_shard_mod_ep")
+        # mesh flattening
+        dp_names.append("dp_shard_mod_ep")
+        dp_shard_cp_names.append("dp_shard_mod_ep")
+        dp_cp_names.append("dp_shard_mod_ep")
+    if dp_shard_in_ep > 1:
+        mesh_shape.append(dp_shard_in_ep)
+        mesh_dim_names.append("dp_shard_in_ep")
+        # mesh flattening
+        dp_names.append("dp_shard_in_ep")
+        dp_shard_cp_names.append("dp_shard_in_ep")
+        dp_cp_names.append("dp_shard_in_ep")
+        ep_names.append("dp_shard_in_ep")
+    if cp_size > 1:
+        mesh_shape.append(cp_size)
+        mesh_dim_names.append("cp")
+        # mesh flattening
+        dp_shard_cp_names.append("cp")
+        dp_cp_names.append("cp")
+        ep_names.append("cp")
+    if tp_size > 1:
+        mesh_shape.append(tp_size)
+        mesh_dim_names.append("tp")
+        # mesh flattening
+        dp_cp_names.append("tp")
+        ep_names.append("tp")
+    
+    return {
+        "mesh_shape": mesh_shape,
+        "mesh_dim_names": mesh_dim_names,
+        "dp_names": dp_names,
+        "dp_shard_cp_names": dp_shard_cp_names,
+        "dp_cp_names": dp_cp_names,
+        "ep_names": ep_names,
+    }
 
 @ray.remote(
     runtime_env=get_runtime_env_for_policy_worker("dtensor_policy_worker")
@@ -285,22 +348,32 @@ class DTensorV2PolicyWorker:
         
         assert self.ep_size % self.cp_size == 0, "Expert parallel size must be divisible by context parallel size"
         
-        self.dp_shard_in_ep = self.ep_size // (self.cp_size * self.tp_size)
-        self.dp_shard_mod_ep = (self.cp_size * self.tp_size) // self.ep_size
+        mesh_info = get_device_mesh_info(
+            self.tp_size,
+            self.cp_size,
+            self.ep_size,
+            self.pp_size,
+            self.dp_size,
+        )
         
-        # self.dp_shard_in_ep = max(self.dp_shard_in_ep, 1)
-        # self.dp_shard_mod_ep = max(self.dp_shard_mod_ep, 1)
+        mesh_shape = mesh_info["mesh_shape"]
+        mesh_dim_names = mesh_info["mesh_dim_names"]
+        
+        dp_names = mesh_info["dp_names"]
+        dp_shard_cp_names = mesh_info["dp_shard_cp_names"]
+        dp_cp_names = mesh_info["dp_cp_names"]
+        ep_names = mesh_info["ep_names"]
 
         device_mesh = torch.distributed.device_mesh.init_device_mesh(
             "cuda",
-            (self.pp_size, self.dp_size, self.dp_shard_mod_ep, self.dp_shard_in_ep, self.cp_size, self.tp_size),
-            mesh_dim_names=("pp", "dp_replicate", "dp_shard_mod_ep", "dp_shard_in_ep", "cp", "tp")
+            mesh_shape,
+            mesh_dim_names=mesh_dim_names
         )
         
-        device_mesh[("dp_replicate", "dp_shard_mod_ep", "dp_shard_in_ep")]._flatten(mesh_dim_name="dp")
-        device_mesh[("dp_shard_mod_ep", "dp_shard_in_ep", "cp")]._flatten(mesh_dim_name="dp_shard_cp")
-        device_mesh[("dp_shard_mod_ep", "dp_shard_in_ep", "cp", "tp")]._flatten(mesh_dim_name="dp_cp")
-        device_mesh[("dp_shard_in_ep", "cp", "tp")]._flatten(mesh_dim_name="ep")
+        device_mesh[list(dp_names)]._flatten(mesh_dim_name="dp")
+        device_mesh[list(dp_shard_cp_names)]._flatten(mesh_dim_name="dp_shard_cp")
+        device_mesh[list(dp_cp_names)]._flatten(mesh_dim_name="dp_cp")
+        device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
 
         self.dp_mesh, self.pp_mesh, self.ep_mesh, self.tp_mesh, self.cp_mesh = (
             device_mesh["dp"],
