@@ -112,8 +112,47 @@ def parallelize_qwen3moe(
             model.tok_embeddings,
             **fsdp_config
         )
+    
+    dp_mod_ep_mesh = mesh["dp_mod_ep"]
 
     for layer_name, layer in model.layers.items():
+        fsdp_mod_ep_config = fsdp_config.copy()
+        fsdp_mod_ep_config["mesh"] = dp_mod_ep_mesh
+
+        # NOTE: EP alreadys shards the routed experts on dim 0 (num_experts).
+        #       When dp_mod_ep * ep > num_experts, FSDP default dim-0 sharding
+        #       causes inefficiency, so we choose to do FSDP sharding on dim-1.
+        #       Even when EP is not used, we may still want to shard the experts
+        #       on non-0 dim. For now it may not be worth the complexity to support
+        #       shard_placement_fn on the outer TransformerBlock-level FSDP.
+        _experts_shard_placement_fn = None
+        assert dp_mod_ep_mesh is not None
+        assert hasattr(layer, "moe")
+        
+        # TODO: pass this directly, this is kind of ugly
+        ep_degree = dp_mod_ep_mesh.size() // mesh["dp_in_ep"].size()
+        if (
+            dp_mod_ep_mesh.size() * ep_degree
+            > layer.moe.experts.num_experts
+        ):
+            _experts_shard_placement_fn = lambda param: Shard(1)
+
+        fully_shard(
+            layer.moe.experts,
+            **fsdp_mod_ep_config,
+            shard_placement_fn=_experts_shard_placement_fn,
+        )
+        
+        # TODO: verify correctness
+        gradient_divide_factor = mesh["dp_replicate"].size() * mesh["cp"].size()
+
+        # NOTE: # Although the FSDP sharding of experts is done on a mesh of
+        #       a different size than other parameters, the gradient division
+        #       factor should be consistent with data.
+        layer.moe.experts.set_gradient_divide_factor(
+            gradient_divide_factor,
+        )
+        
         fully_shard(
             layer,
             **fsdp_config
