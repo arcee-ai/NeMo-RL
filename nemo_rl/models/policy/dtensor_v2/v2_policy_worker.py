@@ -131,66 +131,82 @@ def get_cpu_state_dict(
     return new_state_dict
 
 def get_device_mesh_info(
+    world_size: int,
     tp_size: int,
     cp_size: int,
     ep_size: int,
     pp_size: int,
-    dp_size: int,
-    always_include_all: bool = True
+    always_include_all: bool = True,
 ):
-    dp_shard_in_ep = ep_size // (cp_size * tp_size)
-    dp_shard_mod_ep = (cp_size * tp_size) // ep_size
-    
-    mesh_shape = []
-    mesh_dim_names = []
-    
-    dp_names = []
-    dp_shard_cp_names = []
-    dp_cp_names = []
-    ep_names = []
-    
+    # Define DP as dp = dp_replicate * dp_shard, without dividing by EP.
+    dp_replicate = 1
+    dp_shard = max(1, world_size // max(1, (dp_replicate * cp_size * tp_size * pp_size)))
+
+    # Derive dp_shard_mod_ep and dp_shard_in_ep for non-ETP: ep = dp_shard_in_ep * cp * tp
+    if ep_size > 1:
+        dp_shard_mod_ep = (dp_shard * cp_size * tp_size) // max(1, ep_size)
+        dp_shard_in_ep = ep_size // max(1, (cp_size * tp_size))
+    else:
+        dp_shard_mod_ep = dp_shard
+        dp_shard_in_ep = 1
+
+    mesh_shape: list[int] = []
+    mesh_dim_names: list[str] = []
+
+    dp_names: list[str] = []
+    dp_shard_cp_names: list[str] = []
+    dp_cp_names: list[str] = []
+    ep_names: list[str] = []
+
     if pp_size > 1 or always_include_all:
-        mesh_shape.append(pp_size)
+        mesh_shape.append(max(1, pp_size))
         mesh_dim_names.append("pp")
-    if dp_size > 1 or always_include_all:
-        mesh_shape.append(max(1, dp_size))
+
+    # dp_replicate (optional)
+    if dp_replicate > 1 or always_include_all:
+        mesh_shape.append(max(1, dp_replicate))
         mesh_dim_names.append("dp_replicate")
-        # mesh flattening
         dp_names.append("dp_replicate")
+        dp_cp_names.append("dp_replicate")
+
+    # dp_shard_mod_ep (always included to keep process groups consistent)
     if dp_shard_mod_ep > 1 or always_include_all:
-        mesh_shape.append(dp_shard_mod_ep)
+        mesh_shape.append(max(1, dp_shard_mod_ep))
         mesh_dim_names.append("dp_shard_mod_ep")
-        # mesh flattening
         dp_names.append("dp_shard_mod_ep")
         dp_shard_cp_names.append("dp_shard_mod_ep")
         dp_cp_names.append("dp_shard_mod_ep")
-    if dp_shard_in_ep > 1 or always_include_all:
-        mesh_shape.append(dp_shard_in_ep)
+
+    # dp_shard_in_ep (only when EP>1)
+    if (ep_size > 1 and (dp_shard_in_ep > 1 or always_include_all)):
+        mesh_shape.append(max(1, dp_shard_in_ep))
         mesh_dim_names.append("dp_shard_in_ep")
-        # mesh flattening
         dp_names.append("dp_shard_in_ep")
         dp_shard_cp_names.append("dp_shard_in_ep")
         dp_cp_names.append("dp_shard_in_ep")
         ep_names.append("dp_shard_in_ep")
+
+    # CP
     if cp_size > 1 or always_include_all:
-        mesh_shape.append(cp_size)
+        mesh_shape.append(max(1, cp_size))
         mesh_dim_names.append("cp")
-        # mesh flattening
         dp_shard_cp_names.append("cp")
         dp_cp_names.append("cp")
         ep_names.append("cp")
+
+    # TP
     if tp_size > 1 or always_include_all:
-        mesh_shape.append(tp_size)
+        mesh_shape.append(max(1, tp_size))
         mesh_dim_names.append("tp")
-        # mesh flattening
-        dp_cp_names.append("tp")
         ep_names.append("tp")
-    
+
     mesh_shape = [max(1, s) for s in mesh_shape]
-    
+
     return {
         "mesh_shape": mesh_shape,
         "mesh_dim_names": mesh_dim_names,
+        "dp_replicate": dp_replicate,
+        "dp_shard": dp_shard,
         "dp_names": dp_names,
         "dp_shard_cp_names": dp_shard_cp_names,
         "dp_cp_names": dp_cp_names,
@@ -329,7 +345,6 @@ class DTensorV2PolicyWorker:
         self.cp_size = self.cfg["dtensor_v2_cfg"]["context_parallel_size"]
         self.pp_size = self.cfg["dtensor_v2_cfg"]["pipeline_parallel_size"]
         self.ep_size = self.cfg["dtensor_v2_cfg"]["expert_parallel_size"]
-        self.dp_size = world_size // (self.tp_size*self.cp_size*self.pp_size*self.ep_size)
         
         if self.cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
@@ -337,7 +352,7 @@ class DTensorV2PolicyWorker:
             )
         sequence_parallel_enabled = self.cfg["dtensor_v2_cfg"]["sequence_parallel"]
         
-        if sequence_parallel_enabled and tp_size == 1:
+        if sequence_parallel_enabled and self.tp_size == 1:
             print(
                 "[WARNING]: sequence_parallel=True, but tp_size=1 which has no effect. Enable tp_size > 1 to use sequence parallelism."
             )
@@ -352,11 +367,12 @@ class DTensorV2PolicyWorker:
         assert self.ep_size % self.cp_size == 0, "Expert parallel size must be divisible by context parallel size"
         
         mesh_info = get_device_mesh_info(
+            world_size,
             self.tp_size,
             self.cp_size,
             self.ep_size,
             self.pp_size,
-            self.dp_size,
+            always_include_all=True,
         )
         
         mesh_shape = mesh_info["mesh_shape"]
@@ -385,6 +401,11 @@ class DTensorV2PolicyWorker:
             device_mesh["tp"],
             device_mesh["cp"],
         )
+        # Additional mesh groups used elsewhere
+        self.dp_cp_mesh = device_mesh["dp_cp"]
+        self.dp_shard_cp_mesh = device_mesh["dp_shard_cp"]
+        # DP size equals the flattened dp mesh size
+        self.dp_size = self.dp_mesh.size()
         self.device_mesh = device_mesh
 
         self.model = model_parallelize_function(
