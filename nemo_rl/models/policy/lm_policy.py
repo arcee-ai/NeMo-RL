@@ -118,7 +118,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 cp_size,
                 ep_size,
                 pp_size,
-                always_include_all=False,
+                always_include_all=True,
             )
             
             logging.info(f"Creating mesh with shape {mesh_info['mesh_shape']} and dim names {mesh_info['mesh_dim_names']}")

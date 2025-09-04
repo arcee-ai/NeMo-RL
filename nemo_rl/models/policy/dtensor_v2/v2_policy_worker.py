@@ -383,7 +383,7 @@ class DTensorV2PolicyWorker:
             self.cp_size,
             self.ep_size,
             self.pp_size,
-            always_include_all=False,
+            always_include_all=True,
         )
         
         mesh_shape = mesh_info["mesh_shape"]
