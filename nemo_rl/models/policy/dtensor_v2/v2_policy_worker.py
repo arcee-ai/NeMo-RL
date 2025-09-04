@@ -136,7 +136,7 @@ def get_device_mesh_info(
     cp_size: int,
     ep_size: int,
     pp_size: int,
-    always_include_all: bool = True,
+    always_include_all: bool = False,
 ):
     # Define DP as dp = dp_replicate * dp_shard, without dividing by EP.
     dp_replicate = 1
@@ -153,55 +153,51 @@ def get_device_mesh_info(
         dp_shard_mod_ep = dp_shard
         dp_shard_in_ep = 1
 
+    # Build dims similar to Torchtitan (non-ETP): include dims > 1; always include dp_shard_mod_ep
     mesh_shape: list[int] = []
     mesh_dim_names: list[str] = []
+
+    dims_and_names = [
+        (pp_size, "pp"),
+        (dp_replicate, "dp_replicate"),
+        (dp_shard_mod_ep, "dp_shard_mod_ep"),
+        (dp_shard_in_ep, "dp_shard_in_ep"),
+        (cp_size, "cp"),
+        (tp_size, "tp"),
+    ]
+
+    for d, name in dims_and_names:
+        if d > 1 or name == "dp_shard_mod_ep":
+            mesh_shape.append(d)
+            mesh_dim_names.append(name)
 
     dp_names: list[str] = []
     dp_shard_cp_names: list[str] = []
     dp_cp_names: list[str] = []
     ep_names: list[str] = []
 
-    if pp_size > 1 or always_include_all:
-        mesh_shape.append(max(1, pp_size))
-        mesh_dim_names.append("pp")
-
-    # dp_replicate (optional)
-    if dp_replicate > 1 or always_include_all:
-        mesh_shape.append(max(1, dp_replicate))
-        mesh_dim_names.append("dp_replicate")
+    if "dp_replicate" in mesh_dim_names:
         dp_names.append("dp_replicate")
         dp_cp_names.append("dp_replicate")
 
-    # dp_shard_mod_ep (always included to keep process groups consistent)
-    if dp_shard_mod_ep > 1 or always_include_all:
-        mesh_shape.append(max(1, dp_shard_mod_ep))
-        mesh_dim_names.append("dp_shard_mod_ep")
-        dp_names.append("dp_shard_mod_ep")
-        dp_shard_cp_names.append("dp_shard_mod_ep")
-        dp_cp_names.append("dp_shard_mod_ep")
+    # dp_shard_mod_ep is always present
+    dp_names.append("dp_shard_mod_ep")
+    dp_shard_cp_names.append("dp_shard_mod_ep")
+    dp_cp_names.append("dp_shard_mod_ep")
 
-    # dp_shard_in_ep (only when EP>1)
-    if (ep_size > 1 and (dp_shard_in_ep > 1 or always_include_all)):
-        mesh_shape.append(max(1, dp_shard_in_ep))
-        mesh_dim_names.append("dp_shard_in_ep")
+    if "dp_shard_in_ep" in mesh_dim_names:
         dp_names.append("dp_shard_in_ep")
         dp_shard_cp_names.append("dp_shard_in_ep")
         dp_cp_names.append("dp_shard_in_ep")
         ep_names.append("dp_shard_in_ep")
 
-    # CP
-    if cp_size > 1 or always_include_all:
-        mesh_shape.append(max(1, cp_size))
-        mesh_dim_names.append("cp")
+    if "cp" in mesh_dim_names:
         dp_shard_cp_names.append("cp")
         dp_cp_names.append("cp")
         ep_names.append("cp")
 
-    # TP
-    if tp_size > 1 or always_include_all:
-        mesh_shape.append(max(1, tp_size))
-        mesh_dim_names.append("tp")
-        ep_names.append("tp")
+    # Non-ETP: EP borrows TP
+    ep_names.append("tp")
 
     mesh_shape = [max(1, s) for s in mesh_shape]
 
@@ -209,10 +205,13 @@ def get_device_mesh_info(
     prod = 1
     for s in mesh_shape:
         prod *= s
-    assert prod == world_size, (
-        f"Device mesh shape {tuple(mesh_shape)} with names {tuple(mesh_dim_names)} "
-        f"has product {prod} != WORLD_SIZE {world_size}."
-    )
+    if prod != world_size:
+        raise ValueError(
+            "Invalid device mesh: "
+            + f"world_size={world_size}, tp={tp_size}, cp={cp_size}, ep={ep_size}, pp={pp_size}; "
+            + f"dp_shard={dp_shard}, dp_shard_mod_ep={dp_shard_mod_ep}, dp_shard_in_ep={dp_shard_in_ep}; "
+            + f"mesh_shape={tuple(mesh_shape)}, mesh_dim_names={tuple(mesh_dim_names)} (product {prod})."
+        )
 
     return {
         "mesh_shape": mesh_shape,
@@ -384,7 +383,7 @@ class DTensorV2PolicyWorker:
             self.cp_size,
             self.ep_size,
             self.pp_size,
-            always_include_all=True,
+            always_include_all=False,
         )
         
         mesh_shape = mesh_info["mesh_shape"]
