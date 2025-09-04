@@ -144,8 +144,11 @@ def get_device_mesh_info(
 
     # Derive dp_shard_mod_ep and dp_shard_in_ep for non-ETP: ep = dp_shard_in_ep * cp * tp
     if ep_size > 1:
-        dp_shard_mod_ep = (dp_shard * cp_size * tp_size) // max(1, ep_size)
+        assert ep_size % max(1, (cp_size * tp_size)) == 0, (
+            f"Invalid EP layout: ep({ep_size}) must be divisible by cp*tp({cp_size*tp_size})"
+        )
         dp_shard_in_ep = ep_size // max(1, (cp_size * tp_size))
+        dp_shard_mod_ep = max(1, dp_shard // max(1, dp_shard_in_ep))
     else:
         dp_shard_mod_ep = dp_shard
         dp_shard_in_ep = 1
@@ -201,6 +204,15 @@ def get_device_mesh_info(
         ep_names.append("tp")
 
     mesh_shape = [max(1, s) for s in mesh_shape]
+
+    # Validate shape product matches world size
+    prod = 1
+    for s in mesh_shape:
+        prod *= s
+    assert prod == world_size, (
+        f"Device mesh shape {tuple(mesh_shape)} with names {tuple(mesh_dim_names)} "
+        f"has product {prod} != WORLD_SIZE {world_size}."
+    )
 
     return {
         "mesh_shape": mesh_shape,
