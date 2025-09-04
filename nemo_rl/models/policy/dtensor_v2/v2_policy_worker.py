@@ -167,7 +167,7 @@ def get_device_mesh_info(
     ]
 
     for d, name in dims_and_names:
-        if d > 1 or name == "dp_shard_mod_ep":
+        if d > 1 or name in ("dp_shard_mod_ep", "dp_replicate"):
             mesh_shape.append(d)
             mesh_dim_names.append(name)
 
