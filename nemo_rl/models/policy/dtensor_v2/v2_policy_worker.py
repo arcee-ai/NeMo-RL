@@ -1084,7 +1084,7 @@ class DTensorV2PolicyWorker:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         # TODO: support these other args
                         logits = self.model(
-                            tokens=input_ids,
+                            input_ids,
                             # attention_mask=attention_mask_input_all_ones,
                             # position_ids=position_ids,
                             # use_cache=False,
