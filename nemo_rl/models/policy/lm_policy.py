@@ -113,11 +113,12 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             dp_size = cluster.world_size() // (tp_size * cp_size * pp_size * ep_size)
             # Different ordering for DTensorV2
             mesh_info = get_device_mesh_info(
+                cluster.world_size(),
                 tp_size,
                 cp_size,
                 ep_size,
                 pp_size,
-                dp_size,
+                always_include_all=False,
             )
             
             logging.info(f"Creating mesh with shape {mesh_info['mesh_shape']} and dim names {mesh_info['mesh_dim_names']}")
