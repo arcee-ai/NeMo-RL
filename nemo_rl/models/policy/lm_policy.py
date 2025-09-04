@@ -111,7 +111,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         if config["dtensor_v2_cfg"]["enabled"]:
             dp_size = cluster.world_size() // (tp_size * cp_size * pp_size * ep_size)
-            # Different ordering for DTensorV2
+            # Build a flattened DP axis for DTensorV2: dp = dp_replicate * dp_shard_mod_ep * dp_shard_in_ep
             mesh_info = get_device_mesh_info(
                 cluster.world_size(),
                 tp_size,
@@ -120,22 +120,34 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 pp_size,
                 always_include_all=True,
             )
-            
-            logging.info(f"Creating mesh with shape {mesh_info['mesh_shape']} and dim names {mesh_info['mesh_dim_names']}")
-            
-            # remap a bit to fit existing system
-            remap = {
-                "dp_replicate": "data_parallel",
-                "cp": "context_parallel",
-                "tp": "tensor_parallel",
-                "pp": "pipeline_parallel"
-                # TODO: add more if necessary
-            }
-            sharding_names = [remap.get(name, name) for name in mesh_info["mesh_dim_names"]]
-            
+
+            shape_map = {n: s for n, s in zip(mesh_info["mesh_dim_names"], mesh_info["mesh_shape"])}
+            dp_axis_size = (
+                shape_map.get("dp_replicate", 1)
+                * shape_map.get("dp_shard_mod_ep", 1)
+                * shape_map.get("dp_shard_in_ep", 1)
+            )
+            new_shape = [
+                shape_map.get("pp", 1),
+                max(1, dp_axis_size),
+                shape_map.get("cp", 1),
+                shape_map.get("tp", 1),
+            ]
+            new_names = [
+                "pipeline_parallel",
+                "data_parallel",
+                "context_parallel",
+                "tensor_parallel",
+            ]
+
+            assert np.prod(new_shape) == cluster.world_size(), (
+                f"NamedSharding shape {tuple(new_shape)} product "
+                f"!= world_size {cluster.world_size()}"
+            )
+
             self.sharding_annotations = NamedSharding(
-                layout=np.arange(cluster.world_size()).reshape(*mesh_info["mesh_shape"]),
-                names=sharding_names,
+                layout=np.arange(cluster.world_size()).reshape(*new_shape),
+                names=new_names,
             )
         else:
             self.sharding_annotations = NamedSharding(
