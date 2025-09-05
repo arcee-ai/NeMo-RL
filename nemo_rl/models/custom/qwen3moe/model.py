@@ -154,8 +154,8 @@ class Qwen3MoEModel(nn.Module):
         rope_cache = torch.cat([cos, sin], dim=-1)  # (seq_len, head_dim)
         return rope_cache
 
-    def forward(self, input_ids: torch.Tensor):
-        h = self.tok_embeddings(input_ids) if self.tok_embeddings is not None else input_ids
+    def forward(self, tokens: torch.Tensor):
+        h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
         
         if self.model_args.use_flex_attn:
             # FlexAttention only needs seq_len; pass a dummy 4D tensor with the correct [B, S]
