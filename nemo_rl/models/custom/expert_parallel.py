@@ -11,6 +11,7 @@ from typing import Callable, Literal
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
@@ -374,12 +375,12 @@ class ReordererSequenceParallel(ParallelStyle):
         self.num_tokens = top_scores.shape[0]
 
         # NOTE: If needed, we can pad tokens in case bs*slen is not divisible by TP degree
-        # if top_scores.shape[0] % device_mesh.size() != 0:
-        #     num_tokens = top_scores.shape[0]
-        #     tp_size = device_mesh.size()
-        #     n_pad = (num_tokens // tp_size + 1) * tp_size - num_tokens
-        #     selected_experts_indices = F.pad(selected_experts_indices, [0, 0, 0, n_pad])
-        #     top_scores = F.pad(top_scores, [0, 0, 0, n_pad])
+        if top_scores.shape[0] % device_mesh.size() != 0:
+            num_tokens = top_scores.shape[0]
+            tp_size = device_mesh.size()
+            n_pad = (num_tokens // tp_size + 1) * tp_size - num_tokens
+            selected_experts_indices = F.pad(selected_experts_indices, [0, 0, 0, n_pad])
+            top_scores = F.pad(top_scores, [0, 0, 0, n_pad])
 
         def _split_along_first_dim(x: torch.Tensor) -> torch.Tensor:
             assert x.is_contiguous()
