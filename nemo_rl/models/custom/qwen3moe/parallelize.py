@@ -120,8 +120,7 @@ def parallelize_qwen3moe(
         "mesh": mesh["dp"],
         "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
         "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
-        # TODO: set to True when PP is not being used
-        "reshard_after_forward": False,
+        "reshard_after_forward": pp_mesh.size() == 1,
     }
 
     # FSDP sharding
