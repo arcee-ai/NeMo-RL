@@ -78,6 +78,7 @@ def parallelize_qwen3moe(
     sequence_parallel: bool,
     cpu_offload: bool,
     activation_checkpointing: bool = False,
+    loss_parallel: bool = True,
 ):
     # Per-layer TP plan
     for layer_name, layer in model.layers.items():
@@ -99,8 +100,8 @@ def parallelize_qwen3moe(
             "norm": SequenceParallel(),
             "output": ColwiseParallel(
                 input_layouts=Shard(1),
-                output_layouts=Replicate(),
-                use_local_output=True,
+                output_layouts=Shard(-1) if loss_parallel else Replicate(),
+                use_local_output=not loss_parallel,
             ),
         },
     )
