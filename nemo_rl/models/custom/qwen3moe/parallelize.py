@@ -16,6 +16,16 @@ from torch.distributed.tensor import (
     Partial,
     Replicate,
 )
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+)
+import logging
+from typing import Optional, Literal
+
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+)
+from collections import defaultdict
 
 from nemo_rl.models.custom.qwen3moe.model import Qwen3MoEModel
 from nemo_rl.models.custom.moe import MoE
@@ -46,6 +56,15 @@ PER_LAYER_TP_PLAN = {
     "moe.reorderer": ReordererSequenceParallel(),
 }
 
+def apply_ac(model: nn.Module):
+    """Apply activation checkpointing to the model."""
+    # TODO: support selective ac
+    for layer_id, transformer_block in model.layers.named_children():
+        transformer_block = checkpoint_wrapper(transformer_block, preserve_rng_state=False)
+        model.layers.register_module(layer_id, transformer_block)
+
+    logging.info(f"Applied full activation checkpointing to the model")
+
 
 def parallelize_qwen3moe(
     model: Qwen3MoEModel,
@@ -60,12 +79,6 @@ def parallelize_qwen3moe(
     cpu_offload: bool,
     activation_checkpointing: bool = False,
 ):
-    if activation_checkpointing:
-        raise NotImplementedError("Activation checkpointing is not yet supported for Qwen3MoE")
-
-    if sequence_parallel:
-        raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3MoE")
-
     # Per-layer TP plan
     for layer_name, layer in model.layers.items():
         parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
@@ -91,6 +104,10 @@ def parallelize_qwen3moe(
             ),
         },
     )
+    
+    # apply activation checkpointing if needed
+    if activation_checkpointing:
+        apply_ac(model)
 
     # compile each layer
     torch._dynamo.config.capture_scalar_outputs = True
