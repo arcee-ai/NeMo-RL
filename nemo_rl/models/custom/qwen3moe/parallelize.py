@@ -178,7 +178,7 @@ def parallelize_qwen3moe(
     # Do not reshard_after_forward the last layers by default
     fully_shard(
         [model.norm, model.output],
-        **fsdp_config,
+        **{k: v for k, v in fsdp_config.items() if k != "reshard_after_forward"},
         reshard_after_forward=fsdp_config["reshard_after_forward"],
     )
     
