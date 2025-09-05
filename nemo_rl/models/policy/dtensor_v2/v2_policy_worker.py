@@ -197,8 +197,8 @@ def get_device_mesh_info(
         ep_names.append("cp")
 
     # Non-ETP: EP borrows TP
-    # if ep_size != 1:
-    #     ep_names.append("tp")
+    if ep_size != 1:
+        ep_names.append("tp")
 
     mesh_shape = [max(1, s) for s in mesh_shape]
 
