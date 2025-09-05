@@ -175,12 +175,19 @@ def parallelize_qwen3moe(
             **fsdp_config
         )
     
-    fully_shard(model.norm, **fsdp_config)
-    fully_shard(model.output, **fsdp_config)
+    # Do not reshard_after_forward the last layers by default
+    fully_shard(
+        [model.norm, model.output],
+        **fsdp_config,
+        reshard_after_forward=fsdp_config["reshard_after_forward"],
+    )
     
     fully_shard(model, **fsdp_config)
     
-    # bizarre torchtitan fsdp logic
+    # Only do custom prefetch logic when EP is used
+    if ep_mesh.size() == 1:
+        return model
+
     # forward
     transformer_blocks = list(model.layers.values())
     next_transformer_blocks = transformer_blocks[1:] + [None]
