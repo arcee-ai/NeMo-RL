@@ -1033,6 +1033,7 @@ class DTensorV2PolicyWorker:
                         packed_sequence_size=[
                             batch_size
                         ],  # flash attention 2 expects flattened input
+                        min_seq_len=self.cfg["sequence_packing"]["train_mb_tokens"],
                         padding_value=self.tokenizer.eos_token_id,
                         return_attention_mask=False,
                     )
