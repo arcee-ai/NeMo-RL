@@ -9,7 +9,7 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleInput,
     parallelize_module,
 )
-from nemo_rl.models.custom.expert_parallel import ExpertParallel
+from nemo_rl.models.custom.expert_parallel import ExpertParallel, TensorParallel
 from nemo_rl.models.custom.utils import NoParallel, PrepareModuleInputOutput, ReordererSequenceParallel
 from torch.distributed.tensor import (
     Shard,
@@ -72,7 +72,7 @@ def parallelize_qwen3moe(
         
         if hasattr(layer, "moe"):
             moe_layer: MoE = layer.moe
-            parallelize_module(moe_layer.experts, ep_mesh, ExpertParallel())
+            parallelize_module(moe_layer.experts, ep_mesh, ExpertParallel() if ep_mesh.size() > 1 else TensorParallel())
 
     # Top-level modules: embeddings, norm, output
     parallelize_module(
