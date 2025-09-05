@@ -87,6 +87,7 @@ class GRPOConfig(TypedDict):
     val_at_start: bool
     max_val_samples: int
     seed: int
+    parameter_spreads: NotRequired[list[dict[str, Any]]]  # List of parameter sets for generation
 
 
 class GRPOSaveState(TypedDict):
@@ -103,6 +104,62 @@ def _default_grpo_save_state() -> GRPOSaveState:
         "val_reward": -99999999.0,
         "consumed_samples": 0,
     }
+
+
+def _assign_parameter_spreads(
+    repeated_batch: BatchedDataDict[DatumSpec],
+    num_prompts: int,
+    num_generations_per_prompt: int,
+    parameter_spreads: Optional[list[dict[str, Any]]] = None,
+) -> BatchedDataDict[DatumSpec]:
+    """Assign parameter spreads to repeated batch samples.
+    
+    Args:
+        repeated_batch: The batch that has been repeated
+        num_prompts: Number of original prompts
+        num_generations_per_prompt: Number of generations per prompt
+        parameter_spreads: List of parameter dictionaries to cycle through
+    
+    Returns:
+        The batch with parameter spreads assigned
+    """
+    if parameter_spreads is None or len(parameter_spreads) == 0:
+        return repeated_batch
+    
+    batch_size = repeated_batch.size
+    
+    # Create tensors for each parameter type
+    temperatures = []
+    top_ps = []
+    top_ks = []
+    max_new_tokens_list = []
+    
+    # Assign parameters cyclically to each generation
+    for prompt_idx in range(num_prompts):
+        for gen_idx in range(num_generations_per_prompt):
+            # Cycle through parameter spreads
+            param_set = parameter_spreads[gen_idx % len(parameter_spreads)]
+            
+            if "temperature" in param_set:
+                temperatures.append(param_set["temperature"])
+            if "top_p" in param_set:
+                top_ps.append(param_set["top_p"])
+            if "top_k" in param_set:
+                top_ks.append(param_set["top_k"])
+            if "max_new_tokens" in param_set:
+                max_new_tokens_list.append(param_set["max_new_tokens"])
+    
+    # Add parameter tensors to batch if they were specified
+    if temperatures:
+        repeated_batch["temperature"] = torch.tensor(temperatures, dtype=torch.float32)
+    if top_ps:
+        repeated_batch["top_p"] = torch.tensor(top_ps, dtype=torch.float32)
+    if top_ks:
+        repeated_batch["top_k"] = torch.tensor(top_ks, dtype=torch.int32)
+    if max_new_tokens_list:
+        repeated_batch["max_new_tokens"] = torch.tensor(max_new_tokens_list, dtype=torch.int32)
+    
+    return repeated_batch
 
 
 class GRPOLoggerConfig(LoggerConfig):
@@ -571,9 +628,21 @@ def grpo_train(
             print("▶ Preparing batch...")
             with timer.time("data_processing"):
                 # Repeat batch items
+                num_generations_per_prompt = master_config["grpo"]["num_generations_per_prompt"]
                 repeated_batch: BatchedDataDict[DatumSpec] = batch.repeat_interleave(
-                    master_config["grpo"]["num_generations_per_prompt"]
+                    num_generations_per_prompt
                 )
+                
+                # Assign parameter spreads if configured
+                parameter_spreads = master_config["grpo"].get("parameter_spreads")
+                if parameter_spreads:
+                    repeated_batch = _assign_parameter_spreads(
+                        repeated_batch,
+                        num_prompts=batch.size,
+                        num_generations_per_prompt=num_generations_per_prompt,
+                        parameter_spreads=parameter_spreads,
+                    )
+                
                 # Convert LLMMessageLogType to FlatMessagesType for generation
                 batched_flat, input_lengths = batched_message_log_to_flat_message(
                     repeated_batch["message_log"],

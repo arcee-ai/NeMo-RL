@@ -130,6 +130,10 @@ class GenerationDatumSpec(TypedDict):
     - input_ids: Tensor of token IDs representing the input sequences (right padded)
     - input_lengths: Tensor containing the actual length of each sequence (without padding)
     - stop_strings: Optional list of strings to stop generation (per sample)
+    - temperature: Optional per-sample temperature values
+    - top_p: Optional per-sample top_p values
+    - top_k: Optional per-sample top_k values
+    - max_new_tokens: Optional per-sample max_new_tokens values
     - __extra__: Additional model-specific data fields
 
     Example of a batch with 4 entries with different sequence lengths:
@@ -155,6 +159,10 @@ class GenerationDatumSpec(TypedDict):
     input_ids: torch.Tensor
     input_lengths: torch.Tensor
     stop_strings: NotRequired[list[str]]
+    temperature: NotRequired[torch.Tensor]  # Per-sample temperature values
+    top_p: NotRequired[torch.Tensor]  # Per-sample top_p values
+    top_k: NotRequired[torch.Tensor]  # Per-sample top_k values
+    max_new_tokens: NotRequired[torch.Tensor]  # Per-sample max_new_tokens values
     __extra__: Any
 
 

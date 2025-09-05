@@ -138,9 +138,6 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             meta["state"].update(new_state)
             observations.append(responses)
             
-            if len(responses) == 0:
-                observations.append({"role": "environment", "content": "generic termination feedback"})
-            
             env_is_completed = await self.env.is_completed(messages, meta["state"])
             if env_is_completed or meta["state"]["turn"] >= self.env.max_turns:
                 # Rollout marked complete - calculate rewards and finalize.

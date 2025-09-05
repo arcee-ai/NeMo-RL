@@ -1,102 +1,203 @@
 import verifiers as vf
 import vf_exts as vfe
 
-from datasets import Dataset
+import datasets
+from datasets import concatenate_datasets
 
 import asyncio
-import random
 import os
-import math
 import re
 import logging
+import html
 
 import openai
 
-various_nouns = [
-    "cat",
-    "dog",
-    "bird",
-    "fish",
-    "horse",
-    "rabbit",
-    "snake",
-    "tiger",
-    "chair",
-    "table",
-    "book",
-    "pen",
-    "pencil",
-    "eraser",
-    "notebook",
-    "computer",
-    "program",
-    "ai",
-    "robot"
-]
+from pocketReward import getReward
+from collections import Counter
 
 JUDGE_PROMPT = """
-You are a poet. You are given two poems. Please judge which poem is better.
+You are a strict verifier. Compare the candidate answer with the ground truth.
 
-Respond with an integer between 1 and 7 (inclusive) indicating your preference, where 1 is "Poem A is much better than Poem B", 4 is "Poem A and Poem B are equally good", and 7 is "Poem B is much better than Poem A".
+Return only the XML block exactly in the prescribed format.
 
-Put your judgement in an <answer> tag, like this:
+Set <score> to an integer 0-5.
 
-<answer>5</answer>
+Use this rubric:
+5: Perfect semantic match; precise, complete, no contradictions.
+4: Strong alignment with minor omissions or wording differences.
+3: Partially correct; captures key elements but misses others.
+2: Weak alignment; vague or significant errors vs. ground truth.
+1: Barely related; mostly incorrect with minor overlap.
+0: Unrelated or contradicts the ground truth.
+Do not include any text outside the block.
 
-Do not include any other text in your response.
+Output format:
 
-Poem A:
-{}
+<output>
 
-Poem B:
-{}
+<reasoning>
+...
+</reasoning>
+
+<score>
+...
+</score>
+
+</output>
 """
 
-async def get_opinion(client: openai.AsyncOpenAI, poem_a: str, poem_b: str) -> int:
+async def get_opinion(client: openai.AsyncOpenAI, prompt: vf.Messages, completion: vf.Messages, answer: str) -> int:
     response = await client.chat.completions.create(
-        model="google/gemini-2.5-flash-lite",
+        model="moonshotai/kimi-k2-0905:nitro",
         messages=[
-            {"role": "user", "content": JUDGE_PROMPT.format(poem_a, poem_b)}
+            {"role": "user", "content": JUDGE_PROMPT},
+            {"role": "user", "content": f"<prompt>\n{prompt}\n</prompt>\n\n"
+                f"<candidateAnswer>\n{completion}\n</candidateAnswer>\n\n"
+                f"<groundTruth>\n{answer}\n</groundTruth>\n\n"}
         ]
     )
         
-    match = re.search(r"<answer>(.*?)</answer>", response.choices[0].message.content)
-    if match is None:
-        logging.error(f"No answer found in response: {response.choices[0].message.content}")
-        return 4
-    return int(match.group(1))
+    content = response.choices[0].message.content or ""
+    # Unescape in case the model returns HTML-escaped tags like &lt;score&gt;0&lt;/score&gt;.
+    content_unescaped = html.unescape(content)
+    last_match = None
+    for m in re.finditer(r"<\s*score\s*>\s*([0-5])\s*<\s*/\s*score\s*>", content_unescaped, re.IGNORECASE):
+        last_match = m
+    if last_match is None:
+        logging.error(f"No answer found in response: {content!r}")
+        return 3
+    return int(last_match.group(1))
 
-def load_environment(num_examples=100,seed=42) -> vf.MultiTurnEnv:
-    random.seed(seed)
-    dataset = Dataset.from_dict({
-        "question": [f"Please write a poem about the following word: {random.choice(various_nouns)}" for i in range(num_examples)],
-        "answer": ["doesn't matter"] * num_examples,
-    })
+def load_environment(num_train_examples: int = -1,
+    num_eval_examples: int = -1,
+    seed: int = 42,
+    system_prompt: str = "Thoroughly think about and check your answer before calling it final.",
+) -> vf.Environment:
+    dataset = datasets.load_dataset("arcee-train/pocket-verifiableQaPrepped", split="train")
+
+    # Drop any samples with a prompt longer than 4000 characters
+    dataset = dataset.filter(lambda x: len(x["prompt"]) < 4000)
+
+    # Shuffle with seed 42
+    dataset = dataset.shuffle(seed=seed)
+
+    # The dataset has a key "domain". Compute the average count per domain and
+    # select up to that many examples for each domain without dropping other fields.
+    domain_counts = Counter(dataset["domain"])
+    avg_count = int(sum(domain_counts.values()) / len(domain_counts))
+    kept_per_domain: dict[str, int] = {}
+    keep_indices: list[int] = []
+    for idx, d in enumerate(dataset["domain"]):
+        c = kept_per_domain.get(d, 0)
+        if c < avg_count:
+            keep_indices.append(idx)
+            kept_per_domain[d] = c + 1
+    dataset = dataset.select(keep_indices)
+
+    # Add arcee-train/pocket-practicePairsJoined
+    practice_dataset = datasets.load_dataset("arcee-train/pocket-practicePairsJoined", split="train")
+
+    # Drop any rows with prompts or answers that contain "fig" case-insensitively
+    practice_dataset = practice_dataset.filter(lambda x: "fig" not in x["prompt"].lower() and "fig" not in x["groundTruth"].lower())
+    
+    # Drop any samples with a prompt longer than 4000 characters
+    practice_dataset = practice_dataset.filter(lambda x: len(x["prompt"]) < 4000)
+
+    dataset = concatenate_datasets([dataset, practice_dataset])
+
+    # Shuffle with seed 42
+    dataset = dataset.shuffle(seed=seed)
+
+    # The prompts are all in the key "prompt"
+    dataset = dataset.map(
+        lambda x, i: {
+            "prompt": [
+                {"role": "user", "content": x["prompt"]},
+            ],
+            "answer": x["groundTruth"],
+        },
+        with_indices=True,
+    )
+
+    # Create an eval holdout if requested; otherwise eval over full dataset
+    if num_eval_examples != -1:
+        take = min(num_eval_examples, len(dataset))
+        eval_dataset = dataset.select(range(take))
+        dataset = dataset.select(range(take, len(dataset)))
+    else:
+        eval_dataset = dataset.select(range(len(dataset)))
+
+    if num_train_examples != -1:
+        dataset = dataset.select(range(min(num_train_examples, len(dataset))))
+
     
     openrouter_key = os.getenv("OPENROUTER_API_KEY")
     
     client = openai.AsyncOpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1")
     
-    async def poem_reward_func(completions: list[vf.Messages], answer: list[str], **kwargs) -> list[float]:
+    async def verifiableQaFunc(prompts: list[vf.Messages], completions: list[vf.Messages], answer: str, **kwargs) -> list[float]:
         rewards = []
-        pairs = []
-        for i in range(0, len(completions), 2):
-            a = completions[i][-1]["content"]
-            b = completions[i+1][-1]["content"]
-            pairs.append((a, b))
 
-        tasks = [get_opinion(client, a, b) for a, b in pairs]
-        opinions = await asyncio.gather(*tasks)
+        tasks = [get_opinion(client, a, b, answer) for a, b in zip(prompts, completions)]
+        scores = await asyncio.gather(*tasks)
 
-        for opinion in opinions:
-            b_reward = opinion / 7
-            a_reward = 1 - b_reward
-            rewards.append(a_reward)
-            rewards.append(b_reward)
+        for score in scores:
+            rewards.append(score / 5)
 
         return rewards
+
+    async def externalRewardFunc(
+        prompts: list[vf.Messages],
+        completions: list[vf.Messages],
+        **kwargs,
+    ) -> list[float]:
+        """Call pocketReward sequentially over the group and return per-item scores."""
+        async def score_one(prompt: vf.Messages, completion: vf.Messages) -> float:
+            messages: vf.Messages = []
+            if isinstance(prompt, list):
+                messages += list(prompt)
+            if isinstance(completion, list):
+                messages += list(completion)
+            elif isinstance(completion, str) and completion:
+                messages.append({"role": "assistant", "content": completion})
+            # Determine whether stripping the completion would change its content.
+            # NOTE: We only penalize the score; we do not modify the messages sent to the scorer.
+            strip_changed: bool = False
+            if isinstance(completion, str):
+                strip_changed = completion.strip() != completion
+            elif isinstance(completion, list):
+                for m in completion:
+                    content = m.get("content") if isinstance(m, dict) else None
+                    if isinstance(content, str) and content.strip() != content:
+                        strip_changed = True
+                        break
+
+            result = await getReward(messages=messages)
+            try:
+                score = float(result)
+            except Exception:
+                return 0.0
+
+            if strip_changed:
+                # NOTE: Apply a 10% penalty when extraneous surrounding whitespace is present.
+                score *= 0.9
+
+            return score
+        
+        results: list[float] = []
+        for p, c in zip(prompts, completions):
+            results.append(await score_one(p, c))
+        return results
     
-    rubric = vfe.GroupedRubric([poem_reward_func])
+    rubric = vfe.GroupedRubric(
+        funcs=[verifiableQaFunc, externalRewardFunc],
+        weights=[0.7, 0.3],
+    )
     
-    env = vf.SingleTurnEnv(dataset=dataset, rubric=rubric)
+    env = vf.SingleTurnEnv(
+        dataset=dataset,
+        eval_dataset=eval_dataset,
+        system_prompt=system_prompt,
+        rubric=rubric,
+    )
     return env

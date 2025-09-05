@@ -1,0 +1,99 @@
+"""Example GRPO configuration with parameter spreads.
+
+This config demonstrates how to use parameter spreads to generate multiple
+outputs per prompt with different generation parameters.
+"""
+
+# Policy model configuration
+policy:
+  model_name: "meta-llama/Llama-3.2-1B-Instruct"
+  max_total_sequence_length: 4096
+  generation:
+    temperature: 0.7  # Default temperature (overridden by spreads)
+    top_p: 0.9        # Default top_p (overridden by spreads)
+    top_k: 50         # Default top_k (overridden by spreads)
+    max_new_tokens: 512
+    vllm:
+      tensor_parallel_size: 1
+      pipeline_parallel_size: 1
+      gpu_memory_utilization: 0.9
+      max_model_len: 4096
+      async_engine: false
+
+# GRPO algorithm configuration
+grpo:
+  num_prompts_per_step: 32
+  num_generations_per_prompt: 4  # Will generate 4 outputs per prompt
+  max_num_steps: 1000
+  max_rollout_turns: 1
+  normalize_rewards: true
+  use_leave_one_out_baseline: true
+  val_period: 50
+  val_batch_size: 16
+  val_at_start: true
+  max_val_samples: 100
+  seed: 42
+  
+  # Parameter spreads - each set will be assigned to one generation
+  # With num_generations_per_prompt=4, these 4 sets will be cycled through
+  parameter_spreads:
+    - temperature: 0.5
+      top_p: 0.85
+      top_k: 30
+      max_new_tokens: 256
+    - temperature: 0.7
+      top_p: 0.9
+      top_k: 50
+      max_new_tokens: 512
+    - temperature: 0.9
+      top_p: 0.95
+      top_k: 100
+      max_new_tokens: 512
+    - temperature: 1.0
+      top_p: 1.0
+      top_k: 200
+      max_new_tokens: 768
+
+# Loss function configuration
+loss_fn:
+  clip_param: 0.2
+  value_loss_coef: 0.5
+  entropy_coef: 0.01
+
+# Environment configuration
+env:
+  type: "math"
+  config:
+    timeout: 30
+    max_attempts: 3
+
+# Data configuration
+data:
+  train_dataset_path: "/path/to/train/data"
+  val_dataset_path: "/path/to/val/data"
+  batch_size: 32
+  num_workers: 4
+  shuffle: true
+
+# Logger configuration
+logger:
+  log_dir: "./logs/grpo_parameter_spreads"
+  log_interval: 10
+  num_val_samples_to_print: 5
+  wandb:
+    project: "grpo-parameter-spreads"
+    entity: "your-entity"
+    name: "grpo-spreads-experiment"
+
+# Cluster configuration
+cluster:
+  num_gpus: 1
+  num_cpus: 8
+  memory_gb: 32
+
+# Checkpointing configuration
+checkpointing:
+  save_dir: "./checkpoints/grpo_parameter_spreads"
+  save_interval: 100
+  keep_last_n: 5
+  resume_from: null

@@ -18,7 +18,10 @@ class _MtEnvGroupRubric(GroupedRubric):
         return self._all_reward_names
     
     def should_group_rollouts(self, task: str) -> bool:
-        return isinstance(self.env_map.get(task, self.env_map.values()[0]).rubric, GroupedRubric)
+        # NOTE: dict.values() is a view and not subscriptable in Python 3. Use an iterator
+        # to obtain a deterministic fallback to the first environment when task is missing.
+        default_env = next(iter(self.env_map.values()))
+        return isinstance(self.env_map.get(task, default_env).rubric, GroupedRubric)
 
     async def score_rollouts_grouped(
         self,

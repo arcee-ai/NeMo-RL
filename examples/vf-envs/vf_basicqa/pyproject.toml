@@ -1,0 +1,16 @@
+[project]
+name = "vf-basicqa"
+version = "0.1.0"
+description = "BasicQA environment"
+tags = ["basicqa", "single-turn", "train"]
+requires-python = ">=3.11"
+dependencies = [
+    "verifiers>=0.1.2.post0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["vf_basicqa.py"]

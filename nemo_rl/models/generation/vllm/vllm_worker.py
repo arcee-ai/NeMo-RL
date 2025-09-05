@@ -16,6 +16,9 @@ import copy
 import gc
 import os
 import sys
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, cast
 
 import ray
@@ -347,11 +350,22 @@ class BaseVllmGenerationWorker:
         greedy: bool,
         stop_strings,
         max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
     ):
-        top_k_cfg = self.cfg["top_k"]
-        top_k_val = 1 if greedy else (top_k_cfg if top_k_cfg is not None else -1)
-
-        temperature = 0.0 if greedy else self.cfg["temperature"]
+        # Use provided values or fall back to config defaults
+        if temperature is None:
+            temperature = 0.0 if greedy else self.cfg["temperature"]
+        
+        if top_k is None:
+            top_k_cfg = self.cfg["top_k"]
+            top_k_val = 1 if greedy else (top_k_cfg if top_k_cfg is not None else -1)
+        else:
+            top_k_val = top_k
+        
+        if top_p is None:
+            top_p = 1.0 if greedy else self.cfg["top_p"]
 
         max_tokens = (
             max_new_tokens if max_new_tokens is not None else self.cfg["max_new_tokens"]
@@ -359,7 +373,7 @@ class BaseVllmGenerationWorker:
 
         return self.SamplingParams(
             temperature=temperature,
-            top_p=self.cfg["top_p"],
+            top_p=top_p,
             top_k=top_k_val,
             max_tokens=max_tokens,
             logprobs=0,
@@ -487,11 +501,13 @@ class VllmGenerationWorker(BaseVllmGenerationWorker):
         input_lengths = data["input_lengths"]
         batch_stop_strings: list[list[str]] = data.get("stop_strings", [])
         stop_strings = self._merge_stop_strings(batch_stop_strings)
-        sampling_params = self._build_sampling_params(
-            greedy=greedy,
-            stop_strings=stop_strings,
-        )
-
+        
+        # Extract per-sample parameters if provided
+        temperatures = data.get("temperature", None)
+        top_ps = data.get("top_p", None)
+        top_ks = data.get("top_k", None)
+        max_new_tokens_list = data.get("max_new_tokens", None)
+        
         # verify inputs have correct padding
         verify_right_padding(data, pad_value=self.cfg["pad_token_id"])
 
@@ -500,24 +516,102 @@ class VllmGenerationWorker(BaseVllmGenerationWorker):
         # Original input length with padding
         padded_input_length = input_ids.size(1)
 
-        # Prepare prompts for vLLM (removing padding)
-        prompts = []
-
-        for i in range(batch_size):
-            # Use input_lengths to get only valid tokens (not padding)
-            valid_length = input_lengths[i].item()
-            valid_ids = (
-                input_ids[i, :valid_length] if valid_length > 0 else input_ids[i, :0]
+        # Check if we have per-sample parameters
+        has_per_sample_params = any([
+            temperatures is not None,
+            top_ps is not None,
+            top_ks is not None,
+            max_new_tokens_list is not None
+        ])
+        
+        if has_per_sample_params:
+            # Group prompts by identical parameters for efficient generation
+            param_groups = {}
+            for i in range(batch_size):
+                # Get parameters for this sample
+                temp = temperatures[i].item() if temperatures is not None else None
+                top_p = top_ps[i].item() if top_ps is not None else None
+                top_k = top_ks[i].item() if top_ks is not None else None
+                max_new_tokens = max_new_tokens_list[i].item() if max_new_tokens_list is not None else None
+                
+                # Create a key for this parameter combination
+                param_key = (temp, top_p, top_k, max_new_tokens)
+                
+                if param_key not in param_groups:
+                    param_groups[param_key] = {
+                        "indices": [],
+                        "prompts": [],
+                        "sampling_params": self._build_sampling_params(
+                            greedy=greedy,
+                            stop_strings=stop_strings,
+                            temperature=temp,
+                            top_p=top_p,
+                            top_k=top_k,
+                            max_new_tokens=max_new_tokens,
+                        )
+                    }
+                
+                # Add this prompt to the group
+                param_groups[param_key]["indices"].append(i)
+                valid_length = input_lengths[i].item()
+                valid_ids = (
+                    input_ids[i, :valid_length] if valid_length > 0 else input_ids[i, :0]
+                )
+                token_ids = valid_ids.tolist()
+                
+                
+                param_groups[param_key]["prompts"].append({"prompt_token_ids": token_ids})
+            
+            # Generate outputs for each parameter group
+            # Process sequentially to avoid vLLM internal state issues
+            assert self.llm is not None, (
+                "Attempting to generate with either an uninitialized vLLM or non-model-owner"
             )
-            token_ids = valid_ids.tolist()
-
-            prompts.append({"prompt_token_ids": token_ids})
-
-        # Generate outputs
-        assert self.llm is not None, (
-            "Attempting to generate with either an uninitialized vLLM or non-model-owner"
-        )
-        outputs = self.llm.generate(prompts, sampling_params)
+            
+            all_outputs = [None] * batch_size
+            
+            # Sort groups by size (largest first) for better performance
+            sorted_groups = sorted(
+                param_groups.items(), 
+                key=lambda x: len(x[1]["indices"]), 
+                reverse=True
+            )
+            
+            for param_key, group_data in sorted_groups:
+                # Generate for this group
+                outputs = self.llm.generate(
+                    group_data["prompts"], 
+                    group_data["sampling_params"],
+                    use_tqdm=False
+                )
+                # Place outputs back in original order
+                for idx, output in zip(group_data["indices"], outputs):
+                    all_outputs[idx] = output
+            
+            outputs = all_outputs
+        else:
+            # Use single set of parameters for all prompts (original behavior)
+            sampling_params = self._build_sampling_params(
+                greedy=greedy,
+                stop_strings=stop_strings,
+            )
+            
+            # Prepare prompts for vLLM (removing padding)
+            prompts = []
+            for i in range(batch_size):
+                # Use input_lengths to get only valid tokens (not padding)
+                valid_length = input_lengths[i].item()
+                valid_ids = (
+                    input_ids[i, :valid_length] if valid_length > 0 else input_ids[i, :0]
+                )
+                token_ids = valid_ids.tolist()
+                prompts.append({"prompt_token_ids": token_ids})
+            
+            # Generate outputs
+            assert self.llm is not None, (
+                "Attempting to generate with either an uninitialized vLLM or non-model-owner"
+            )
+            outputs = self.llm.generate(prompts, sampling_params, use_tqdm=False)
 
         # Process the outputs - but preserve the original input padding structure
         output_ids_list = []

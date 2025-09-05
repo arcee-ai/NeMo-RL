@@ -438,6 +438,11 @@ def run_multi_turn_rollout(
                 "stop_strings": active_stop_strings,
             }
         )
+        
+        # Pass through parameter spreads if present in the batch
+        for param_key in ["temperature", "top_p", "top_k", "max_new_tokens"]:
+            if param_key in active_batch:
+                generation_input_data[param_key] = active_batch[param_key]
 
         # generate_responses updates active_batch["message_log"] in-place
         active_batch, generated_ids, gen_metrics = generate_responses(
