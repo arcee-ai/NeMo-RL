@@ -49,7 +49,7 @@ policy:
   dtensor_v2_cfg:
     enabled: true
     cpu_offload: False
-    sequence_parallel: true
+    sequence_parallel: false
     activation_checkpointing: false
     tensor_parallel_size: 2
     context_parallel_size: 1
