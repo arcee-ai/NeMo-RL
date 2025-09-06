@@ -47,26 +47,37 @@ Output format:
 """
 
 async def get_opinion(client: openai.AsyncOpenAI, prompt: vf.Messages, completion: vf.Messages, answer: str) -> int:
-    response = await client.chat.completions.create(
-        model="moonshotai/kimi-k2-0905:nitro",
-        messages=[
-            {"role": "user", "content": JUDGE_PROMPT},
-            {"role": "user", "content": f"<prompt>\n{prompt}\n</prompt>\n\n"
-                f"<candidateAnswer>\n{completion}\n</candidateAnswer>\n\n"
-                f"<groundTruth>\n{answer}\n</groundTruth>\n\n"}
-        ]
-    )
-        
-    content = response.choices[0].message.content or ""
-    # Unescape in case the model returns HTML-escaped tags like &lt;score&gt;0&lt;/score&gt;.
-    content_unescaped = html.unescape(content)
-    last_match = None
-    for m in re.finditer(r"<\s*score\s*>\s*([0-5])\s*<\s*/\s*score\s*>", content_unescaped, re.IGNORECASE):
-        last_match = m
-    if last_match is None:
-        logging.error(f"No answer found in response: {content!r}")
-        return 3
-    return int(last_match.group(1))
+    for attempt in range(3):
+        try:
+            response = await client.chat.completions.create(
+                model="moonshotai/kimi-k2-0905:nitro",
+                messages=[
+                    {"role": "user", "content": JUDGE_PROMPT},
+                    {"role": "user", "content": f"<prompt>\n{prompt}\n</prompt>\n\n"
+                        f"<candidateAnswer>\n{completion}\n</candidateAnswer>\n\n"
+                        f"<groundTruth>\n{answer}\n</groundTruth>\n\n"}
+                ]
+            )
+        except Exception as e:
+            logging.warning(f"Verifier request failed on attempt {attempt + 1}/3: {e!r}")
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (attempt + 1))
+            continue
+
+        content = response.choices[0].message.content or ""
+        # Unescape in case the model returns HTML-escaped tags like &lt;score&gt;0&lt;/score&gt;.
+        contentUnescaped = html.unescape(content)
+        lastMatch = None
+        for m in re.finditer(r"<\s*score\s*>\s*([0-5])\s*<\s*/\s*score\s*>", contentUnescaped, re.IGNORECASE):
+            lastMatch = m
+        if lastMatch is not None:
+            return int(lastMatch.group(1))
+
+        logging.error(f"No answer found in response (attempt {attempt + 1}/3): {content!r}")
+        if attempt < 2:
+            await asyncio.sleep(0.2 * (attempt + 1))
+
+    return 0
 
 def load_environment(num_train_examples: int = -1,
     num_eval_examples: int = -1,
