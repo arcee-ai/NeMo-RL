@@ -82,7 +82,7 @@ policy:
 
   optimizer:
     # name: "torch.optim.AdamW"
-    name: "torchao.prototype.low_bit_optim.AdamW8bit"
+    name: "torchao.optim.AdamW8bit"
     kwargs:
       lr: 3.0e-6
       weight_decay: 0.01
