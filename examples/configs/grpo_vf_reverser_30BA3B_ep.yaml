@@ -91,7 +91,7 @@ policy:
       # when using Dtensor, we need to set foreach
       # and fused to False
       # foreach: False
-      fused: False
+      # fused: False
 
   scheduler:
     - name: "torch.optim.lr_scheduler.LinearLR"
