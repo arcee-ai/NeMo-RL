@@ -118,7 +118,7 @@ def parallelize_qwen3moe(
 
     fsdp_config = {
         "mesh": mesh["dp"],
-        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.bfloat16, output_dtype=param_dtype),
+        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=param_dtype),
         "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
         "reshard_after_forward": pp_mesh.size() == 1,
     }
