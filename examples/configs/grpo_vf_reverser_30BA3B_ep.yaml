@@ -90,7 +90,7 @@ policy:
       eps: 1e-8
       # when using Dtensor, we need to set foreach
       # and fused to False
-      foreach: False
+      # foreach: False
       fused: False
 
   scheduler:
