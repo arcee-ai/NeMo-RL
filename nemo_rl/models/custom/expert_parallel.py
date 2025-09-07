@@ -33,19 +33,6 @@ class _A2A(torch.autograd.Function):
     def forward(ctx, x, out_splits, in_splits, group):
         T_out = int(sum(out_splits))
         y = x.new_empty((T_out,) + tuple(x.shape[1:]))  # allocate by output splits
-        try:
-            rank = dist.get_rank(group) if group is not None else dist.get_rank()
-            size = (
-                dist.get_world_size(group)
-                if group is not None
-                else dist.get_world_size()
-            )
-            logging.info(
-                f"[A2A fwd r{rank}/{size}] x0={x.shape[0]} sum(in)={int(sum(in_splits))} "
-                f"sum(out)={int(sum(out_splits))} len(in/out)={len(in_splits)}/{len(out_splits)}"
-            )
-        except Exception:
-            pass
         dist.all_to_all_single(y, x.contiguous(), out_splits, in_splits, group=group)
 
         ctx.in_splits = in_splits
@@ -198,9 +185,6 @@ class ExpertParallel(ParallelStyle):
                 num_tokens_per_expert,
                 group=device_mesh.get_group(),
             )
-            assert (
-                num_tokens_per_expert.numel() % ep_size == 0
-            ), "expert count not divisible by ep_size"
             input_splits = (
                 num_tokens_per_expert.view(ep_size, -1)
                 .sum(dim=1)
@@ -215,34 +199,8 @@ class ExpertParallel(ParallelStyle):
             torch.cuda.current_stream().synchronize()
             self.input_splits = input_splits.tolist()
             self.output_splits = output_splits.tolist()
-            assert (
-                len(self.input_splits) == ep_size and len(self.output_splits) == ep_size
-            ), "split lengths do not match ep_size"
-
-        try:
-            local_rank = device_mesh.get_local_rank()
-            world = device_mesh.size()
-            logging.info(
-                f"[EP {local_rank}/{world}] routed_input.shape0={routed_input.shape[0]} "
-                f"len(in)={len(self.input_splits)} sum(in)={sum(self.input_splits)} "
-                f"len(out)={len(self.output_splits)} sum(out)={sum(self.output_splits)}"
-            )
-            logging.info(
-                f"[EP {local_rank}] ep_size={ep_size}, "
-                f"num_tokens_per_expert.shape={tuple(num_tokens_per_expert.shape)}, "
-                f"numel={num_tokens_per_expert.numel()}"
-            )
-        except Exception:
-            pass
 
         # perform all-to-all
-        try:
-            local_rank = device_mesh.get_local_rank()
-            logging.info(
-                f"[EP {local_rank}] dispatch x0={routed_input.shape[0]} vs sum(in)={sum(self.input_splits)}"
-            )
-        except Exception:
-            pass
         routed_input = all_to_all_single_autograd(
             routed_input,
             self.output_splits,
@@ -271,14 +229,6 @@ class ExpertParallel(ParallelStyle):
 
     # performing all-to-all combine on the output
     def _token_combine(self, mod, routed_output, device_mesh):
-        try:
-            local_rank = device_mesh.get_local_rank()
-            logging.info(
-                f"[EP {local_rank}] combine x0={routed_output.shape[0]} "
-                f"sum(in)={sum(self.input_splits)} sum(out)={sum(self.output_splits)}"
-            )
-        except Exception:
-            pass
         routed_output = all_to_all_single_autograd(
             routed_output,
             self.input_splits,
