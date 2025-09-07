@@ -103,6 +103,7 @@ class VllmHttpGeneration(GenerationInterface):
             try:
                 response = requests.get("http://127.0.0.1:8000/v1/models")
                 if response.status_code == 200:
+                    print(response.json())
                     success = True
                     break
                 time.sleep(1)
