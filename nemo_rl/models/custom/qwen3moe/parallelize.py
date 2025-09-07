@@ -112,9 +112,13 @@ def parallelize_qwen3moe(
 
     # compile each layer
     torch._dynamo.config.capture_scalar_outputs = True
-    for layer_name, layer in model.layers.items():
-        layer = torch.compile(layer, fullgraph=False)
-        model.layers.register_module(layer_name, layer)
+    for layer_id, transformer_block in model.layers.named_children():
+        # TODO: remove when torch.compile supports fullgraph=True for MoE
+        fullgraph = True
+        if transformer_block.moe_enabled:
+            fullgraph = False
+        transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
+        model.layers.register_module(layer_id, transformer_block)
 
     fsdp_config = {
         "mesh": mesh["dp"],
