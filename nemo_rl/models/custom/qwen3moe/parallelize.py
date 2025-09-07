@@ -111,10 +111,10 @@ def parallelize_qwen3moe(
         apply_ac(model)
 
     # compile each layer
-    # torch._dynamo.config.capture_scalar_outputs = True
-    # for layer_name, layer in model.layers.items():
-    #     layer = torch.compile(layer, fullgraph=False)
-    #     model.layers.register_module(layer_name, layer)
+    torch._dynamo.config.capture_scalar_outputs = True
+    for layer_name, layer in model.layers.items():
+        layer = torch.compile(layer, fullgraph=False)
+        model.layers.register_module(layer_name, layer)
 
     fsdp_config = {
         "mesh": mesh["dp"],
