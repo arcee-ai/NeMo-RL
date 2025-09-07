@@ -200,6 +200,9 @@ class ExpertParallel(ParallelStyle):
             self.input_splits = input_splits.tolist()
             self.output_splits = output_splits.tolist()
 
+        logging.info(f"Input splits: {self.input_splits}")
+        logging.info(f"Output splits: {self.output_splits}")
+
         # perform all-to-all
         routed_input = all_to_all_single_autograd(
             routed_input,
