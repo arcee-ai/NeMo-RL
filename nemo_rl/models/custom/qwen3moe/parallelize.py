@@ -66,6 +66,8 @@ def apply_ac(model: nn.Module):
     logging.info(f"Applied full activation checkpointing to the model")
 
 
+from nemo_rl.models.custom.parallel import parallelize_model
+
 def parallelize_qwen3moe(
     model: Qwen3MoEModel,
     mesh: DeviceMesh,
@@ -80,164 +82,178 @@ def parallelize_qwen3moe(
     activation_checkpointing: bool = False,
     loss_parallel: bool = True,
 ):
-    # Per-layer TP plan
-    for layer_name, layer in model.layers.items():
-        parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
-        
-        if hasattr(layer, "moe"):
-            moe_layer: MoE = layer.moe
-            parallelize_module(moe_layer.experts, ep_mesh, ExpertParallel() if ep_mesh.size() > 1 else TensorParallel())
-
-    # Top-level modules: embeddings, norm, output
-    parallelize_module(
+    return parallelize_model(
         model,
-        tp_mesh,
-        {
-            "tok_embeddings": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "norm": SequenceParallel(),
-            "output": ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Shard(-1) if loss_parallel else Replicate(),
-                use_local_output=not loss_parallel,
-            ),
-        },
+        mesh,
+        cp_size=cp_mesh.size(),
+        tp_size=tp_mesh.size(),
+        ep_size=ep_mesh.size(),
+        pp_size=pp_mesh.size(),
+        dp_replicate=1,
+        dp_shard=mesh["dp_shard_mod_ep"].size() * mesh["dp_shard_in_ep"].size(),
+        model_compile_enabled=True,
+        param_dtype=param_dtype,
+        reduce_dtype=torch.float32,
+        enable_cpu_offload=cpu_offload
     )
-    
-    # apply activation checkpointing if needed
-    if activation_checkpointing:
-        apply_ac(model)
-
-    # compile each layer
-    torch._dynamo.config.capture_scalar_outputs = True
-    for layer_id, transformer_block in model.layers.named_children():
-        # TODO: remove when torch.compile supports fullgraph=True for MoE
-        fullgraph = True
-        if transformer_block.moe_enabled:
-            fullgraph = False
-        transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
-        model.layers.register_module(layer_id, transformer_block)
-
-    fsdp_config = {
-        "mesh": mesh["dp"],
-        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=param_dtype),
-        "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
-        "reshard_after_forward": pp_mesh.size() == 1,
-    }
-
-    # FSDP sharding
-    if model.tok_embeddings is not None:
-        fully_shard(
-            model.tok_embeddings,
-            **fsdp_config
-        )
-    
-    dp_mod_ep_mesh = mesh["dp_shard_mod_ep"]
-
-    for layer_name, layer in model.layers.items():
-        fsdp_mod_ep_config = fsdp_config.copy()
-        fsdp_mod_ep_config["mesh"] = dp_mod_ep_mesh
-
-        # NOTE: EP alreadys shards the routed experts on dim 0 (num_experts).
-        #       When dp_mod_ep * ep > num_experts, FSDP default dim-0 sharding
-        #       causes inefficiency, so we choose to do FSDP sharding on dim-1.
-        #       Even when EP is not used, we may still want to shard the experts
-        #       on non-0 dim. For now it may not be worth the complexity to support
-        #       shard_placement_fn on the outer TransformerBlock-level FSDP.
-        _experts_shard_placement_fn = None
-        assert dp_mod_ep_mesh is not None
-        assert hasattr(layer, "moe")
+    # # Per-layer TP plan
+    # for layer_name, layer in model.layers.items():
+    #     parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
         
-        # TODO: pass this directly, this is kind of ugly
-        ep_degree = dp_mod_ep_mesh.size() // mesh["dp_shard_in_ep"].size()
-        if (
-            dp_mod_ep_mesh.size() * ep_degree
-            > layer.moe.experts.num_experts
-        ):
-            _experts_shard_placement_fn = lambda param: Shard(1)
+    #     if hasattr(layer, "moe"):
+    #         moe_layer: MoE = layer.moe
+    #         parallelize_module(moe_layer.experts, ep_mesh, ExpertParallel() if ep_mesh.size() > 1 else TensorParallel())
 
-        fully_shard(
-            layer.moe.experts,
-            **fsdp_mod_ep_config,
-            shard_placement_fn=_experts_shard_placement_fn,
-        )
+    # # Top-level modules: embeddings, norm, output
+    # parallelize_module(
+    #     model,
+    #     tp_mesh,
+    #     {
+    #         "tok_embeddings": RowwiseParallel(
+    #             input_layouts=Replicate(),
+    #             output_layouts=Shard(1),
+    #         ),
+    #         "norm": SequenceParallel(),
+    #         "output": ColwiseParallel(
+    #             input_layouts=Shard(1),
+    #             output_layouts=Shard(-1) if loss_parallel else Replicate(),
+    #             use_local_output=not loss_parallel,
+    #         ),
+    #     },
+    # )
+    
+    # # apply activation checkpointing if needed
+    # if activation_checkpointing:
+    #     apply_ac(model)
+
+    # # compile each layer
+    # torch._dynamo.config.capture_scalar_outputs = True
+    # for layer_id, transformer_block in model.layers.named_children():
+    #     # TODO: remove when torch.compile supports fullgraph=True for MoE
+    #     fullgraph = True
+    #     if transformer_block.moe_enabled:
+    #         fullgraph = False
+    #     transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
+    #     model.layers.register_module(layer_id, transformer_block)
+
+    # fsdp_config = {
+    #     "mesh": mesh["dp"],
+    #     "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=param_dtype),
+    #     "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
+    #     "reshard_after_forward": pp_mesh.size() == 1,
+    # }
+
+    # # FSDP sharding
+    # if model.tok_embeddings is not None:
+    #     fully_shard(
+    #         model.tok_embeddings,
+    #         **fsdp_config
+    #     )
+    
+    # dp_mod_ep_mesh = mesh["dp_shard_mod_ep"]
+
+    # for layer_name, layer in model.layers.items():
+    #     fsdp_mod_ep_config = fsdp_config.copy()
+    #     fsdp_mod_ep_config["mesh"] = dp_mod_ep_mesh
+
+    #     # NOTE: EP alreadys shards the routed experts on dim 0 (num_experts).
+    #     #       When dp_mod_ep * ep > num_experts, FSDP default dim-0 sharding
+    #     #       causes inefficiency, so we choose to do FSDP sharding on dim-1.
+    #     #       Even when EP is not used, we may still want to shard the experts
+    #     #       on non-0 dim. For now it may not be worth the complexity to support
+    #     #       shard_placement_fn on the outer TransformerBlock-level FSDP.
+    #     _experts_shard_placement_fn = None
+    #     assert dp_mod_ep_mesh is not None
+    #     assert hasattr(layer, "moe")
         
-        # TODO: verify correctness
-        gradient_divide_factor = mesh["dp_replicate"].size() * mesh["cp"].size()
+    #     # TODO: pass this directly, this is kind of ugly
+    #     ep_degree = dp_mod_ep_mesh.size() // mesh["dp_shard_in_ep"].size()
+    #     if (
+    #         dp_mod_ep_mesh.size() * ep_degree
+    #         > layer.moe.experts.num_experts
+    #     ):
+    #         _experts_shard_placement_fn = lambda param: Shard(1)
 
-        # NOTE: # Although the FSDP sharding of experts is done on a mesh of
-        #       a different size than other parameters, the gradient division
-        #       factor should be consistent with data.
-        layer.moe.experts.set_gradient_divide_factor(
-            gradient_divide_factor,
-        )
+    #     fully_shard(
+    #         layer.moe.experts,
+    #         **fsdp_mod_ep_config,
+    #         shard_placement_fn=_experts_shard_placement_fn,
+    #     )
         
-        fully_shard(
-            layer,
-            **fsdp_config
-        )
+    #     # TODO: verify correctness
+    #     gradient_divide_factor = mesh["dp_replicate"].size() * mesh["cp"].size()
+
+    #     # NOTE: # Although the FSDP sharding of experts is done on a mesh of
+    #     #       a different size than other parameters, the gradient division
+    #     #       factor should be consistent with data.
+    #     layer.moe.experts.set_gradient_divide_factor(
+    #         gradient_divide_factor,
+    #     )
+        
+    #     fully_shard(
+    #         layer,
+    #         **fsdp_config
+    #     )
     
-    # Do not reshard_after_forward the last layers by default
-    fully_shard(
-        [model.norm, model.output],
-        **{k: v for k, v in fsdp_config.items() if k != "reshard_after_forward"},
-        reshard_after_forward=fsdp_config["reshard_after_forward"],
-    )
+    # # Do not reshard_after_forward the last layers by default
+    # fully_shard(
+    #     [model.norm, model.output],
+    #     **{k: v for k, v in fsdp_config.items() if k != "reshard_after_forward"},
+    #     reshard_after_forward=fsdp_config["reshard_after_forward"],
+    # )
     
-    fully_shard(model, **fsdp_config)
+    # fully_shard(model, **fsdp_config)
     
-    # Only do custom prefetch logic when EP is used
-    if ep_mesh.size() == 1:
-        return model
+    # # Only do custom prefetch logic when EP is used
+    # if ep_mesh.size() == 1:
+    #     return model
 
-    # # forward
-    # transformer_blocks = list(model.layers.values())
-    # next_transformer_blocks = transformer_blocks[1:] + [None]
+    # # # forward
+    # # transformer_blocks = list(model.layers.values())
+    # # next_transformer_blocks = transformer_blocks[1:] + [None]
 
-    # if model.tok_embeddings is not None and model.layers is not None:
-    #     model.tok_embeddings.set_modules_to_forward_prefetch([transformer_blocks[0]])
+    # # if model.tok_embeddings is not None and model.layers is not None:
+    # #     model.tok_embeddings.set_modules_to_forward_prefetch([transformer_blocks[0]])
 
-    # for transformer_block, next_transformer_block in zip(
-    #     transformer_blocks, next_transformer_blocks
-    # ):
-    #     if next_transformer_block is not None:
-    #         if next_transformer_block.moe_enabled:
-    #             transformer_block.set_modules_to_forward_prefetch(
-    #                 [next_transformer_block, next_transformer_block.moe.experts]
-    #             )
-    #         else:
-    #             transformer_block.set_modules_to_forward_prefetch(
-    #                 [next_transformer_block]
-    #             )
-    #     elif model.norm is not None and model.output is not None:
-    #         transformer_block.set_modules_to_forward_prefetch(
-    #             [model.norm, model.output]
-    #         )
+    # # for transformer_block, next_transformer_block in zip(
+    # #     transformer_blocks, next_transformer_blocks
+    # # ):
+    # #     if next_transformer_block is not None:
+    # #         if next_transformer_block.moe_enabled:
+    # #             transformer_block.set_modules_to_forward_prefetch(
+    # #                 [next_transformer_block, next_transformer_block.moe.experts]
+    # #             )
+    # #         else:
+    # #             transformer_block.set_modules_to_forward_prefetch(
+    # #                 [next_transformer_block]
+    # #             )
+    # #     elif model.norm is not None and model.output is not None:
+    # #         transformer_block.set_modules_to_forward_prefetch(
+    # #             [model.norm, model.output]
+    # #         )
 
-    # # backward
-    # reversed_transformer_blocks = list(reversed(model.layers.values()))
-    # prev_transformer_blocks = reversed_transformer_blocks[1:] + [None]
+    # # # backward
+    # # reversed_transformer_blocks = list(reversed(model.layers.values()))
+    # # prev_transformer_blocks = reversed_transformer_blocks[1:] + [None]
 
-    # if model.norm is not None and model.output is not None and model.layers is not None:
-    #     model.output.set_modules_to_backward_prefetch([reversed_transformer_blocks[0]])
+    # # if model.norm is not None and model.output is not None and model.layers is not None:
+    # #     model.output.set_modules_to_backward_prefetch([reversed_transformer_blocks[0]])
 
-    # for transformer_block, prev_transformer_block in zip(
-    #     reversed_transformer_blocks, prev_transformer_blocks
-    # ):
-    #     if prev_transformer_block is not None:
-    #         if prev_transformer_block.moe_enabled:
-    #             transformer_block.set_modules_to_backward_prefetch(
-    #                 [prev_transformer_block, prev_transformer_block.moe.experts]
-    #             )
-    #         else:
-    #             transformer_block.set_modules_to_backward_prefetch(
-    #                 [prev_transformer_block]
-    #             )
-    #     elif model.tok_embeddings is not None:
-    #         transformer_block.set_modules_to_backward_prefetch([model.tok_embeddings])
+    # # for transformer_block, prev_transformer_block in zip(
+    # #     reversed_transformer_blocks, prev_transformer_blocks
+    # # ):
+    # #     if prev_transformer_block is not None:
+    # #         if prev_transformer_block.moe_enabled:
+    # #             transformer_block.set_modules_to_backward_prefetch(
+    # #                 [prev_transformer_block, prev_transformer_block.moe.experts]
+    # #             )
+    # #         else:
+    # #             transformer_block.set_modules_to_backward_prefetch(
+    # #                 [prev_transformer_block]
+    # #             )
+    # #     elif model.tok_embeddings is not None:
+    # #         transformer_block.set_modules_to_backward_prefetch([model.tok_embeddings])
     
-    return model
+    # return model
 
 
