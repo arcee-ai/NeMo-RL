@@ -199,9 +199,12 @@ class ExpertParallel(ParallelStyle):
             torch.cuda.current_stream().synchronize()
             self.input_splits = input_splits.tolist()
             self.output_splits = output_splits.tolist()
+            
+            tok_per_expert_list = num_tokens_per_expert.tolist()
+            tok_per_expert_group_list = num_tokens_per_expert_group.tolist()
 
-            logging.info(f"Num tokens per expert: {num_tokens_per_expert}")
-            logging.info(f"Num tokens per expert group: {num_tokens_per_expert_group}")
+            logging.info(f"Num tokens per expert: {tok_per_expert_list} (sum={sum(tok_per_expert_list)})")
+            logging.info(f"Num tokens per expert group: {tok_per_expert_group_list} (sum={sum(tok_per_expert_group_list)})")
             logging.info(f"Routed input: {routed_input.shape}")
             logging.info(f"Input splits: {self.input_splits} (sum={sum(self.input_splits)})")
             logging.info(f"Output splits: {self.output_splits} (sum={sum(self.output_splits)})")
