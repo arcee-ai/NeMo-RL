@@ -203,8 +203,8 @@ class ExpertParallel(ParallelStyle):
             logging.info(f"Num tokens per expert: {num_tokens_per_expert}")
             logging.info(f"Num tokens per expert group: {num_tokens_per_expert_group}")
             logging.info(f"Routed input: {routed_input.shape}")
-            logging.info(f"Input splits: {self.input_splits}")
-            logging.info(f"Output splits: {self.output_splits}")
+            logging.info(f"Input splits: {self.input_splits} (sum={sum(self.input_splits)})")
+            logging.info(f"Output splits: {self.output_splits} (sum={sum(self.output_splits)})")
 
         # perform all-to-all
         routed_input = all_to_all_single_autograd(
