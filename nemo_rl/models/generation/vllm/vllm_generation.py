@@ -710,9 +710,7 @@ class VllmGeneration(GenerationInterface):
             print(f"Error during update weights: {e}")
             return False
 
-    def update_weights_from_collective(
-        self,
-    ) -> list[ray.ObjectRef]:
+    def update_weights_from_collective(self) -> list[ray.ObjectRef]:
         """Update weights of the policy using collective communication."""
         if not self.worker_group or not self.worker_group.workers:
             raise RuntimeError("Worker group is not initialized")
