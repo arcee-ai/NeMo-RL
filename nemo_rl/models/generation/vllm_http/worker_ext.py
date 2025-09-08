@@ -1,12 +1,10 @@
 from collections import defaultdict
-import importlib
 from typing import Any, Optional
 import asyncio
 
 import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
-from nemo_rl.models.custom.model import BaseModelArgs
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
 try:
@@ -25,8 +23,9 @@ class VllmHttpWorkerExtension:
         self, rank_prefix: int, ip: str, port: int, world_size: int
     ) -> None:
         """Initialize the collective communication."""
-        from vllm.distributed.utils import StatelessProcessGroup
+        
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+        from vllm.distributed.utils import StatelessProcessGroup
 
         local_rank = torch.distributed.get_rank()
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster

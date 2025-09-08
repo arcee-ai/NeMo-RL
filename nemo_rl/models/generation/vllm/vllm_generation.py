@@ -30,7 +30,6 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict, SlicedDataDic
 from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
-from nemo_rl.models.custom.model import BaseModelArgs
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
     GenerationInterface,

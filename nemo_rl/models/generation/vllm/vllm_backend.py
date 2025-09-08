@@ -18,8 +18,6 @@ from typing import Any, Optional
 import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
-from nemo_rl.models.custom.model import BaseModelArgs
-from nemo_rl.models.custom.state_dict_adapter import BaseStateDictAdapter
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 
 try:

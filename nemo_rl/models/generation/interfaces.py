@@ -18,7 +18,6 @@ import ray
 import torch
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.models.custom.model import BaseModelArgs
 
 
 def verify_right_padding(

@@ -495,8 +495,8 @@ class DTensorPolicyWorker:
 
     def init_collective(self, ip: str, port: int, world_size: int) -> None:
         """Initialize the collective communication."""
-        from vllm.distributed.utils import StatelessProcessGroup
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+        from vllm.distributed.utils import StatelessProcessGroup
 
         if self.rank == 0:
             pg = StatelessProcessGroup.create(

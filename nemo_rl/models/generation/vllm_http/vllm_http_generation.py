@@ -10,7 +10,6 @@ from requests.exceptions import RequestException
 import torch
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.ray_actor_environment_registry import get_actor_python_env
-from nemo_rl.models.custom.model import BaseModelArgs
 from nemo_rl.utils.venvs import create_local_venv_on_each_node
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
