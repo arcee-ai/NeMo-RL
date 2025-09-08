@@ -48,10 +48,6 @@ class VLLMOpenAIServe:
         validate_parsed_serve_args(self._args)
         
         asyncio.create_task(self._init_app(worker_extension_cls))
-        
-        self._engine_client = None
-        self._engine_client_ctx = None
-        self._tokenizer = None
     
     async def _init_app(self, worker_extension_cls: str):
         self._worker_extension_cls = worker_extension_cls

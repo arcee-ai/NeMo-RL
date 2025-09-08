@@ -23,7 +23,6 @@ class VllmHttpWorkerExtension:
         self, rank_prefix: int, ip: str, port: int, world_size: int
     ) -> None:
         """Initialize the collective communication."""
-        
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
         from vllm.distributed.utils import StatelessProcessGroup
 
