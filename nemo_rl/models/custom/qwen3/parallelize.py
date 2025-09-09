@@ -53,6 +53,8 @@ def replicate_all_buffers_as_dtensor(module: torch.nn.Module, tp_mesh):
             submodule.register_buffer(name, dt, persistent=is_persistent)
 
 
+from nemo_rl.models.custom.parallelize import parallelize_model
+
 def parallelize_qwen3(
     model: Qwen3Model,
     mesh: DeviceMesh,
@@ -66,56 +68,70 @@ def parallelize_qwen3(
     cpu_offload: bool,
     activation_checkpointing: bool = False,
 ):
-    if activation_checkpointing:
-        raise NotImplementedError("Activation checkpointing is not yet supported for Qwen3")
+    return parallelize_model(
+        model,
+        mesh,
+        cp_size=cp_mesh.size(),
+        tp_size=tp_mesh.size(),
+        ep_size=ep_mesh.size(),
+        pp_size=pp_mesh.size(),
+        dp_replicate=1,
+        dp_shard=mesh["dp_shard_mod_ep"].size() * mesh["dp_shard_in_ep"].size(),
+        model_compile_enabled=True,
+        param_dtype=param_dtype,
+        reduce_dtype=torch.float32,
+        enable_cpu_offload=cpu_offload
+    )
+    # if activation_checkpointing:
+    #     raise NotImplementedError("Activation checkpointing is not yet supported for Qwen3")
 
-    if sequence_parallel:
-        raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
+    # if sequence_parallel:
+    #     raise NotImplementedError("Sequence parallelism is not yet supported for Qwen3")
 
-    fsdp_config = {
-        "mesh": mesh["dp"],
-        "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
-        "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
-        # TODO: set to True when PP is not being used
-        "reshard_after_forward": False,
-    }
+    # fsdp_config = {
+    #     "mesh": mesh["dp"],
+    #     "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32, output_dtype=torch.float32),
+    #     "offload_policy": CPUOffloadPolicy() if cpu_offload else None,
+    #     # TODO: set to True when PP is not being used
+    #     "reshard_after_forward": False,
+    # }
 
-    for layer_name, layer in model.layers.items():
-        parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
+    # for layer_name, layer in model.layers.items():
+    #     parallelize_module(layer, tp_mesh, PER_LAYER_TP_PLAN)
     
-    parallelize_module(model.norm, tp_mesh, {
-            "tok_embeddings": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "norm": SequenceParallel(),
-            "output": ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate(),
-                use_local_output=True,
-            ),
-        },)
+    # parallelize_module(model.norm, tp_mesh, {
+    #         "tok_embeddings": RowwiseParallel(
+    #             input_layouts=Replicate(),
+    #             output_layouts=Shard(1),
+    #         ),
+    #         "norm": SequenceParallel(),
+    #         "output": ColwiseParallel(
+    #             input_layouts=Shard(1),
+    #             output_layouts=Replicate(),
+    #             use_local_output=True,
+    #         ),
+    #     },)
 
-    # replicate_all_buffers_as_dtensor(model, tp_mesh)
+    # # replicate_all_buffers_as_dtensor(model, tp_mesh)
     
-    # compile each layer
-    torch._dynamo.config.capture_scalar_outputs = True
-    for layer_name, layer in model.layers.items():
-        layer = torch.compile(layer, fullgraph=True)
-        model.layers.register_module(layer_name, layer)
+    # # compile each layer
+    # torch._dynamo.config.capture_scalar_outputs = True
+    # for layer_name, layer in model.layers.items():
+    #     layer = torch.compile(layer, fullgraph=True)
+    #     model.layers.register_module(layer_name, layer)
 
-    if model.tok_embeddings is not None:
-        fully_shard(
-            model.tok_embeddings,
-            **fsdp_config
-        )
+    # if model.tok_embeddings is not None:
+    #     fully_shard(
+    #         model.tok_embeddings,
+    #         **fsdp_config
+    #     )
     
-    for layer_name, layer in model.layers.items():
-        fully_shard(
-            layer,
-            **fsdp_config
-        )
+    # for layer_name, layer in model.layers.items():
+    #     fully_shard(
+    #         layer,
+    #         **fsdp_config
+    #     )
 
-    return fully_shard(model, **fsdp_config)
+    # return fully_shard(model, **fsdp_config)
 
 
