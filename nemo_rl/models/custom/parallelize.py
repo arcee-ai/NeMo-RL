@@ -36,6 +36,9 @@ from collections import defaultdict
 import logging
 from typing import Literal, Optional
 
+def is_moe_enabled(module: nn.Module):
+    return hasattr(module, "moe_enabled") and module.moe_enabled
+
 _save_list = {
     torch.ops.aten.mm.default,
     torch.ops.aten._scaled_dot_product_efficient_attention.default,
@@ -47,7 +50,6 @@ _save_list = {
     torch.ops.aten.max.default,
     torch._higher_order_ops.flex_attention,
 }
-
 
 def _apply_ac_to_transformer_block(
     module: nn.Module,
@@ -363,7 +365,7 @@ def apply_non_moe_tp(
             "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
             "ffn_norm": SequenceParallel(),
         }
-        if not (hasattr(transformer_block, "moe_enabled") and transformer_block.moe_enabled):
+        if not is_moe_enabled(transformer_block):
             layer_plan.update(
                 {
                     "feed_forward": prepare_module_input(
@@ -447,7 +449,7 @@ def apply_fsdp(
         # NOTE: When EP is enabled, In an MoE layer, we use the following FSDP wrapping
         # - the router and the shared experts are sharded together with the TransformerBlock
         # - the routed experts are sharded with the remaining dp_mod_ep_mesh
-        if transformer_block.moe_enabled and ep_degree > 1:
+        if is_moe_enabled(transformer_block) and ep_degree > 1:
             fsdp_mod_ep_config = fsdp_config.copy()
             fsdp_mod_ep_config["mesh"] = dp_mod_ep_mesh
 
@@ -513,7 +515,7 @@ def apply_fsdp(
         transformer_blocks, next_transformer_blocks
     ):
         if next_transformer_block is not None:
-            if next_transformer_block.moe_enabled:
+            if is_moe_enabled(next_transformer_block):
                 transformer_block.set_modules_to_forward_prefetch(
                     [next_transformer_block, next_transformer_block.moe.experts]
                 )
@@ -537,7 +539,7 @@ def apply_fsdp(
         reversed_transformer_blocks, prev_transformer_blocks
     ):
         if prev_transformer_block is not None:
-            if prev_transformer_block.moe_enabled:
+            if is_moe_enabled(prev_transformer_block):
                 transformer_block.set_modules_to_backward_prefetch(
                     [prev_transformer_block, prev_transformer_block.moe.experts]
                 )
@@ -557,7 +559,7 @@ def apply_moe_ep_tp(
     etp_enabled: bool,
 ):
     for transformer_block in model.layers.values():
-        if not transformer_block.moe_enabled:
+        if not is_moe_enabled(transformer_block):
             continue
 
         if tp_mesh is not None:
@@ -627,7 +629,7 @@ def apply_compile(model: nn.Module):
     for layer_id, transformer_block in model.layers.named_children():
         # TODO: remove when torch.compile supports fullgraph=True for MoE
         fullgraph = True
-        if transformer_block.moe_enabled:
+        if is_moe_enabled(transformer_block):
             fullgraph = False
         transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
         model.layers.register_module(layer_id, transformer_block)
