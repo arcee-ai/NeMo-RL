@@ -40,7 +40,7 @@ policy:
   train_micro_batch_size: 2
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
-  max_total_sequence_length: 256
+  max_total_sequence_length: 512
   precision: "bfloat16"
 
   dtensor_cfg:
@@ -107,7 +107,7 @@ policy:
 
   generation:
     backend: "vllm_http"
-    max_new_tokens: 128
+    max_new_tokens: 256
     temperature: 1.0
     top_p: 1.0
     top_k: null
