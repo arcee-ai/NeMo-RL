@@ -363,7 +363,7 @@ def apply_non_moe_tp(
             "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
             "ffn_norm": SequenceParallel(),
         }
-        if not transformer_block.moe_enabled:
+        if not (hasattr(transformer_block, "moe_enabled") and transformer_block.moe_enabled):
             layer_plan.update(
                 {
                     "feed_forward": prepare_module_input(
