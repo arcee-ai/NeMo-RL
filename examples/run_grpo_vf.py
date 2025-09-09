@@ -117,7 +117,7 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
                 add_generation_prompt=add_gen_prompt,
                 add_special_tokens=True,
                 tools=vf_tools[vf_task], # type: ignore
-                use_thinking=False
+                enable_thinking=False
             )
 
             message["token_ids"] = tokenizer(
