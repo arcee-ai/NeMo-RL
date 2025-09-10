@@ -222,8 +222,11 @@ def parallelize_model(
     #         loss_parallel=not job_config.parallelism.disable_loss_parallel,
     #         enable_float8_tensorwise_tp=enable_float8_tensorwise_tp,
     #     )
-    #     # TODO: bring this back
+    #     
     #     # maybe_enable_async_tp(job_config, world_mesh["tp"])
+
+    if ep_size > 1 and not hasattr(torch, "_grouped_mm"):
+        raise RuntimeError("EP is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")
 
     if tp_size > 1 or ep_size > 1:
         apply_moe_ep_tp(

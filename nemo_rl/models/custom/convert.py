@@ -1,4 +1,5 @@
 from typing import Callable
+import torch
 from torch import nn
 from transformers import PreTrainedModel, PretrainedConfig
 
@@ -24,6 +25,8 @@ from nemo_rl.models.custom.state_dict_adapter import BaseStateDictAdapter
 
 def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseModelArgs, type[BaseStateDictAdapter], Callable]:
     mt = config.model_type
+    
+    is_nightly_torch = hasattr(torch, "_grouped_mm")
     
     if mt == "llama":
         # TODO: verfy this works on all llama3 models
@@ -84,7 +87,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
                 route_scale = 1,
                 score_before_experts = False,
                 top_k = config.num_experts_per_tok,
-                use_grouped_mm = True,
+                use_grouped_mm = is_nightly_torch,
                 load_balance_coeff = None
             ),
             decoder_sparse_step = getattr(config, "decoder_sparse_step", 1),

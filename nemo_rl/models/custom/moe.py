@@ -145,6 +145,8 @@ class GroupedExperts(nn.Module):
         num_tokens_per_expert: torch.Tensor,
     ) -> torch.Tensor:
         if self.use_grouped_mm:
+            if not hasattr(torch, "_grouped_mm"):
+                raise RuntimeError("Grouped MM is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")
             return _run_experts_grouped_mm(
                 self.w1, self.w2, self.w3, x, num_tokens_per_expert
             )
