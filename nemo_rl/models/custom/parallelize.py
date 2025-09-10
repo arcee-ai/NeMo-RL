@@ -14,7 +14,6 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     PrepareModuleInput,
-    PrepareModuleInputOutput,
     RowwiseParallel,
     SequenceParallel,
 )
@@ -564,6 +563,11 @@ def apply_moe_ep_tp(
     for transformer_block in model.layers.values():
         if not is_moe_enabled(transformer_block):
             continue
+        
+        if not hasattr(torch, "_grouped_mm"):
+            raise RuntimeError("Expert parallelism is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")
+        
+        from nemo_rl.models.custom.utils import PrepareModuleInputOutput
 
         if tp_mesh is not None:
             moe_layer_plan = {
