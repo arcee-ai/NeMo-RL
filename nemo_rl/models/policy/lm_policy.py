@@ -75,6 +75,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         tp_size = 1
         pp_size = 1
         cp_size = 1
+        
+        dtv2_enable = config.get("dtensor_v2_cfg", {}).get("enabled", False)
 
         megatron_enable = config.get("megatron_cfg", {}).get("enabled", False)
         if megatron_enable:
@@ -86,7 +88,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             cp_size = config["megatron_cfg"]["context_parallel_size"]
 
             env_vars = config["megatron_cfg"].get("env_vars", {})
-        elif config["dtensor_v2_cfg"]["enabled"]:
+        elif dtv2_enable:
             worker_builder_cls = (
                 "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker"
             )
@@ -109,7 +111,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
             env_vars = config["dtensor_cfg"].get("env_vars", {})
 
-        if config["dtensor_v2_cfg"]["enabled"]:
+        if dtv2_enable:
             dp_size = cluster.world_size() // (tp_size * cp_size * pp_size * ep_size)
             # Build a flattened DP axis for DTensorV2: dp = dp_replicate * dp_shard_mod_ep * dp_shard_in_ep
             mesh_info = get_device_mesh_info(
