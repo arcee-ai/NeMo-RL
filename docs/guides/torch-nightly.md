@@ -16,6 +16,12 @@ After that, you will need to build vLLM so it is compatible with this version of
 bash tools/build-vllm-with-nightly.sh
 ```
 
+Finally, you will need to rebuild Flash Attention.
+
+```
+uv pip install -n --reinstall flash-attn
+```
+
 ## Things To Note
 
 Because some of NeMo-RL's dependencies have a pinned requirement for a specific PyTorch version, running a script with `uv run` will cause it to install that version and break the environment. When using a nightly version of PyTorch, run scripts with `uv run --no-sync` to avoid this.
