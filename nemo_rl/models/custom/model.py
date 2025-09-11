@@ -32,7 +32,7 @@ class BaseModelArgs:
 class BaseModel(nn.Module):
     @abstractmethod
     def __init__(self, model_args: BaseModelArgs):
-        pass
+        super().__init__()
     
     @abstractmethod
     def forward(self, tokens: torch.Tensor):
