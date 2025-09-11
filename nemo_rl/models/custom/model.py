@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from torch import nn
+import torch
 
 from transformers import PreTrainedModel
 
@@ -26,4 +27,13 @@ class BaseModelArgs:
     def get_nparams_and_flops(
         self, model: nn.Module, seq_len: int
     ) -> tuple[int, float]:
+        pass
+
+class BaseModel(nn.Module):
+    @abstractmethod
+    def __init__(self, model_args: BaseModelArgs):
+        pass
+    
+    @abstractmethod
+    def forward(self, tokens: torch.Tensor):
         pass

@@ -14,6 +14,7 @@ from torch import nn
 from nemo_rl.models.custom.attention import build_attention, init_attention_mask
 
 from .args import Qwen3ModelArgs
+from nemo_rl.models.custom.model import BaseModel
 
 # Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
 def precompute_rope_cache(
@@ -323,7 +324,7 @@ class TransformerBlock(nn.Module):
         self.feed_forward.init_weights(self.weight_init_std)
 
 
-class Qwen3Model(nn.Module):
+class Qwen3Model(BaseModel):
     """
     Qwen3Model Module
 
@@ -410,11 +411,7 @@ class Qwen3Model(nn.Module):
             self.model_args.rope_theta,
         )
 
-    def forward(
-        self,
-        tokens: torch.Tensor,
-        input_batch: torch.Tensor | None = None,
-    ):
+    def forward(self, tokens: torch.Tensor):
         """
         Perform a forward pass through the Transformer model.
 

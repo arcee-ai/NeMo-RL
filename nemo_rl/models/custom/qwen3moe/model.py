@@ -9,6 +9,7 @@ from nemo_rl.models.custom.qwen3moe.args import Qwen3MoEModelArgs
 from nemo_rl.models.custom.qwen3.model import Attention, FeedForward
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from nemo_rl.models.custom.attention import init_attention_mask
+from nemo_rl.models.custom.model import BaseModel
 
 class TransformerBlock(nn.Module):
     def __init__(self, layer_id: int, model_args: Qwen3MoEModelArgs):
@@ -60,17 +61,15 @@ class TransformerBlock(nn.Module):
         return hidden_states
     
     def init_weights(self, buffer_device: torch.device | None = None):
-        # for norm in (self.attention_norm, self.ffn_norm):
-        #     norm.reset_parameters()
-        # self.attention.init_weights(self.weight_init_std)
+        for norm in (self.attention_norm, self.ffn_norm):
+            norm.reset_parameters()
+        self.attention.init_weights(self.weight_init_std)
         if self.moe_enabled:
-            pass
-            #self.moe.init_weights(self.weight_init_std, buffer_device)
+            self.moe.init_weights(self.weight_init_std, buffer_device)
         else:
-            pass
-            # self.feed_forward.init_weights(self.weight_init_std)
+            self.feed_forward.init_weights(self.weight_init_std)
 
-class Qwen3MoEModel(nn.Module):
+class Qwen3MoEModel(BaseModel):
     def __init__(self, model_args: Qwen3MoEModelArgs):
         super().__init__()
         self.model_args = model_args
