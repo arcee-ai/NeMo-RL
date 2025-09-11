@@ -5,11 +5,6 @@ from transformers import PreTrainedModel, PretrainedConfig
 
 from nemo_rl.models.custom.model import BaseModelArgs
 
-from nemo_rl.models.custom.llama3.model import Transformer as LlamaModel
-from nemo_rl.models.custom.llama3.args import TransformerModelArgs as LlamaModelArgs
-from nemo_rl.models.custom.llama3.state_dict_adapter import Llama3StateDictAdapter
-from nemo_rl.models.custom.llama3.parallelize import parallelize_llama
-
 from nemo_rl.models.custom.moe import MoEArgs
 from nemo_rl.models.custom.qwen3.model import Qwen3Model
 from nemo_rl.models.custom.qwen3.args import Qwen3ModelArgs
@@ -28,20 +23,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
     
     is_nightly_torch = hasattr(torch, "_grouped_mm")
     
-    if mt == "llama":
-        # TODO: verfy this works on all llama3 models
-        return LlamaModel, LlamaModelArgs(
-            dim = config.hidden_size,
-            n_layers = config.num_hidden_layers,
-            n_heads = config.num_attention_heads,
-            n_kv_heads = config.num_key_value_heads,
-            vocab_size = config.vocab_size,
-            norm_eps = config.layer_norm_eps,
-            rope_theta = config.rope_theta,
-            max_seq_len = config.max_position_embeddings,
-            eos_id = int(config.eos_token_id) if getattr(config, "eos_token_id", None) is not None else 0
-        ), Llama3StateDictAdapter, parallelize_llama
-    elif mt == "qwen3":
+    if mt == "qwen3":
         uses_sliding_causal = getattr(config, "sliding_window", None) is not None
         return Qwen3Model, Qwen3ModelArgs(
             dim = config.hidden_size,
