@@ -404,10 +404,10 @@ class DTensorV2PolicyWorker:
             mesh_dim_names=mesh_dim_names
         )
         
-        device_mesh[list(dp_names)]._flatten(mesh_dim_name="dp")
-        device_mesh[list(dp_shard_cp_names)]._flatten(mesh_dim_name="dp_shard_cp")
-        device_mesh[list(dp_cp_names)]._flatten(mesh_dim_name="dp_cp")
-        device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
+        device_mesh["dp"] = device_mesh[list(dp_names)]._flatten(mesh_dim_name="dp")
+        device_mesh["dp_shard_cp"] = device_mesh[list(dp_shard_cp_names)]._flatten(mesh_dim_name="dp_shard_cp")
+        device_mesh["dp_cp"] = device_mesh[list(dp_cp_names)]._flatten(mesh_dim_name="dp_cp")
+        device_mesh["ep"] = device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
 
         self.dp_mesh, self.pp_mesh, self.ep_mesh, self.tp_mesh, self.cp_mesh = (
             device_mesh["dp"],
