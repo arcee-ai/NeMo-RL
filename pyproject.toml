@@ -21,7 +21,7 @@ license = {text = "Apache 2.0"}
 dependencies = [
     "setuptools",
     "ninja",  # for flash-attn parallel build
-    "torch==2.8.0",
+    "torch==2.7.1",
     "triton",
     "colored==2.2.3",
     "ray[default]==2.48.0",
@@ -99,7 +99,7 @@ mcore = [
 # This is a default group so that we install these even with bare `uv sync`
 build = [
     # Build requirement for TE
-    "torch==2.8.0",
+    "torch==2.7.1",
     # Build requirement for TE
     "setuptools",
     "packaging",
