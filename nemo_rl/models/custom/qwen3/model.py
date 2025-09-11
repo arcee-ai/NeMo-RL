@@ -344,7 +344,7 @@ class Qwen3Model(BaseModel):
     """
 
     def __init__(self, model_args: Qwen3ModelArgs):
-        super().__init__()
+        super().__init__(model_args)
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
         self.n_layers = model_args.n_layers

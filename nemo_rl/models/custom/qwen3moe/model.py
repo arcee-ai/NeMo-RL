@@ -13,7 +13,7 @@ from nemo_rl.models.custom.model import BaseModel
 
 class TransformerBlock(nn.Module):
     def __init__(self, layer_id: int, model_args: Qwen3MoEModelArgs):
-        super().__init__()
+        super().__init__(model_args)
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
         
