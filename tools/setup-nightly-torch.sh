@@ -10,7 +10,12 @@ bash tools/build-vllm-with-nightly.sh
 
 uv pip install -n --reinstall flash-attn
 
-uv venv $VENV_DIR
+if [ -d "$VENV_DIR" ]; then
+    echo "Using existing venv..."
+else
+    uv venv $VENV_DIR
+fi
+
 uv sync -p $VENV_DIR --extra vllm_http
 
 uv pip install -U --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
