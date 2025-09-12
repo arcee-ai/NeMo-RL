@@ -349,8 +349,7 @@ class DTensorV2PolicyWorker:
         self.tokenizer = tokenizer
 
         # ------------------------------------------------
-        # 3) Move to GPU + Composable FSDP
-        #    (Initialize device mesh, shard submodules, then shard entire model)
+        # 3) Move to GPU + Apply parallelism strategies
         # ------------------------------------------------
 
         self.tp_size = self.cfg["dtensor_v2_cfg"]["tensor_parallel_size"]
@@ -407,7 +406,7 @@ class DTensorV2PolicyWorker:
         self.dp_mesh = device_mesh[list(dp_names)]._flatten(mesh_dim_name="dp")
         self.dp_shard_cp_mesh = device_mesh[list(dp_shard_cp_names)]._flatten(mesh_dim_name="dp_shard_cp")
         self.dp_cp_mesh = device_mesh[list(dp_cp_names)]._flatten(mesh_dim_name="dp_cp")
-        self.ep_mesh = device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
+        self.ep_mesh = device_mesh[list(ep_names)]
 
         self.pp_mesh, self.tp_mesh, self.cp_mesh = (
             device_mesh["pp"],
