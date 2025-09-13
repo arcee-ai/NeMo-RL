@@ -51,8 +51,8 @@ find requirements/ -name "*.txt" -type f -exec sed -i 's/#.*$//' {} \; 2>/dev/nu
 find requirements/ -name "*.txt" -type f -exec sed -i '/^[[:space:]]*$/d' {} \; 2>/dev/null || true
 
 # Modify torch dependency to allow nightlies
-sed -i 's/torch==/torch>=/g' requirements/build.txt
-sed -i 's/torch ==/torch >=/g' pyproject.toml
+sed -i 's/torch==2.8.0/torch/g' requirements/build.txt
+sed -i 's/torch == 2.8.0/torch/g' pyproject.toml
 
 # Install dependencies
 echo "Installing dependencies..."
