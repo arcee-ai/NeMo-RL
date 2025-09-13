@@ -50,7 +50,9 @@ echo "Removing comments from requirements files..."
 find requirements/ -name "*.txt" -type f -exec sed -i 's/#.*$//' {} \; 2>/dev/null || true
 find requirements/ -name "*.txt" -type f -exec sed -i '/^[[:space:]]*$/d' {} \; 2>/dev/null || true
 
-uv run --no-project use_existing_torch.py
+# Modify torch dependency to allow nightlies
+sed -i 's/torch==/torch>=/g' requirements/build.txt
+sed -i 's/torch ==/torch >=/g' pyproject.toml
 
 # Install dependencies
 echo "Installing dependencies..."
