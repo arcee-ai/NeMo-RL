@@ -48,6 +48,7 @@ find requirements/ -name "*.txt" -type f -exec sed -i '/^[[:space:]]*$/d' {} \; 
 
 # Modify torch dependency to allow nightlies
 uv run --no-project use_existing_torch.py
+echo "" > requirements/cuda.txt
 
 # Install dependencies
 echo "Installing dependencies..."
@@ -57,6 +58,6 @@ uv pip install numpy setuptools setuptools_scm
 
 # Install vLLM using precompiled wheel
 echo "Installing vLLM with precompiled wheel..."
-uv pip install -e 3rdparty/vllm --no-build-isolation --no-deps
+uv pip install -e 3rdparty/vllm --no-build-isolation
 
 echo "Build completed successfully!"
