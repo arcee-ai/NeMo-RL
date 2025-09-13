@@ -4,7 +4,7 @@ VENV_DIR=venvs/nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe
 
 rm -rf 3rdparty/vllm
 
-uv pip install -U --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+uv pip install --reinstall --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
 bash tools/build-vllm-with-nightly.sh
 
@@ -18,7 +18,7 @@ fi
 
 uv sync -p $VENV_DIR --extra vllm_http
 
-uv pip install -U --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
+uv pip install --reinstall --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
 uv pip install -r 3rdparty/vllm/requirements/build.txt -p $VENV_DIR
 uv pip install --no-build-isolation -e 3rdparty/vllm -p $VENV_DIR
 uv pip install --reinstall flash-attn -p $VENV_DIR
