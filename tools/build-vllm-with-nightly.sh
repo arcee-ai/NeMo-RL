@@ -54,10 +54,9 @@ echo "Installing dependencies..."
 cd ../..
 uv pip install --upgrade-package pip pip
 uv pip install numpy setuptools setuptools_scm
-uv pip install -r 3rdparty/vllm/requirements/common.txt
 
 # Install vLLM using precompiled wheel
 echo "Installing vLLM with precompiled wheel..."
-uv pip install -e 3rdparty/vllm --no-build-isolation --no-deps
+uv pip install -e 3rdparty/vllm --no-build-isolation
 
 echo "Build completed successfully!"
