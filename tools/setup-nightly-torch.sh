@@ -14,9 +14,9 @@ if [ -d "$VENV_DIR" ]; then
     echo "Using existing venv..."
 else
     uv venv $VENV_DIR
-    uv sync -p $VENV_DIR --extra vllm_http
 fi
 
+uv sync -p $VENV_DIR --extra vllm_http
 
 uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
 
