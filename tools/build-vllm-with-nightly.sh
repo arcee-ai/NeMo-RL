@@ -60,6 +60,6 @@ uv pip install numpy setuptools setuptools_scm
 
 # Install vLLM using precompiled wheel
 echo "Installing vLLM with precompiled wheel..."
-uv pip install -e 3rdparty/vllm --no-deps
+uv pip install -e 3rdparty/vllm
 
 echo "Build completed successfully!"
