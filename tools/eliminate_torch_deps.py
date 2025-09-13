@@ -3,8 +3,8 @@
 
 import glob
 
-requires_files = glob.glob('requirements/*.txt')
-requires_files += ["pyproject.toml"]
+requires_files = glob.glob('3rdparty/vllm/requirements/*.txt')
+requires_files += ["3rdparty/vllm/pyproject.toml"]
 for file in requires_files:
     print(f">>> cleaning {file}")
     with open(file) as f:
