@@ -54,7 +54,7 @@ echo "Installing dependencies..."
 cd ../..
 uv pip install --upgrade-package pip pip
 uv pip install numpy setuptools setuptools_scm
-uv pip install -r 3rdparty/vllm/requirements/cuda.txt
+uv pip install -r 3rdparty/vllm/requirements/common.txt
 
 # Install vLLM using precompiled wheel
 echo "Installing vLLM with precompiled wheel..."
