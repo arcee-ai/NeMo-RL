@@ -7,20 +7,10 @@ Current stable builds of PyTorch are missing a few features that benefit MoE tra
 To install the current nightly version of PyTorch, run:
 
 ```
-uv pip install -U --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+bash tools/setup-nightly-torch.sh
 ```
 
-After that, you will need to build vLLM so it is compatible with this version of PyTorch.
-
-```
-bash tools/build-vllm-with-nightly.sh
-```
-
-Finally, you will need to rebuild Flash Attention.
-
-```
-uv pip install -n --reinstall flash-attn
-```
+This may take several minutes.
 
 ## Things To Note
 
