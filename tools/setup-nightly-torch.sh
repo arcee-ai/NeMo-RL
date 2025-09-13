@@ -28,7 +28,4 @@ uv pip install numpy setuptools setuptools_scm
 uv pip install -e 3rdparty/vllm -p $VENV_DIR
 uv pip install -P flash-attn flash-attn -p $VENV_DIR
 
-uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
-
 echo "Nightly torch setup complete! From now on, run scripts with 'uv run --no-sync'"
