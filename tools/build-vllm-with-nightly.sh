@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
 DEFAULT_GIT_URL="https://github.com/vllm-project/vllm.git"
-DEFAULT_BRANCH="0.10.1.1"
+DEFAULT_BRANCH="v0.10.1.1"
 
 # Parse command line arguments
 GIT_URL=${1:-$DEFAULT_GIT_URL}
