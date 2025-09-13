@@ -6,7 +6,7 @@ VENV_DIR=venvs/nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe
 
 rm -rf 3rdparty/vllm
 
-uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+uv pip install -P torch --prerelease allow torch torchvision torchaudio torchao --index-url https://download.pytorch.org/whl/nightly/cu128
 
 bash tools/build-vllm-with-nightly.sh
 
