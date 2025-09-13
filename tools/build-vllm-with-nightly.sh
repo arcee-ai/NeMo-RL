@@ -51,7 +51,7 @@ find requirements/ -name "*.txt" -type f -exec sed -i 's/#.*$//' {} \; 2>/dev/nu
 find requirements/ -name "*.txt" -type f -exec sed -i '/^[[:space:]]*$/d' {} \; 2>/dev/null || true
 
 # Modify torch dependency to allow nightlies
-python ../../tools/eliminate_torch_deps.py
+uv run --no-project use_existing_torch.py
 
 # Install dependencies
 echo "Installing dependencies..."
