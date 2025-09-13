@@ -18,12 +18,8 @@ set -eoux pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
-DEFAULT_GIT_URL="https://github.com/vllm-project/vllm.git"
-DEFAULT_BRANCH="v0.10.1.1"
-
-# Parse command line arguments
-GIT_URL=${1:-$DEFAULT_GIT_URL}
-BRANCH=${2:-$DEFAULT_BRANCH}
+GIT_URL="https://github.com/vllm-project/vllm.git"
+BRANCH="v0.10.1.1"
 
 BUILD_DIR=$(realpath "$SCRIPT_DIR/../3rdparty/vllm")
 if [[ -e "$BUILD_DIR" ]]; then
