@@ -18,7 +18,7 @@ else
     uv venv $VENV_DIR
 fi
 
-uv sync -p $VENV_DIR --extra vllm_http
+VIRTUAL_ENV=$VENV_DIR uv sync --active --extra vllm_http
 
 uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
 
