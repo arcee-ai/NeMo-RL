@@ -1,5 +1,7 @@
 # Make sure vLLM venv exists
 
+set -eoux pipefail
+
 VENV_DIR=venvs/nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe
 
 rm -rf 3rdparty/vllm
