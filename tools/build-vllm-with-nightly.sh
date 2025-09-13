@@ -63,6 +63,3 @@ echo "Installing vLLM with precompiled wheel..."
 uv pip install -e 3rdparty/vllm --no-deps
 
 echo "Build completed successfully!"
-echo "The built vLLM is available in: $BUILD_DIR"
-echo "You can now update your pyproject.toml to use this local version."
-echo "Follow instructions on https://github.com/NVIDIA-NeMo/RL/blob/main/docs/guides/use-custom-vllm.md for how to configure your local NeMo RL environment to use this custom vLLM."
