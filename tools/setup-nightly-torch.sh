@@ -8,7 +8,7 @@ uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-
 
 bash tools/build-vllm-with-nightly.sh
 
-uv pip install -n -P flash-attn flash-attn --no-deps
+uv pip install -n -P flash-attn flash-attn
 
 if [ -d "$VENV_DIR" ]; then
     echo "Using existing venv..."
@@ -23,7 +23,7 @@ uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-
 # install vLLM
 uv pip install --upgrade pip
 uv pip install numpy setuptools setuptools_scm
-uv pip install -e 3rdparty/vllm -p $VENV_DIR --no-deps
-uv pip install -P flash-attn flash-attn -p $VENV_DIR --no-deps
+uv pip install -e 3rdparty/vllm -p $VENV_DIR
+uv pip install -P flash-attn flash-attn -p $VENV_DIR
 
 echo "Nightly torch setup complete! From now on, run scripts with 'uv run --no-sync'"
