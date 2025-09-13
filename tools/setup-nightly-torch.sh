@@ -20,7 +20,7 @@ uv sync -p $VENV_DIR --extra vllm_http
 
 uv pip install -P torch --prerelease allow torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 -p $VENV_DIR
 uv pip install -r 3rdparty/vllm/requirements/build.txt -p $VENV_DIR
-uv pip install --no-build-isolation -e 3rdparty/vllm -p $VENV_DIR
+uv pip install -e 3rdparty/vllm -p $VENV_DIR --no-deps
 uv pip install --reinstall flash-attn -p $VENV_DIR
 
 echo "Nightly torch setup complete! From now on, run scripts with 'uv run --no-sync'"
