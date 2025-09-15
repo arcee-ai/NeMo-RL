@@ -48,6 +48,8 @@ dependencies = [
     "mlflow",
     "verifiers==0.1.3",
     "vf-exts",
+    "flash-attn==2.7.4.post1",
+    "vllm>=0.10.0"
 ]
 
 [project.optional-dependencies]
@@ -70,9 +72,10 @@ vllm = [
     "causal-conv1d"
 ]
 # For the vllm_http backend, we use the latest vllm
-vllm_http = [
+vllm-http = [
     "vllm==0.10.1.1",
-    "hf-transfer"
+    "hf-transfer",
+    "flash-attn==2.7.4.post1"
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)

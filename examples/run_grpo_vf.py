@@ -50,6 +50,11 @@ from nemo_rl.utils.logger import get_next_experiment_dir
 import verifiers as vf
 import vf_exts as vfe
 
+import logging
+
+# Cope with asyncio spamming console on certain crashes
+logging.getLogger("asyncio").setLevel(logging.ERROR)
+
 OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
 
 

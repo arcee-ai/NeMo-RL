@@ -15,6 +15,7 @@ import os
 import warnings
 from collections import defaultdict
 from typing import Any, Optional, Union
+import logging
 
 import numpy as np
 import ray
@@ -47,6 +48,7 @@ from nemo_rl.utils.flops_tracker import (
     get_default_hf_config,
     get_theoretical_tflops,
 )
+from nemo_rl.models.policy.dtensor_v2.v2_policy_worker import get_device_mesh_info
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
@@ -73,6 +75,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         tp_size = 1
         pp_size = 1
         cp_size = 1
+        
+        dtv2_enable = config.get("dtensor_v2_cfg", {}).get("enabled", False)
 
         megatron_enable = config.get("megatron_cfg", {}).get("enabled", False)
         if megatron_enable:
@@ -84,10 +88,20 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             cp_size = config["megatron_cfg"]["context_parallel_size"]
 
             env_vars = config["megatron_cfg"].get("env_vars", {})
+        elif dtv2_enable:
+            worker_builder_cls = (
+                "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker"
+            )
+            tp_size = config["dtensor_v2_cfg"]["tensor_parallel_size"]
+            cp_size = config["dtensor_v2_cfg"]["context_parallel_size"]
+            pp_size = config["dtensor_v2_cfg"]["pipeline_parallel_size"]
+            ep_size = config["dtensor_v2_cfg"]["expert_parallel_size"]
+            env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
         else:
             assert config["dtensor_cfg"]["enabled"], (
-                "Please either set policy.megatron_cfg.enabled=true to use Megatron training backend "
-                "or set policy.dtensor_cfg.enabled=true to use DTensor training backend."
+                "Please either set policy.megatron_cfg.enabled=true to use Megatron training backend, ",
+                "set policy.dtensor_cfg.enabled=true to use DTensor training backend, ",
+                "or set policy.torchtitan_cfg.enabled=true to use TorchTitan training backend.",
             )
             worker_builder_cls = (
                 "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
@@ -97,20 +111,61 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
             env_vars = config["dtensor_cfg"].get("env_vars", {})
 
-        self.sharding_annotations = NamedSharding(
-            layout=np.arange(cluster.world_size()).reshape(
-                pp_size,  # PP
-                -1,  # DP
-                cp_size,  # CP
-                tp_size,  # TP
-            ),
-            names=[
+        if dtv2_enable:
+            dp_size = cluster.world_size() // (tp_size * cp_size * pp_size * ep_size)
+            # Build a flattened DP axis for DTensorV2: dp = dp_replicate * dp_shard_mod_ep * dp_shard_in_ep
+            mesh_info = get_device_mesh_info(
+                cluster.world_size(),
+                tp_size,
+                cp_size,
+                ep_size,
+                pp_size,
+                always_include_all=True,
+            )
+
+            shape_map = {n: s for n, s in zip(mesh_info["mesh_dim_names"], mesh_info["mesh_shape"])}
+            dp_axis_size = (
+                shape_map.get("dp_replicate", 1)
+                * shape_map.get("dp_shard_mod_ep", 1)
+                * shape_map.get("dp_shard_in_ep", 1)
+            )
+            new_shape = [
+                shape_map.get("pp", 1),
+                max(1, dp_axis_size),
+                shape_map.get("cp", 1),
+                shape_map.get("tp", 1),
+            ]
+            new_names = [
                 "pipeline_parallel",
                 "data_parallel",
                 "context_parallel",
                 "tensor_parallel",
-            ],
-        )
+            ]
+
+            assert np.prod(new_shape) == cluster.world_size(), (
+                f"NamedSharding shape {tuple(new_shape)} product "
+                f"!= world_size {cluster.world_size()}"
+            )
+
+            self.sharding_annotations = NamedSharding(
+                layout=np.arange(cluster.world_size()).reshape(*new_shape),
+                names=new_names,
+            )
+        else:
+            self.sharding_annotations = NamedSharding(
+                layout=np.arange(cluster.world_size()).reshape(
+                    pp_size,  # PP
+                    -1,  # DP
+                    cp_size,  # CP
+                    tp_size,  # TP
+                ),
+                names=[
+                    "pipeline_parallel",
+                    "data_parallel",
+                    "context_parallel",
+                    "tensor_parallel",
+                ],
+            )
 
         pre_init_queue = RayQueue()
         worker_builder = RayWorkerBuilder(
