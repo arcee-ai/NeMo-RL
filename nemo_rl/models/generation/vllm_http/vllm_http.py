@@ -25,6 +25,22 @@ class VLLMOpenAIServe:
         extra_cli_args: Optional[list[str]] = None,
         worker_extension_cls: str = "nemo_rl.models.generation.vllm_http.worker_ext.VllmHttpWorkerExtension",
     ):
+        for _name in [
+            "uvicorn.access",
+            "uvicorn.error",
+            "ray.serve",
+            "ray.serve.deployment",
+            "ray.serve.request_summary",
+            "vllm_http_generation_VLLMOpenAIServe",
+        ]:
+            try:
+                if _name == "uvicorn.access":
+                    logging.getLogger(_name).disabled = True
+                else:
+                    logging.getLogger(_name).setLevel(logging.ERROR)
+            except Exception:
+                pass
+
         args = [
             "--model", model,
             "--served-model-name", served_model_name,
