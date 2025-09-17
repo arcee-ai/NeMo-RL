@@ -100,7 +100,7 @@ def run_vf_rollouts(
             log.append({
                 "role": msg["role"],
                 "content": msg["content"],
-                "tool_calls": msg["tool_calls"],
+                "tool_calls": msg.get("tool_calls", []),
                 "token_ids": token_ids
             })
         new_msg_logs.append(log)
