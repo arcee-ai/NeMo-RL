@@ -44,9 +44,9 @@ def run_vf_rollouts(
     # Convert input batch to verifiers input format
     verifiers_input_batch = vf.GenerateInputs(
         prompt=vf_msg_log,
-        answer=input_batch.get("answer", [None] * len(input_batch["message_log"])),
-        info=input_batch.get("info", [None] * len(input_batch["message_log"])),
-        task=input_batch.get("task", [None] * len(input_batch["message_log"]))
+        answer=input_batch["extra_env_info"].get("answer", [None] * len(input_batch["message_log"])),
+        info=input_batch["extra_env_info"].get("info", [None] * len(input_batch["message_log"])),
+        task=input_batch["extra_env_info"].get("task", ["vf"] * len(input_batch["message_log"]))
     )
 
     sampling_args = {
