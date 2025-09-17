@@ -31,7 +31,7 @@ class VLLMOpenAIServe:
             "ray.serve",
             "ray.serve.deployment",
             "ray.serve.request_summary",
-            "vllm_http_generation_VLLMOpenAIServe",
+            # "vllm_http_generation_VLLMOpenAIServe",
         ]:
             try:
                 if _name == "uvicorn.access":
