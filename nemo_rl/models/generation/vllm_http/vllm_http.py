@@ -35,6 +35,8 @@ class VLLMOpenAIServe:
             "--logprobs-mode", "processed_logprobs",
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--data-parallel-size", str(data_parallel_size),
+            "--disable-log-requests",
+            "--disable-uvicorn-access-log",
         ]
         if extra_cli_args:
             args += extra_cli_args
