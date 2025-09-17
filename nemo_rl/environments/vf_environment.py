@@ -11,6 +11,8 @@ from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentRet
 import verifiers as vf
 import vf_exts as vfe
 
+from openai import AsyncOpenAI
+
 class VfEnvironmentMetadata(TypedDict):
     """Persistent state of the environment across steps."""
     answer: str | None
@@ -195,3 +197,25 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             "generation_lengths": batch["generation_lengths"].float().mean().item(),
             "prompt_lengths": batch["prompt_lengths"].float().mean().item(),
         }
+    
+    async def a_generate(
+        self,
+        inputs: vf.GenerateInputs | vf.Dataset | dict,
+        sampling_args: vf.SamplingArgs | None = None,
+        score_rollouts: bool = True,
+        max_concurrent: int = -1,
+        **kwargs,
+    ) -> vf.GenerateOutputs:
+        client = AsyncOpenAI(
+            api_key="n/a",
+            base_url="http://127.0.0.1:8000/v1",
+        )
+        return await self.env.a_generate(
+            inputs,
+            client,
+            sampling_args,
+            "policy",
+            score_rollouts,
+            max_concurrent,
+            **kwargs,
+        )

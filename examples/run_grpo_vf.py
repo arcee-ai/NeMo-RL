@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from copy import deepcopy
 import os
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
@@ -74,7 +75,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 TokenizerType = PreTrainedTokenizerBase
 
 # Slightly odd closure for verifiers env in the data processor, which needs a specific signature.
-def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
+def create_data_processor(vf_env: vf.MultiTurnEnv, tokenizer_kwargs: dict[str, Any]) -> Callable:
     vf_tools: dict[str, list[Callable]] = defaultdict(lambda: [])
     if isinstance(vf_env, vfe.MultiTurnEnvGroup):
         env_map = vf_env.env_map
@@ -107,6 +108,21 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
             raise ValueError("One of 'answer' or 'info' must be present in each datapoint. Found neither.", datum_dict)
 
         message_log: LLMMessageLogType = []
+
+        msg_tokenizer_kwargs = {
+            "chat_template_kwargs": {
+                "tokenize": False,
+                "add_special_tokens": True,
+                "tools": vf_tools[vf_task] # type: ignore
+            },
+            "tokenize_kwargs": {
+                "return_tensors": "pt",
+                "add_special_tokens": False,
+            }
+        }
+
+        # Add user overrides
+        msg_tokenizer_kwargs.update(tokenizer_kwargs)
         
         # NeMo-RL expects a format with a standard message log alongside token IDs.
         # Go through and convert each message.
@@ -116,19 +132,24 @@ def create_data_processor(vf_env: vf.MultiTurnEnv) -> Callable:
             add_gen_prompt = (
                 i == len(prompt_messages) - 1 and message.get("role") == "user"
             )
+            add_tools = (i == 0)
+
+            chat_template_kwargs = deepcopy(msg_tokenizer_kwargs["chat_template_kwargs"])
+            if not add_tools:
+                chat_template_kwargs["tools"] = None
+
             raw_message: str = tokenizer.apply_chat_template(  # type: ignore
                 [message],
-                tokenize=False,
                 add_generation_prompt=add_gen_prompt,
-                add_special_tokens=True,
-                tools=vf_tools[vf_task] # type: ignore
+                **chat_template_kwargs
             )
 
             message["token_ids"] = tokenizer(
                 raw_message,
-                return_tensors="pt",
-                add_special_tokens=False,
+                **msg_tokenizer_kwargs["tokenize_kwargs"]
             )["input_ids"][0]
+
+            message["tokenizer_kwargs"] = msg_tokenizer_kwargs
             
             message_log.append(message)
 
@@ -184,7 +205,7 @@ def setup_data(
         }
     ).remote(env_configs["vf"])
     
-    vf_data_processor = create_data_processor(vf_env_loaded)
+    vf_data_processor = create_data_processor(vf_env_loaded, data_config.get("tokenizer_kwargs", {}))
     
     dataset = AllTaskProcessedDataset(
         data,
