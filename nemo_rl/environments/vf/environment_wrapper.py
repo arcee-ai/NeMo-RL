@@ -27,8 +27,6 @@ def run_vf_rollouts(
     env = list(task_to_env.values())[0]
 
     assert isinstance(policy_generation, VllmHttpGeneration), "Verifiers environments require a vLLM client."
-    
-    assert max_rollout_turns == -1, "Do not specify NeMo-RL's max_turns for a verifiers environment. Use the verifiers environment's max_turns instead."
 
     # Convert input batch to verifiers input format
     verifiers_input_batch = vf.GenerateInputs(
