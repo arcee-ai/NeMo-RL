@@ -28,7 +28,7 @@ def run_vf_rollouts(
 
     assert isinstance(policy_generation, VllmHttpGeneration), "Verifiers environments require a vLLM client."
 
-    vf_msg_log = []
+    vf_msg_log: list[vf.Messages] = []
 
     for messages in input_batch["message_log"]:
         log = []
