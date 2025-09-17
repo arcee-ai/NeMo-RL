@@ -106,3 +106,5 @@ def run_vf_rollouts(
         new_msg_logs.append(log)
 
     current_batch["message_log"] = new_msg_logs
+
+    return current_batch, {}
