@@ -1,5 +1,6 @@
 # serve_vllm.py
 import asyncio
+import logging
 from typing import Any, Optional
 from ray import serve
 from fastapi import FastAPI, Request
@@ -60,6 +61,9 @@ class VLLMOpenAIServe:
             build_async_engine_client_from_engine_args,
             init_app_state,
         )
+
+        uvicorn_access = logging.getLogger("uvicorn.access")
+        uvicorn_access.disabled = True
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
