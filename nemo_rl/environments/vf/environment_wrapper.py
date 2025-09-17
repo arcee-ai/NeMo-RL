@@ -7,6 +7,8 @@ from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGen
 from nemo_rl.experience.rollouts import BatchedDataDict, DatumSpec, TokenizerType, LLMMessageLogType
 from nemo_rl.environments.vf_environment import VfEnvironment
 from nemo_rl.environments.interfaces import EnvironmentInterface
+from nemo_rl.experience.rollouts import build_rollouts_log
+
 
 import verifiers as vf
 from openai import AsyncOpenAI
@@ -108,4 +110,56 @@ def run_vf_rollouts(
 
     current_batch["message_log"] = new_msg_logs
 
-    return current_batch, {}
+    # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
+    batch_size = len(current_batch["message_log"])
+
+    sample_assistant_tokens: list[int] = []
+    sample_total_tokens: list[int] = []
+
+    for log in current_batch["message_log"]:
+        assistant_tokens = 0
+        for msg in log:
+            if msg.get("role") == "assistant":
+                token_ids = msg.get("token_ids", [])
+                # token_ids may be a list[int] or torch.Tensor; handle both
+                if isinstance(token_ids, torch.Tensor):
+                    assistant_tokens += int(token_ids.numel())
+                else:
+                    assistant_tokens += len(token_ids)
+        sample_assistant_tokens.append(assistant_tokens)
+        sample_total_tokens.append(assistant_tokens)  # No environment messages added in this path
+
+    sync_sample_metrics = [
+        {
+            "terminated": False,
+            "truncated": False,
+            "total_tokens": sample_total_tokens[i],
+            "assistant_tokens": sample_assistant_tokens[i],
+            "env_tokens": 0,
+        }
+        for i in range(batch_size)
+    ]
+
+    # Aggregate rollout metrics to mirror keys from run_multi_turn_rollout
+    denom = max(batch_size, 1)
+    rollout_metrics = {
+        "total_turns": batch_size,
+        "avg_turns_per_sample": 1.0,
+        "max_turns_per_sample": 1,
+        "natural_termination_rate": 0.0,
+        "truncation_rate": 0.0,
+        "max_turns_reached_rate": 0.0,
+        "mean_total_tokens_per_sample": float(sum(sample_total_tokens) / denom),
+        "mean_gen_tokens_per_sample": float(sum(sample_assistant_tokens) / denom),
+        "mean_env_tokens_per_sample": 0.0,
+    }
+
+    rollout_metrics["rollouts/text"] = build_rollouts_log(
+        message_logs=current_batch["message_log"],
+        grpo_group_ids=current_batch["idx"],
+        total_rewards=[current_batch["total_reward"][i].item() for i in range(len(current_batch["message_log"]))],
+        extra_env_infos=current_batch["extra_env_info"],
+        sample_metrics=sync_sample_metrics,
+    )
+
+    return current_batch, rollout_metrics
