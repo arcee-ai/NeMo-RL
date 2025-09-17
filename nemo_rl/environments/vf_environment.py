@@ -211,7 +211,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             api_key="n/a",
             base_url="http://127.0.0.1:8000/v1",
         )
-        logging.info(f"Generating with inputs: {inputs} and sampling args: {sampling_args}")
+        assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         return await self.env.a_generate(
             inputs,
             client,
