@@ -70,7 +70,8 @@ def run_vf_rollouts(
 
     rollout = ray.get(env.a_generate.remote(
         inputs=verifiers_input_batch,
-        sampling_args=sampling_args
+        sampling_args=sampling_args,
+        max_concurrent=256,
     ))
 
     current_batch = input_batch.copy()
