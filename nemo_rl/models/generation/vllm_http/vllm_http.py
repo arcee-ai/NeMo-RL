@@ -35,6 +35,7 @@ class VLLMOpenAIServe:
             "--logprobs-mode", "processed_logprobs",
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--data-parallel-size", str(data_parallel_size),
+            "--disable-log-requests",
         ]
         if extra_cli_args:
             args += extra_cli_args
@@ -61,9 +62,6 @@ class VLLMOpenAIServe:
             build_async_engine_client_from_engine_args,
             init_app_state,
         )
-
-        uvicorn_access = logging.getLogger("uvicorn.access")
-        uvicorn_access.disabled = True
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
