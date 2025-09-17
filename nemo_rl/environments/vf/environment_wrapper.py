@@ -36,11 +36,18 @@ def run_vf_rollouts(
     for messages in input_batch["message_log"]:
         log = []
         for message in messages:
-            log.append({
+            entry = {
                 "role": message["role"],
                 "content": message["content"],
-                "tool_calls": message.get("tool_calls", None)
-            })
+            }
+            # Only include tool_calls for assistant messages when present and non-empty
+            if (
+                message.get("role") == "assistant"
+                and message.get("tool_calls")
+                and len(message["tool_calls"]) > 0
+            ):
+                entry["tool_calls"] = message["tool_calls"]
+            log.append(entry)
         
         vf_msg_log.append(log)
     
@@ -49,12 +56,12 @@ def run_vf_rollouts(
     task = [x.get("task", "vf_placeholder") for x in input_batch["extra_env_info"]]
 
     # Convert input batch to verifiers input format
-    verifiers_input_batch = vf.GenerateInputs(
-        prompt=vf_msg_log,
-        answer=answer,
-        info=info,
-        task=task
-    )
+    verifiers_input_batch = {
+        "prompt": vf_msg_log,
+        "answer": answer,
+        "info": info,
+        "task": task,
+    }
 
     sampling_args = {}
 
