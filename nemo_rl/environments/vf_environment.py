@@ -12,6 +12,7 @@ import verifiers as vf
 import vf_exts as vfe
 
 from openai import AsyncOpenAI
+from datasets import Dataset
 
 class VfEnvironmentMetadata(TypedDict):
     """Persistent state of the environment across steps."""
@@ -200,7 +201,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     
     async def a_generate(
         self,
-        inputs: vf.GenerateInputs | vf.Dataset | dict,
+        inputs: vf.GenerateInputs | Dataset | dict,
         sampling_args: vf.SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
