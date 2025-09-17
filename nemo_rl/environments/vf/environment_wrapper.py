@@ -72,7 +72,7 @@ def run_vf_rollouts(
         assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
 
         # Use tokenizer args specified from the data processor
-        tokenizer_kwargs = input_batch["message_log"][0]["tokenizer_kwargs"]
+        tokenizer_kwargs = input_batch["message_log"][0][0]["tokenizer_kwargs"]
 
         log = []
         for i, msg in enumerate(prompt + completion):
