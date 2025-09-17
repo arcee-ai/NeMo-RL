@@ -34,7 +34,7 @@ def run_vf_rollouts(
         log = []
         for message in messages:
             log.append({
-                "role": message["role"],
+                "role": "user",
                 "content": message["content"],
                 "tool_calls": message.get("tool_calls", None)
             })
