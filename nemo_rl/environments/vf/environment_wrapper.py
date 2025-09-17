@@ -53,10 +53,7 @@ def run_vf_rollouts(
         task=task
     )
 
-    sampling_args = {
-        # This technically isn't right, but with the vLLM server it shouldn't matter either way.
-        "max_tokens": max_seq_len,
-    }
+    sampling_args = {}
 
     if greedy:
         sampling_args["temperature"] = 0.0
