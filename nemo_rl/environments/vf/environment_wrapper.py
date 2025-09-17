@@ -28,9 +28,22 @@ def run_vf_rollouts(
 
     assert isinstance(policy_generation, VllmHttpGeneration), "Verifiers environments require a vLLM client."
 
+    vf_msg_log = []
+
+    for messages in input_batch["message_log"]:
+        log = []
+        for message in messages:
+            log.append({
+                "role": message["role"],
+                "content": message["content"],
+                "tool_calls": message.get("tool_calls", None)
+            })
+        
+        vf_msg_log.append(log)
+
     # Convert input batch to verifiers input format
     verifiers_input_batch = vf.GenerateInputs(
-        prompt=input_batch["message_log"],
+        prompt=vf_msg_log,
         answer=input_batch.get("answer", None),
         info=input_batch.get("info", None),
         task=input_batch.get("task", None)
