@@ -46,7 +46,7 @@ def run_vf_rollouts(
         prompt=vf_msg_log,
         answer=input_batch["extra_env_info"].get("answer", [None] * len(input_batch["message_log"])),
         info=input_batch["extra_env_info"].get("info", [None] * len(input_batch["message_log"])),
-        task=input_batch["extra_env_info"].get("task", ["vf"] * len(input_batch["message_log"]))
+        task=input_batch["extra_env_info"].get("task", ["vf_placeholder"] * len(input_batch["message_log"]))
     )
 
     sampling_args = {
