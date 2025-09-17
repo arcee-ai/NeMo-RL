@@ -20,7 +20,7 @@ def run_vf_rollouts(
     greedy: bool = False,
 ):
     for env in task_to_env.values():
-        assert isinstance(env, "VfEnvironment"), "Verifiers environments require a VfEnvironment."
+        assert hasattr(env, "a_generate"), "Verifiers environments require a VfEnvironment."
     
     assert len(task_to_env) == 1, "Verifiers environments are not supported with multiple NeMo-RL tasks. Use vf_exts.MultiTurnEnvGroup instead."
     
