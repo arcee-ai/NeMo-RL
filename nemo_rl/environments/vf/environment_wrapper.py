@@ -1,6 +1,7 @@
 from copy import deepcopy
 from re import L
 
+import torch
 import ray
 from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
 from nemo_rl.experience.rollouts import BatchedDataDict, DatumSpec, TokenizerType, LLMMessageLogType
@@ -64,7 +65,7 @@ def run_vf_rollouts(
     ))
 
     current_batch = input_batch.copy()
-    current_batch["total_reward"] = rollout.reward
+    current_batch["total_reward"] = torch.tensor(rollout.reward)
 
     # Convert completion to NeMo-RL message log format, and re-tokenize the prompt to avoid including generation prompts.
     new_msg_logs: list[LLMMessageLogType] = []
