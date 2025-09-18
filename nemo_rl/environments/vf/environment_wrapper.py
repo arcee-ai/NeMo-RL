@@ -17,9 +17,8 @@ def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
     input_batch: BatchedDataDict[DatumSpec],
     tokenizer: TokenizerType,
+    max_new_tokens: int,
     task_to_env: dict[str, EnvironmentInterface],
-    max_seq_len: int,
-    max_rollout_turns: int = -1,
     greedy: bool = False,
 ):
     for env in task_to_env.values():
@@ -63,7 +62,9 @@ def run_vf_rollouts(
         "task": task,
     }
 
-    sampling_args = {}
+    sampling_args = {
+        "max_tokens": max_new_tokens,
+    }
 
     if greedy:
         sampling_args["temperature"] = 0.0
