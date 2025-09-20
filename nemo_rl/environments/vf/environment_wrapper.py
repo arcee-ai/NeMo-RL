@@ -80,7 +80,7 @@ def run_vf_rollouts(
     rollout, processed_outputs = ray.get(env.a_generate.remote(
         inputs=verifiers_input_batch,
         sampling_args=sampling_args,
-        max_concurrent=64,
+        max_concurrent=32,
     ))
     rollout: vf.GenerateOutputs
     processed_outputs: vf.ProcessedOutputs
