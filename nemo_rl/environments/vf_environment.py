@@ -241,7 +241,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             **kwargs,
         )
 
-        return results, await self.env.process_env_results_vllm(
+        return results, self.env.process_env_results_vllm(
             prompts=results.prompt,
             completions=results.completion,
             states=results.state,
