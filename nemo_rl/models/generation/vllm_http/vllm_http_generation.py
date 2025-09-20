@@ -75,7 +75,7 @@ class VllmHttpGeneration(GenerationInterface):
 
         vllm_app = VLLMOpenAIServe.options( # type: ignore
             ray_actor_options={
-                "num_cpus": 32,
+                "num_cpus": 64,
                 "runtime_env": runtime_env,
             },
         ).bind(
