@@ -115,7 +115,7 @@ policy:
     vllm_cfg:
       async_engine: false
       precision: ${policy.precision}
-      tensor_parallel_size: 4
+      tensor_parallel_size: 1
       pipeline_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
@@ -124,7 +124,7 @@ policy:
     colocated:
       enabled: false
       resources:
-        gpus_per_node: 4
+        gpus_per_node: 1
         num_nodes: null
 
 data:
