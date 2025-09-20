@@ -32,7 +32,8 @@ checkpointing:
   checkpoint_must_save_by: null
 
 policy:
-  model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
+  # model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
+  model_name: "Qwen/Qwen3-0.6B"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 256
