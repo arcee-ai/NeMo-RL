@@ -121,7 +121,8 @@ policy:
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
       extra_cli_args: [
-        "--api-server-count", "2"
+        "--api-server-count", "2",
+        "--disable-frontend-multiprocessing"
       ]
     colocated:
       enabled: false

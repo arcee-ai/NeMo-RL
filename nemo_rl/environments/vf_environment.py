@@ -217,8 +217,8 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 http_client=httpx.AsyncClient(
                     http2=True,
                     limits=httpx.Limits(
-                        max_connections=256,
-                        max_keepalive_connections=256,
+                        max_connections=28000,
+                        max_keepalive_connections=28000,
                     ),
                     timeout=600.0,
                 ),
