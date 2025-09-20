@@ -24,6 +24,7 @@ class VLLMOpenAIServe:
         data_parallel_size: int = 1,
         extra_cli_args: Optional[list[str]] = None,
         worker_extension_cls: str = "nemo_rl.models.generation.vllm_http.worker_ext.VllmHttpWorkerExtension",
+        tool_call_parser: str | None = None,
     ):
         for _name in [
             "uvicorn.access",
@@ -51,6 +52,9 @@ class VLLMOpenAIServe:
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--data-parallel-size", str(data_parallel_size)
         ]
+        if tool_call_parser:
+            args += ["--tool-call-parser", tool_call_parser]
+            args += ["--enable-auto-tool-choice"]
         if extra_cli_args:
             args += extra_cli_args
         

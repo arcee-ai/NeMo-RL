@@ -85,7 +85,8 @@ class VllmHttpGeneration(GenerationInterface):
             max_model_len=config["vllm_cfg"]["max_model_len"],
             gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
             data_parallel_size=self.dp_size,
-            extra_cli_args=config["vllm_cfg"].get("extra_cli_args", [])
+            extra_cli_args=config["vllm_cfg"].get("extra_cli_args", []),
+            tool_call_parser=config["vllm_cfg"].get("tool_parser", None),
         )
         
         serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
