@@ -212,8 +212,8 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         if self.client is None:
             self.client = AsyncOpenAI(
             api_key="n/a",
-                base_url="http://127.0.0.1:8000/v1",
-            )
+            base_url="http://127.0.0.1:8000/v1"
+        )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         return await self.env.a_generate(
             inputs=inputs,
