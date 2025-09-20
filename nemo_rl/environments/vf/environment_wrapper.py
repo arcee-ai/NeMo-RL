@@ -101,8 +101,8 @@ def run_vf_rollouts(
                 "role": msg["role"],
                 "content": msg["content"],
                 "tool_calls": msg.get("tool_calls", []) or [],
-                "token_ids": completion_ids,
-                "generation_logprobs": processed_outputs.completion_logprobs[i],
+                "token_ids": torch.tensor(completion_ids),
+                "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
             })
         new_msg_logs.append(log)
 
