@@ -109,6 +109,7 @@ def run_vf_rollouts(
             )["input_ids"][0]
 
             # TODO: Add generation logprobs
+            print(msg.keys())
             log.append({
                 "role": msg["role"],
                 "content": msg["content"],
