@@ -60,8 +60,6 @@ class VllmHttpGeneration(GenerationInterface):
         runtime_env["env_vars"]["NCCL_CUMEM_ENABLE"] = "1"
         # TODO: I really don't like this. Find a way around torch dtype serialization.
         runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
-        # Enable parallel tokenization in HF tokenizers
-        runtime_env["env_vars"]["TOKENIZERS_PARALLELISM"] = "true"
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
         self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
