@@ -12,6 +12,7 @@ import verifiers as vf
 import vf_exts as vfe
 
 from openai import AsyncOpenAI
+from openai.types.chat.chat_completion import ChatCompletion
 import httpx
 from datasets import Dataset
 
@@ -146,7 +147,15 @@ async def run_rollouts(
 
             rollouts[idx].append(assistant_msg)  # type: ignore
             completions[idx].append(assistant_msg)  # type: ignore
-            states[idx]["responses"].append(resp)
+            # Build a single-choice ChatCompletion for this sample
+            single_resp = ChatCompletion.model_validate({
+                "id": getattr(resp, "id", ""),
+                "created": getattr(resp, "created", 0),
+                "model": getattr(resp, "model", model),
+                "object": getattr(resp, "object", "chat.completion"),
+                "choices": [choice],
+            })
+            states[idx]["responses"].append(single_resp)
             states[idx]["turn"] += 1
 
             is_done = await self.is_completed(rollouts[idx], states[idx], **kwargs)
