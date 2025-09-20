@@ -10,7 +10,7 @@ import torch
 _serve_app = FastAPI()
 
 
-@serve.deployment(max_queued_requests=10000)
+@serve.deployment(max_ongoing_requests=10000)
 @serve.ingress(_serve_app)
 class VLLMOpenAIServe:
     def __init__(
