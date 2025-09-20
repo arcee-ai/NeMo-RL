@@ -77,53 +77,32 @@ def run_vf_rollouts(
     if greedy:
         sampling_args["temperature"] = 0.0
 
-    rollout = ray.get(env.a_generate.remote(
+    rollout, processed_outputs = ray.get(env.a_generate.remote(
         inputs=verifiers_input_batch,
         sampling_args=sampling_args,
         max_concurrent=64,
     ))
+    rollout: vf.GenerateOutputs
+    processed_outputs: vf.ProcessedOutputs
 
     current_batch = input_batch.copy()
     current_batch["total_reward"] = torch.tensor(rollout.reward)
 
     # Convert completion to NeMo-RL message log format, and re-tokenize the prompt to avoid including generation prompts.
     new_msg_logs: list[LLMMessageLogType] = []
-    for prompt, completion in zip(rollout.prompt, rollout.completion):
+    for i, completion in enumerate(rollout.completion):
         assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
 
-        # Use tokenizer args specified from the data processor
-        tokenizer_kwargs = input_batch["message_log"][0][0]["tokenizer_kwargs"]
-
         log = []
-        for i, msg in enumerate(prompt + completion):
-            add_tools = (
-                i == 0
-            )
+        for msg in completion:
+            completion_ids = processed_outputs.completion_ids[i]
 
-            # Prevent the template from adding a tool calling prompt to literally every message.
-            chat_template_kwargs = deepcopy(tokenizer_kwargs["chat_template_kwargs"])
-            if not add_tools:
-                chat_template_kwargs["tools"] = None
-
-            chat_text = tokenizer.apply_chat_template(
-                [msg],
-                # No generation prompt, since we're finished.
-                add_generation_prompt=False,
-                **chat_template_kwargs
-            )
-            token_ids = tokenizer(
-                chat_text,
-                **tokenizer_kwargs["tokenize_kwargs"]
-            )["input_ids"][0]
-
-            print(msg.keys())
-
-            # TODO: Add generation logprobs
             log.append({
                 "role": msg["role"],
                 "content": msg["content"],
                 "tool_calls": msg.get("tool_calls", []) or [],
-                "token_ids": token_ids
+                "token_ids": completion_ids,
+                "generation_logprobs": processed_outputs.completion_logprobs[i],
             })
         new_msg_logs.append(log)
 

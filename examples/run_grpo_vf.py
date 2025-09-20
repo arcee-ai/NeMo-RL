@@ -175,6 +175,7 @@ def setup_data(
     tokenizer: TokenizerType,
     data_config: DataConfig,
     env_configs: dict[str, Any],
+    model_name: str,
     seed: int,
 ) -> tuple[
     AllTaskProcessedDataset,
@@ -203,7 +204,7 @@ def setup_data(
             ),
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }
-    ).remote(env_configs["vf"])
+    ).remote(env_configs["vf"], model_name)
     
     vf_data_processor = create_data_processor(vf_env_loaded, data_config.get("tokenizer_kwargs", {}))
     
@@ -281,7 +282,7 @@ def main() -> None:
         val_dataset,
         task_to_env,
         val_task_to_env,
-    ) = setup_data(tokenizer, config["data"], config["env"], config["grpo"]["seed"])
+    ) = setup_data(tokenizer, config["data"], config["env"], config["grpo"]["seed"], config["policy"]["model_name"])
 
     (
         policy,

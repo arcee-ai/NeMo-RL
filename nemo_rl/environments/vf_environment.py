@@ -3,6 +3,7 @@ import logging
 
 import ray
 import torch
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -46,8 +47,10 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     env: vf.MultiTurnEnv
 
     client: Optional[AsyncOpenAI] = None
+
+    tokenizer: PreTrainedTokenizerBase
     
-    def __init__(self, cfg: VfEnvironmentConfig):
+    def __init__(self, cfg: VfEnvironmentConfig, model_name: str):
         self.cfg = cfg
         
         if "environment_config" not in cfg or cfg["environment_config"] is None:
@@ -59,6 +62,9 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             cfg["environment_name"],
             **env_cfg,
         )
+
+        # Necessary for verifiers to process results.
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         
         # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup, which we have a multi-turn replacement for.
         if not isinstance(self.env, vf.MultiTurnEnv):
@@ -210,7 +216,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         score_rollouts: bool = True,
         max_concurrent: int = -1,
         **kwargs,
-    ) -> vf.GenerateOutputs:
+    ) -> tuple[vf.GenerateOutputs, vf.ProcessedOutputs]:
         if self.client is None:
             self.client = AsyncOpenAI(
                 api_key="n/a",
@@ -225,7 +231,7 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 ),
             )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
-        return await self.env.a_generate(
+        results = await self.env.a_generate(
             inputs=inputs,
             client=self.client,
             model="policy",
@@ -233,4 +239,12 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             score_rollouts=score_rollouts,
             max_concurrent=max_concurrent,
             **kwargs,
+        )
+
+        return results, await self.env.process_env_results_vllm(
+            prompts=results.prompt,
+            completions=results.completion,
+            states=results.state,
+            rewards=results.reward,
+            processing_class=self.tokenizer,
         )
