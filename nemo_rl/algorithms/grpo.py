@@ -603,7 +603,7 @@ def grpo_train(
                         policy_generation=policy_generation,
                         input_batch=repeated_batch,
                         tokenizer=tokenizer,
-                        max_new_tokens=master_config["generation"]["max_new_tokens"],
+                        max_new_tokens=master_config["policy"]["generation"]["max_new_tokens"],
                         task_to_env=task_to_env,
                         greedy=False,
                     )
