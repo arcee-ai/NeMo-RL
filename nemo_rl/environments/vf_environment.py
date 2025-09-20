@@ -37,7 +37,55 @@ def split_prompt_completion(messages: vf.Messages) -> tuple[vf.Messages, vf.Mess
         if m.get("role") == "user":
             last_user_index = i
     return messages[:last_user_index+1], messages[last_user_index+1:]
-    
+
+import asyncio
+
+async def run_rollouts(
+    self,
+    client: AsyncOpenAI,
+    model: str,
+    prompts: list[vf.Messages],
+    answers: list[str],
+    tasks: list[str],
+    infos: list[vf.Info],
+    sampling_args: vf.SamplingArgs | None = None,
+    max_concurrent: int = -1,
+    **kwargs,
+) -> list[tuple[vf.Messages, vf.State]]:
+    """
+    Run rollouts for a given list of prompts and return the completions.
+    """
+    from tqdm.asyncio import tqdm_asyncio
+
+    logging.info("Running rollout shim.")
+
+    if max_concurrent > 0:
+        semaphore = asyncio.Semaphore(max_concurrent)
+        rollout_tasks = [
+            self.run_rollout_with_semaphore(
+                semaphore,
+                client,
+                model,
+                prompt,
+                answer,
+                task,
+                info,
+                sampling_args,
+                **kwargs,
+            )
+            for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
+        ]
+    else:
+        rollout_tasks = [
+            self.rollout(
+                client, model, prompt, answer, task, info, sampling_args, **kwargs
+            )
+            for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
+        ]
+    return await tqdm_asyncio.gather(
+        *rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts"
+    )
+
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     """Wraps a verifiers environment into a NeMo-RL one."""
@@ -58,6 +106,9 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             cfg["environment_name"],
             **env_cfg,
         )
+
+        # TODO: This is truly awful.
+        self.env.run_rollouts = run_rollouts
         
         # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup, which we have a multi-turn replacement for.
         if not isinstance(self.env, vf.MultiTurnEnv):
