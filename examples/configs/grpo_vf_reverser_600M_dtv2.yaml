@@ -32,8 +32,7 @@ checkpointing:
   checkpoint_must_save_by: null
 
 policy:
-  # model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
-  model_name: "Qwen/Qwen3-0.6B"
+  model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 256
@@ -118,7 +117,7 @@ policy:
       precision: ${policy.precision}
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
-      gpu_memory_utilization: 0.8
+      gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
       extra_cli_args: [
