@@ -107,8 +107,10 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             **env_cfg,
         )
 
+        from types import MethodType
+
         # TODO: This is truly awful.
-        self.env.run_rollouts = run_rollouts
+        self.env.run_rollouts = MethodType(run_rollouts, self.env)
         
         # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup, which we have a multi-turn replacement for.
         if not isinstance(self.env, vf.MultiTurnEnv):
