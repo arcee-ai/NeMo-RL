@@ -282,7 +282,13 @@ def main() -> None:
         val_dataset,
         task_to_env,
         val_task_to_env,
-    ) = setup_data(tokenizer, config["data"], config["env"], config["grpo"]["seed"], config["policy"]["model_name"])
+    ) = setup_data(
+        tokenizer=tokenizer,
+        data_config=config["data"],
+        env_configs=config["env"],
+        seed=config["grpo"]["seed"],
+        model_name=config["policy"]["model_name"],
+    )
 
     (
         policy,
