@@ -1,7 +1,7 @@
 # GRPO Algorithm Configuration
 grpo:
-  num_prompts_per_step: 16
-  num_generations_per_prompt: 16
+  num_prompts_per_step: 6
+  num_generations_per_prompt: 8
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
   max_num_steps: 1000000
   normalize_rewards: true
@@ -35,7 +35,7 @@ policy:
   model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 256
+  train_global_batch_size: 48
   train_micro_batch_size: 4
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
