@@ -12,6 +12,7 @@ import verifiers as vf
 import vf_exts as vfe
 
 from openai import AsyncOpenAI
+import httpx
 from datasets import Dataset
 
 class VfEnvironmentMetadata(TypedDict):
@@ -211,9 +212,17 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     ) -> vf.GenerateOutputs:
         if self.client is None:
             self.client = AsyncOpenAI(
-            api_key="n/a",
-            base_url="http://127.0.0.1:8000/v1"
-        )
+                api_key="n/a",
+                base_url="http://127.0.0.1:8000/v1",
+                http_client=httpx.AsyncClient(
+                    http2=True,
+                    limits=httpx.Limits(
+                        max_connections=256,
+                        max_keepalive_connections=256,
+                    ),
+                    timeout=600.0,
+                ),
+            )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         return await self.env.a_generate(
             inputs=inputs,
