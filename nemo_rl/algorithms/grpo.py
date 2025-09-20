@@ -597,7 +597,7 @@ def grpo_train(
                     policy_generation.prepare_for_generation()
 
             with timer.time("generation"):
-                if "vf" in master_config["env"]:
+                if "vf" in master_config["env"] and False:
                     # Use verifiers rollouts
                     repeated_batch, rollout_metrics = run_vf_rollouts(
                         policy_generation=policy_generation,
