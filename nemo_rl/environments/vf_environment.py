@@ -1,4 +1,4 @@
-from typing import Any, TypedDict
+from typing import Any, Optional, TypedDict
 import logging
 
 import ray
@@ -42,6 +42,8 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
     """Wraps a verifiers environment into a NeMo-RL one."""
     cfg: VfEnvironmentConfig
     env: vf.MultiTurnEnv
+
+    client: Optional[AsyncOpenAI] = None
     
     def __init__(self, cfg: VfEnvironmentConfig):
         self.cfg = cfg
@@ -207,14 +209,15 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
         max_concurrent: int = -1,
         **kwargs,
     ) -> vf.GenerateOutputs:
-        client = AsyncOpenAI(
+        if self.client is None:
+            self.client = AsyncOpenAI(
             api_key="n/a",
-            base_url="http://127.0.0.1:8000/v1",
-        )
+                base_url="http://127.0.0.1:8000/v1",
+            )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         return await self.env.a_generate(
             inputs=inputs,
-            client=client,
+            client=self.client,
             model="policy",
             sampling_args=sampling_args,
             score_rollouts=score_rollouts,

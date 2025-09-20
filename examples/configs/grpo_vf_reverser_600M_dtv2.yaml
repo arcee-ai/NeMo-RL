@@ -113,7 +113,7 @@ policy:
     stop_strings: null
     server_timeout: 60
     vllm_cfg:
-      async_engine: true
+      async_engine: false
       precision: ${policy.precision}
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
