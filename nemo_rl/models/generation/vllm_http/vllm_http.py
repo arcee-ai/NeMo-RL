@@ -51,7 +51,7 @@ class VLLMOpenAIServe:
             "--logprobs-mode", "processed_logprobs",
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--data-parallel-size", str(data_parallel_size),
-            "--tokenizer-mode", "parallel"
+            "--tokenizer-pool-size", "8"
         ]
         if tool_call_parser:
             args += ["--tool-call-parser", tool_call_parser]
