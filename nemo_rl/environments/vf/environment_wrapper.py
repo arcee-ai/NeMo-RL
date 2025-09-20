@@ -65,11 +65,13 @@ def run_vf_rollouts(
     sampling_args = {
         "max_tokens": max_new_tokens,
         "top_p": policy_generation.cfg.get("top_p", None),
-        "top_k": policy_generation.cfg.get("top_k", None),
         "temperature": policy_generation.cfg.get("temperature", None),
         "stop_strings": policy_generation.cfg.get("stop_strings", None),
         "logprobs": 1,
-        "return_tokens_as_token_ids": True,
+        "extra_body": {
+            "return_tokens_as_token_ids": True,
+            "top_k": policy_generation.cfg.get("top_k", None),
+        }
     }
 
     if greedy:
