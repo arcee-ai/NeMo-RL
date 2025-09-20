@@ -120,14 +120,11 @@ policy:
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
       enforce_eager: False
-      extra_cli_args: [
-        "--api-server-count", "2",
-        "--disable-frontend-multiprocessing"
-      ]
+      extra_cli_args: []
     colocated:
       enabled: false
       resources:
-        gpus_per_node: 2
+        gpus_per_node: 4
         num_nodes: null
 
 data:
@@ -157,5 +154,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 6
+  gpus_per_node: 8
   num_nodes: 1
