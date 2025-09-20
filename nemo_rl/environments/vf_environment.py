@@ -372,12 +372,15 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
                 ),
             )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
-        return await self.env.a_generate(
-            inputs=inputs,
-            client=self.client,
-            model="policy",
-            sampling_args=sampling_args,
-            score_rollouts=score_rollouts,
-            max_concurrent=max_concurrent,
-            **kwargs,
-        )
+        try:
+            return await self.env.a_generate(
+                inputs=inputs,
+                client=self.client,
+                model="policy",
+                sampling_args=sampling_args,
+                score_rollouts=score_rollouts,
+                max_concurrent=max_concurrent,
+                **kwargs,
+            )
+        except Exception as e:
+            raise Exception(f"Error running rollouts: {e}")
