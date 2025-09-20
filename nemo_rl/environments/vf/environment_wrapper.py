@@ -50,8 +50,8 @@ def run_vf_rollouts(
         
         vf_msg_log.append(log)
     
-    info = [x.get("info", None) for x in input_batch["extra_env_info"]]
-    answer = [x.get("answer", None) for x in input_batch["extra_env_info"]]
+    info = [x.get("info", {}) for x in input_batch["extra_env_info"]]
+    answer = [x.get("answer", "") for x in input_batch["extra_env_info"]]
     task = [x.get("task", "vf_placeholder") for x in input_batch["extra_env_info"]]
 
     # Convert input batch to verifiers input format
