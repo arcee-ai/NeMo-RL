@@ -53,38 +53,124 @@ async def run_rollouts(
     **kwargs,
 ) -> list[tuple[vf.Messages, vf.State]]:
     """
-    Run rollouts for a given list of prompts and return the completions.
+    Batched multi-turn rollouts: issue one batched chat.completions call per turn
+    and advance all conversations using a simple queue until completion.
     """
-    from tqdm.asyncio import tqdm_asyncio
+    assert self.message_type == "chat", "Batched run_rollouts only supports chat format"
 
-    logging.info("Running rollout shim.")
+    n = len(prompts)
+    results: list[tuple[vf.Messages, vf.State]] = [([], {}) for _ in range(n)]
 
-    if max_concurrent > 0:
-        semaphore = asyncio.Semaphore(max_concurrent)
-        rollout_tasks = [
-            self.run_rollout_with_semaphore(
-                semaphore,
-                client,
-                model,
-                prompt,
-                answer,
-                task,
-                info,
-                sampling_args,
-                **kwargs,
+    states: list[vf.State] = []
+    rollouts: list[vf.Messages] = []
+    completions: list[vf.Messages] = []
+    done: list[bool] = [False] * n
+
+    for i in range(n):
+        info = infos[i] or {}
+        prompt_i = prompts[i]
+        answer_i = answers[i] if answers is not None and i < len(answers) else ""
+        task_i = tasks[i] if tasks is not None and i < len(tasks) else "default"
+
+        state: vf.State = {
+            "prompt": prompt_i,
+            "completion": [],
+            "answer": answer_i,
+            "task": task_i,
+            "info": info,
+            "responses": [],
+            "turn": 0,
+        }
+        state = await self.setup_state(state, **kwargs)
+        rollout_i: vf.Messages = list(prompt_i)  # type: ignore
+        completion_i: vf.Messages = []
+
+        states.append(state)
+        rollouts.append(rollout_i)
+        completions.append(completion_i)
+
+    # Normalize sampling args
+    sa = dict(sampling_args or {})
+    if "max_tokens" in sa and self.message_type == "chat":
+        if sa.get("max_tokens", None) is None:
+            sa.pop("max_tokens", None)
+        else:
+            sa["max_completion_tokens"] = sa.pop("max_tokens")
+    if sa.get("max_completion_tokens", None) is None:
+        sa.pop("max_completion_tokens", None)
+    clean_sampling_args = {k: v for k, v in sa.items() if v is not None}
+
+    # Ensure tools are consistent across the batch if provided
+    tool_sets = []
+    for info in infos:
+        ts = info.get("oai_tools", None) if info is not None else None
+        tool_sets.append(ts)
+    unique_tool_keys = []
+    for ts in tool_sets:
+        if ts not in unique_tool_keys:
+            unique_tool_keys.append(ts)
+    if len(unique_tool_keys) > 1:
+        raise ValueError("All rollouts must share the same oai_tools for batched chat completions")
+    oai_tools = unique_tool_keys[0] if unique_tool_keys else None
+
+    # Queue: advance all active conversations turn-by-turn
+    active_indices = [i for i in range(n)]
+    while len(active_indices) > 0:
+        batch_messages: list[vf.Messages] = [rollouts[i] for i in active_indices]
+
+        # Single batched request for all active conversations
+        if oai_tools:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=batch_messages,  # type: ignore
+                tools=oai_tools,
+                **clean_sampling_args,
             )
-            for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-        ]
-    else:
-        rollout_tasks = [
-            self.rollout(
-                client, model, prompt, answer, task, info, sampling_args, **kwargs
+        else:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=batch_messages,  # type: ignore
+                **clean_sampling_args,
             )
-            for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-        ]
-    return await tqdm_asyncio.gather(
-        *rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts"
-    )
+
+        assert hasattr(resp, "choices") and len(resp.choices) >= len(active_indices), "Batched response mismatch"
+
+        # Map responses back to active indices
+        new_active: list[int] = []
+        for j, idx in enumerate(active_indices):
+            choice = resp.choices[j]
+            response_text = (choice.message.content or "")
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": response_text}
+            if getattr(choice.message, "tool_calls", None):
+                assistant_msg["tool_calls"] = choice.message.tool_calls  # type: ignore
+
+            rollouts[idx].append(assistant_msg)  # type: ignore
+            completions[idx].append(assistant_msg)  # type: ignore
+            states[idx]["responses"].append(resp)
+            states[idx]["turn"] += 1
+
+            is_done = await self.is_completed(rollouts[idx], states[idx], **kwargs)
+            if (self.max_turns > 0 and states[idx]["turn"] >= self.max_turns) or is_done:
+                done[idx] = True
+                continue
+
+            env_msgs, new_state = await self.env_response(rollouts[idx], states[idx], **kwargs)
+            states[idx].update(new_state)
+            if isinstance(env_msgs, list):
+                rollouts[idx] += env_msgs  # type: ignore
+                completions[idx] += env_msgs  # type: ignore
+            else:
+                rollouts[idx] = (rollouts[idx] or [])  # type: ignore
+                completions[idx] = (completions[idx] or [])  # type: ignore
+
+            new_active.append(idx)
+
+        active_indices = new_active
+
+    for i in range(n):
+        results[i] = (completions[i], states[i])
+
+    return results
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
