@@ -1,5 +1,4 @@
 from typing import Any, Optional, TypedDict
-import logging
 
 import ray
 import torch
@@ -13,7 +12,6 @@ import verifiers as vf
 import vf_exts as vfe
 
 from openai import AsyncOpenAI
-from openai.types.chat.chat_completion import ChatCompletion
 import httpx
 from datasets import Dataset
 

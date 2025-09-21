@@ -1,17 +1,12 @@
-from copy import deepcopy
-from re import L
-
 import torch
 import ray
 from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
 from nemo_rl.experience.rollouts import BatchedDataDict, DatumSpec, TokenizerType, LLMMessageLogType
-from nemo_rl.environments.vf_environment import VfEnvironment
 from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.experience.rollouts import build_rollouts_log
 
 
 import verifiers as vf
-from openai import AsyncOpenAI
 
 def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
