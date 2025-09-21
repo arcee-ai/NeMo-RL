@@ -38,6 +38,8 @@ class GroupedRubric(Rubric):
             f"verifiers.rubrics.{self.__class__.__name__}"
         )
 
+        self.cached_rewards: List[float] | None = None
+
     async def call_group_reward_func(
         self,
         func: GroupedRewardFunc,
@@ -117,7 +119,27 @@ class GroupedRubric(Rubric):
         info: Info,
         **kwargs,
     ) -> RolloutScores:
-        raise AttributeError("GroupedRubric does not support scoring rollouts individually.")
+        assert "grpo_group_index" in state, "GroupedRubric can only be used with GroupedEnv."
+        assert "grpo_group" in state, "GroupedRubric can only be used with GroupedEnv."
+        group_index = state["grpo_group_index"]
+        group = state["grpo_group"]
+
+        group_prompts = [x[0] for x in group]
+        group_completions = [x[1] for x in group]
+        group_states = [x[2] for x in group]
+        
+        if self.cached_rewards is None:
+            self.cached_rewards = await self.score_rollouts_grouped(
+                prompts=group_prompts,
+                completions=group_completions,
+                answer=answer,
+                states=group_states,
+                task=task,
+                info=info,
+                **kwargs
+            )
+        
+        return self.cached_rewards[group_index]
 
     def should_group_rollouts(self, task: str) -> bool:
         return True
