@@ -1,6 +1,6 @@
 # GRPO Algorithm Configuration
 grpo:
-  num_prompts_per_step: 3
+  num_prompts_per_step: 1
   num_generations_per_prompt: 16
   max_rollout_turns: 10 # prefer to use verifiers to set turn limits
   max_num_steps: 1000000
@@ -24,7 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_vf_tooltest_4B"
+  checkpoint_dir: "results/grpo_vf_multigroup_4B"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 4
@@ -35,7 +35,7 @@ policy:
   model_name: "Qwen/Qwen3-4B-Instruct-2507"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 48
+  train_global_batch_size: 8
   train_micro_batch_size: 2
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
@@ -43,6 +43,9 @@ policy:
   precision: "bfloat16"
 
   dtensor_cfg:
+    enabled: false
+
+  dtensor_v2_cfg:
     enabled: true
     cpu_offload: False
     sequence_parallel: false
@@ -99,8 +102,8 @@ policy:
     - milestones: [50]
 
   generation:
-    backend: "vllm_http"
-    max_new_tokens: 512
+    backend: "vllm"
+    max_new_tokens: ${policy.max_total_sequence_length}
     temperature: 0.7
     top_p: 0.8
     top_k: 20
@@ -112,7 +115,7 @@ policy:
       tool_parser: "hermes"
       async_engine: false
       precision: ${policy.precision}
-      tensor_parallel_size: 1
+      tensor_parallel_size: 2
       pipeline_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
@@ -120,19 +123,19 @@ policy:
     colocated:
       # true: generation shares training GPUs
       # false: uses dedicated generation resources
-      enabled: false
+      enabled: true
       # only relevant when enabled is false
       resources:
-        gpus_per_node: 2 # Decides num gpus to be dedicated to generation when there is one node in the cluster i.e cluster.num_nodes == 1
+        gpus_per_node: 1 # Decides num gpus to be dedicated to generation when there is one node in the cluster i.e cluster.num_nodes == 1
         num_nodes: null # Decides number of nodes to be dedicated to generation
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  shuffle: false
+  shuffle: true
 
 env:
   vf:
-    environment_name: "vf_tool_test"
+    environment_name: "vf_multigroup_test"
 
 logger:
   log_dir: "logs"  # Base directory for all logs
@@ -143,15 +146,15 @@ logger:
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "nemo-grpo-dev"
-    name: "grpo-vf-tooltest-4B"
+    name: "grpo-vf-multigroup-4B"
   tensorboard: {}
   mlflow:
-    experiment_name: "grpo-vf-tooltest-4B"
+    experiment_name: "grpo-vf-multigroup-4B"
     run_name: "grpo-dev-logger"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 8
+  gpus_per_node: 2
   num_nodes: 1

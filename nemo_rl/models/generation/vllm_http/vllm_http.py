@@ -1,5 +1,6 @@
 # serve_vllm.py
 import asyncio
+import logging
 from typing import Any, Optional
 from ray import serve
 from fastapi import FastAPI, Request
@@ -9,7 +10,7 @@ import torch
 _serve_app = FastAPI()
 
 
-@serve.deployment
+@serve.deployment(max_ongoing_requests=10000)
 @serve.ingress(_serve_app)
 class VLLMOpenAIServe:
     def __init__(
@@ -23,7 +24,23 @@ class VLLMOpenAIServe:
         data_parallel_size: int = 1,
         extra_cli_args: Optional[list[str]] = None,
         worker_extension_cls: str = "nemo_rl.models.generation.vllm_http.worker_ext.VllmHttpWorkerExtension",
+        tool_call_parser: str | None = None,
     ):
+        for _name in [
+            "uvicorn.access",
+            "uvicorn.error",
+            "ray.serve",
+            "ray.serve.deployment",
+            "ray.serve.request_summary"
+        ]:
+            try:
+                if _name == "uvicorn.access":
+                    logging.getLogger(_name).disabled = True
+                else:
+                    logging.getLogger(_name).setLevel(logging.ERROR)
+            except Exception:
+                pass
+
         args = [
             "--model", model,
             "--served-model-name", served_model_name,
@@ -33,8 +50,11 @@ class VLLMOpenAIServe:
             "--max-model-len", str(max_model_len),
             "--logprobs-mode", "processed_logprobs",
             "--gpu-memory-utilization", str(gpu_memory_utilization),
-            "--data-parallel-size", str(data_parallel_size),
+            "--data-parallel-size", str(data_parallel_size)
         ]
+        if tool_call_parser:
+            args += ["--tool-call-parser", tool_call_parser]
+            args += ["--enable-auto-tool-choice"]
         if extra_cli_args:
             args += extra_cli_args
         

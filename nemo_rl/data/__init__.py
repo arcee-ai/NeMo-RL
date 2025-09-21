@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import NotRequired, TypedDict
+from typing import NotRequired, TypedDict, Any
 
 
 class DataConfig(TypedDict):
@@ -27,6 +27,7 @@ class DataConfig(TypedDict):
     output_key: NotRequired[str]
     add_generation_prompt: NotRequired[bool]
     add_system_prompt: NotRequired[bool]
+    tokenizer_kwargs: NotRequired[dict[str, Any]]
     split: NotRequired[str]
     shuffle: NotRequired[bool]
 

@@ -69,6 +69,8 @@ from nemo_rl.utils.logger import (
 from nemo_rl.utils.nsys import maybe_gpu_profile_step
 from nemo_rl.utils.timer import TimeoutChecker, Timer
 
+from nemo_rl.experience.vf_rollouts import run_vf_rollouts
+
 # ===============================================================================
 # Configuration
 # ===============================================================================
@@ -593,8 +595,18 @@ def grpo_train(
                     policy_generation.prepare_for_generation()
 
             with timer.time("generation"):
-                # Use async rollouts if vLLM async engine is enabled
-                if _should_use_async_rollouts(master_config):
+                if "vf" in master_config["env"]:
+                    # Use verifiers rollouts
+                    repeated_batch, rollout_metrics = run_vf_rollouts(
+                        policy_generation=policy_generation,
+                        input_batch=repeated_batch,
+                        tokenizer=tokenizer,
+                        max_new_tokens=master_config["policy"]["generation"]["max_new_tokens"],
+                        task_to_env=task_to_env,
+                        greedy=False,
+                    )
+                elif _should_use_async_rollouts(master_config):
+                    # Use async rollouts if vLLM async engine is enabled
                     (
                         repeated_batch,
                         rollout_metrics,
