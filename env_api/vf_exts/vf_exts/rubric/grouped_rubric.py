@@ -9,6 +9,36 @@ from verifiers.types import Info, Messages, RewardFunc, RolloutScores, State
 
 GroupedRewardFunc = Callable[..., list[float]]
 
+def split_rollouts_by_group(
+    prompts: list[Messages],
+    completions: list[Messages],
+    answers: list[str],
+    states: list[State],
+    tasks: list[str],
+    infos: list[Info],
+    grpo_gids: list[int],
+) -> dict[int, list[tuple[Messages, Messages, State]]]:
+    """
+    Split rollouts by GRPO group.
+
+    Args:
+        prompts: List of prompts.
+        completions: List of completions.
+        answers: List of answers.
+        states: List of states.
+        tasks: List of tasks.
+        infos: List of infos.
+        grpo_gids: List of GRPO group IDs.
+
+    Returns:
+        Dictionary of GRPO group IDs to lists of tuples of (prompt, completion, answer, state, task, info, grpo_gid).
+    """
+    results_by_group = {}
+    for rollout in zip(prompts, completions, answers, states, tasks, infos, grpo_gids):
+        if rollout[6] not in results_by_group:
+            results_by_group[grpo_gid] = []
+        results_by_group[rollout[6]].append(rollout)
+    return results_by_group
 class GroupedRubric(Rubric):
     """
     Rubric base class for grouped scoring.
@@ -111,31 +141,37 @@ class GroupedRubric(Rubric):
 
     async def score_rollouts(
         self,
-        prompt: Messages,
-        completion: Messages,
-        answer: str,
-        state: State,
-        task: str,
-        info: Info,
+        prompts: list[Messages],
+        completions: list[Messages],
+        answers: list[str],
+        states: list[State],
+        tasks: list[str],
+        infos: list[Info],
+        max_concurrent: int = -1,
+        grpo_gids: list[int] | None = None,
         **kwargs,
     ) -> RolloutScores:
-        assert "grpo_group_index" in state, "GroupedRubric can only be used with GroupedEnv."
-        assert "grpo_group" in state, "GroupedRubric can only be used with GroupedEnv."
-        group_index = state["grpo_group_index"]
-        group = state["grpo_group"]
+        assert grpo_gids is not None, "GRPO GIDs must be provided for GroupedRubric."
+        assert len(grpo_gids) == len(prompts), "GRPO GIDs must be the same size as the number of prompts."
 
-        group_prompts = [x[0] for x in group]
-        group_completions = [x[1] for x in group]
-        group_states = [x[2] for x in group]
+        results_by_group = split_rollouts_by_group(prompts, completions, answers, states, tasks, infos, grpo_gids)
+        
+        group_prompts = [x[0] for x in results_by_group.values()]
+        group_completions = [x[1] for x in results_by_group.values()]
+        group_answers = [x[2] for x in results_by_group.values()]
+        group_states = [x[3] for x in results_by_group.values()]
+        group_tasks = [x[4] for x in results_by_group.values()]
+        group_infos = [x[5] for x in results_by_group.values()]
+        group_grpo_gids = [x[6] for x in results_by_group.values()]
         
         if self.cached_rewards is None:
             self.cached_rewards = await self.score_rollouts_grouped(
                 prompts=group_prompts,
                 completions=group_completions,
-                answer=answer,
+                answer=group_answers[0],
                 states=group_states,
-                task=task,
-                info=info,
+                task=group_tasks[0],
+                info=group_infos[0],
                 **kwargs
             )
         
