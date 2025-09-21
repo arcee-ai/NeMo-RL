@@ -257,6 +257,8 @@ def main() -> None:
     print("Final config:")
     pprint.pprint(config)
 
+    assert config["policy"]["generation"]["backend"] == "vllm_http", "Verifiers environments only support the \"vllm_http\" generation backend."
+
     # Get the next experiment directory with incremented ID
     config["logger"]["log_dir"] = get_next_experiment_dir(config["logger"]["log_dir"])
     print(f"📊 Using log directory: {config['logger']['log_dir']}")
