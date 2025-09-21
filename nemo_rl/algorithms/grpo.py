@@ -69,7 +69,7 @@ from nemo_rl.utils.logger import (
 from nemo_rl.utils.nsys import maybe_gpu_profile_step
 from nemo_rl.utils.timer import TimeoutChecker, Timer
 
-from nemo_rl.environments.vf.environment_wrapper import run_vf_rollouts
+from nemo_rl.experience.vf_rollouts import run_vf_rollouts
 
 # ===============================================================================
 # Configuration
