@@ -14,7 +14,7 @@ def run_vf_rollouts(
     tokenizer: TokenizerType,
     max_new_tokens: int,
     task_to_env: dict[str, EnvironmentInterface],
-    grpo_gids: list[int]
+    grpo_gids: list[int],
     greedy: bool = False,
 ):
     for env in task_to_env.values():
