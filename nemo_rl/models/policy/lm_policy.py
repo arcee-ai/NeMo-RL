@@ -92,10 +92,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             worker_builder_cls = (
                 "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker"
             )
-            tp_size = config["dtensor_v2_cfg"]["tensor_parallel_size"]
-            cp_size = config["dtensor_v2_cfg"]["context_parallel_size"]
-            pp_size = config["dtensor_v2_cfg"]["pipeline_parallel_size"]
-            ep_size = config["dtensor_v2_cfg"]["expert_parallel_size"]
+            tp_size = config["dtensor_v2_cfg"].get("tensor_parallel_size", 1)
+            cp_size = config["dtensor_v2_cfg"].get("context_parallel_size", 1)
+            pp_size = config["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
+            ep_size = config["dtensor_v2_cfg"].get("expert_parallel_size", 1)
             env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
         else:
             assert config["dtensor_cfg"]["enabled"], (
