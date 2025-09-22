@@ -150,7 +150,7 @@ def run_vf_rollouts(
                     "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
                 })
             
-            orig_idx = by_group.values()[g_i][i][-1]
+            orig_idx = list(by_group.values())[g_i][i][-1]
 
             current_batch["message_log"][orig_idx].extend(log)
             current_batch["total_reward"][orig_idx] = rollouts.reward[i]
