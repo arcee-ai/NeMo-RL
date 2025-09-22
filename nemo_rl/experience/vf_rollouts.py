@@ -164,6 +164,8 @@ def run_vf_rollouts(
             current_batch["message_log"][orig_idx].extend(log)
             current_batch["total_reward"][orig_idx] = rollouts.reward[i]
 
+    current_batch["reward"] = torch.tensor(rollouts.reward)
+
     env_metrics_means = {k: v / env_metrics_counts[k] for k, v in env_metrics_sums.items()}
 
     # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
