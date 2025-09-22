@@ -5,8 +5,34 @@ from nemo_rl.experience.rollouts import BatchedDataDict, DatumSpec, TokenizerTyp
 from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.experience.rollouts import build_rollouts_log
 
-
 import verifiers as vf
+
+def split_rollouts_by_group(
+    prompts: list[Messages],
+    answers: list[str],
+    infos: list[vf.Info],
+    tasks: list[str],
+    grpo_gids: list[int],
+) -> dict[int, list[tuple[Messages, str, vf.Info, str, int]]]:
+    """
+    Split rollouts by GRPO group.
+
+    Args:
+        prompts: List of prompts.
+        answers: List of answers.
+        infos: List of infos.
+        tasks: List of tasks.
+        grpo_gids: List of GRPO group IDs.
+
+    Returns:
+        Dictionary of GRPO group IDs to lists of tuples of (prompt, answer, info, task, grpo_gid, orig_idx).
+    """
+    results_by_group = {}
+    for i, rollout in enumerate(zip(prompts, answers, infos, tasks, grpo_gids)):
+        if rollout[-1] not in results_by_group:
+            results_by_group[rollout[-1]] = []
+        results_by_group[rollout[-1]].append(rollout + (i,))
+    return results_by_group
 
 def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
@@ -50,13 +76,15 @@ def run_vf_rollouts(
     answer = [x.get("answer", "") for x in input_batch["extra_env_info"]]
     task = [x.get("task", "vf_placeholder") for x in input_batch["extra_env_info"]]
 
+    by_group = split_rollouts_by_group(vf_msg_log, answer, info, task, grpo_gids)
+
     # Convert input batch to verifiers input format
-    verifiers_input_batch = {
-        "prompt": vf_msg_log,
-        "answer": answer,
-        "info": info,
-        "task": task,
-    }
+    verifiers_input_batches = [{
+        "prompt": x[0],
+        "answer": x[1],
+        "info": x[2],
+        "task": x[3],
+    } for x in by_group.values()]
 
     sampling_args = {
         "max_tokens": max_new_tokens,
@@ -73,37 +101,39 @@ def run_vf_rollouts(
     if greedy:
         sampling_args["temperature"] = 0.0
 
-    rollout, processed_outputs = ray.get(env.a_generate.remote(
-        inputs=verifiers_input_batch,
-        sampling_args=sampling_args,
-        max_concurrent=256,
-        grpo_gids=grpo_gids,
-    ))
-    rollout: vf.GenerateOutputs
-    processed_outputs: vf.ProcessedOutputs
+    refs = [
+        env.a_generate.remote(
+            inputs=verifiers_input_batch,
+            sampling_args=sampling_args,
+            max_concurrent=256,
+        )
+        for verifiers_input_batch in verifiers_input_batches
+    ]
+    generate_results = ray.get(refs)
 
     current_batch = input_batch.copy()
     current_batch["total_reward"] = torch.tensor(rollout.reward)
 
-    # Convert completion to NeMo-RL message log format, and re-tokenize the prompt to avoid including generation prompts.
-    new_msg_logs: list[LLMMessageLogType] = []
-    for i, completion in enumerate(rollout.completion):
-        assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
+    # Convert completion to NeMo-RL message log format.
+    for g_i, (rollouts, processed_outputs) in enumerate(generate_results):
+        for i, completion in enumerate(rollouts.completion):
+            assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
 
-        log = []
-        for msg in completion:
-            completion_ids = processed_outputs.completion_ids[i]
+            log = []
+            for msg in completion:
+                completion_ids = processed_outputs.completion_ids[i]
 
-            log.append({
-                "role": msg["role"],
-                "content": msg["content"],
-                "tool_calls": msg.get("tool_calls", []) or [],
-                "token_ids": torch.tensor(completion_ids),
-                "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
-            })
-        new_msg_logs.append(log)
+                log.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "tool_calls": msg.get("tool_calls", []) or [],
+                    "token_ids": torch.tensor(completion_ids),
+                    "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
+                })
+            
+            orig_idx = by_group[g_i][i][-1]
 
-    current_batch["message_log"] = new_msg_logs
+            current_batch["message_log"][orig_idx].extend(log)
 
     # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
     batch_size = len(current_batch["message_log"])
