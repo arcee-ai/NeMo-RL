@@ -37,8 +37,6 @@ class GroupedRubric(Rubric):
             f"verifiers.rubrics.{self.__class__.__name__}"
         )
 
-        self.cached_rewards: List[float] | None = None
-
     async def call_group_reward_func(
         self,
         func: GroupedRewardFunc,
@@ -119,6 +117,9 @@ class GroupedRubric(Rubric):
         max_concurrent: int = -1,
         **kwargs,
     ) -> RolloutScores:
+        """
+        Compatibility wrapper for old GroupedRubric interface.
+        """
         # Sanity check to make sure all of these are from the same prompt.
         first_info = infos[0]
         for info in infos:
@@ -128,18 +129,15 @@ class GroupedRubric(Rubric):
         for task in tasks:
             assert task == first_task, "GroupedRubric got rollouts with different tasks - note that interleaved grading is not supported."
         
-        if self.cached_rewards is None:
-            self.cached_rewards = await self.score_rollouts_grouped(
-                prompts=prompts,
-                completions=completions,
-                answer=group_answers[0],
-                states=states,
-                task=tasks[0],
-                info=infos[0],
-                **kwargs
-            )
-        
-        return self.cached_rewards[group_index]
+        return await self.score_rollouts_grouped(
+            prompts=prompts,
+            completions=completions,
+            answer=group_answers[0],
+            states=states,
+            task=tasks[0],
+            info=infos[0],
+            **kwargs
+        )
 
     def should_group_rollouts(self, task: str) -> bool:
         return True
