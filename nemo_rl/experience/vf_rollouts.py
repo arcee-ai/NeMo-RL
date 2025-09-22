@@ -109,7 +109,7 @@ def run_vf_rollouts(
         )
         for verifiers_input_batch in verifiers_input_batches
     ]
-    generate_results = ray.get(refs)
+    generate_results = ray.get(*refs)
 
     current_batch = input_batch.copy()
     current_batch["total_reward"] = torch.tensor(rollout.reward)
