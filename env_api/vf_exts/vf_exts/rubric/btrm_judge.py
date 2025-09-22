@@ -34,7 +34,7 @@ Reply with no other text.
 </response_b>
 """
 
-class PairwiseJudgeRubric(Rubric):
+class PairwiseJudgeRubric(vf.Rubric):
     def __init__(
         self,
         judge_client: OpenAI | None = None,
