@@ -82,15 +82,22 @@ def run_vf_rollouts(
     verifiers_input_batches = []
 
     for group in by_group.values():
-        group_input_batches = []
+        group_prompts = []
+        group_answers = []
+        group_infos = []
+        group_tasks = []
         for rollout in group:
-            verifiers_input_batches.append({
-                "prompt": rollout[0],
-                "answer": rollout[1],
-                "info": rollout[2],
-                "task": rollout[3],
-            })
-        verifiers_input_batches.append(group_input_batches)
+            group_prompts.append(rollout[0])
+            group_answers.append(rollout[1])
+            group_infos.append(rollout[2])
+            group_tasks.append(rollout[3])
+        
+        verifiers_input_batches.append({
+            "prompt": group_prompts,
+            "answer": group_answers,
+            "info": group_infos,
+            "task": group_tasks,
+        })
 
     sampling_args = {
         "max_tokens": max_new_tokens,
