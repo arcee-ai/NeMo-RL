@@ -116,7 +116,7 @@ class GroupedRubric(Rubric):
         states: list[State],
         tasks: list[str],
         infos: list[Info],
-        max_concurrent: int = -1
+        max_concurrent: int = -1,
         **kwargs,
     ) -> RolloutScores:
         # Sanity check to make sure all of these are from the same prompt.
