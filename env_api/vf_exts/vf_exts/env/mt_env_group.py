@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple, Union
 from datasets import concatenate_datasets
 from openai import AsyncOpenAI
 
-class _MtEnvGroupRubric(GroupedRubric):
+class _MtEnvGroupRubric(vf.Rubric):
     def __init__(self, env_map: Dict[str, vf.MultiTurnEnv]):
         super().__init__()
         self.env_map = env_map
