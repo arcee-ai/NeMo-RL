@@ -181,7 +181,7 @@ def run_vf_rollouts(
             "truncated": False,
             "total_tokens": sample_total_tokens[i],
             "assistant_tokens": sample_assistant_tokens[i],
-            "env_tokens": 0,,
+            "env_tokens": 0,
             env_metrics: env_metrics[i],
         }
         for i in range(batch_size)
