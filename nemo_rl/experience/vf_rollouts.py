@@ -8,12 +8,12 @@ from nemo_rl.experience.rollouts import build_rollouts_log
 import verifiers as vf
 
 def split_rollouts_by_group(
-    prompts: list[Messages],
+    prompts: list[vf.Messages],
     answers: list[str],
     infos: list[vf.Info],
     tasks: list[str],
     grpo_gids: list[int],
-) -> dict[int, list[tuple[Messages, str, vf.Info, str, int]]]:
+) -> dict[int, list[tuple[vf.Messages, str, vf.Info, str, int]]]:
     """
     Split rollouts by GRPO group.
 
