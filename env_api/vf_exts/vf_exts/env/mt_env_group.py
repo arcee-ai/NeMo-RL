@@ -3,8 +3,6 @@ from typing import Dict, List, Tuple, Union
 from datasets import concatenate_datasets
 from openai import AsyncOpenAI
 
-from ..rubric.grouped_rubric import GroupedRubric
-
 class _MtEnvGroupRubric(GroupedRubric):
     def __init__(self, env_map: Dict[str, vf.MultiTurnEnv]):
         super().__init__()
@@ -16,55 +14,24 @@ class _MtEnvGroupRubric(GroupedRubric):
 
     def get_reward_func_names(self) -> List[str]:
         return self._all_reward_names
-    
-    def should_group_rollouts(self, task: str) -> bool:
-        return isinstance(self.env_map.get(task, self.env_map.values()[0]).rubric, GroupedRubric)
 
-    async def score_rollouts_grouped(
+    async def score_rollouts(
         self,
-        prompts: List[vf.Messages],
-        completions: List[vf.Messages],
+        prompts: List[Messages],
+        completions: List[Messages],
         answers: List[str],
-        states: List[vf.State],
-        task: str,
-        infos: List[vf.Info] = [],
+        states: List[State],
+        tasks: List[str],
+        infos: List[Info],
         **kwargs,
-    ) -> vf.RolloutScores:
-        if not self.should_group_rollouts(task):
-            raise ValueError("GroupedRubric is not enabled for this task.")
-        
-        env = self.env_map.get(task)
+    ) -> RolloutScores:
+        env = self.env_map.get(tasks[0])
         if env is None:
-            raise ValueError(f"No environment found for task {task}.")
+            raise ValueError(f"No environment found for task {tasks[0]}.")
         
-        return await env.rubric.score_rollouts_grouped(
-            prompts, completions, answers, states, task, infos, **kwargs
+        return await env.rubric.score_rollouts(
+            prompts, completions, answers, states, tasks, infos, **kwargs
         )
-
-    async def score_rollout(
-        self,
-        prompt: Union[str, List[vf.ChatMessage]],
-        completion: Union[str, List[vf.ChatMessage]],
-        answer: str = "",
-        state: vf.State = {},
-        task: str = "default",
-        info: dict = {},
-        **kwargs,
-    ) -> vf.RolloutScore:
-        metrics = {name: 0.0 for name in self._all_reward_names}
-        reward = 0.0
-        env = self.env_map.get(task)
-        if env is None:
-            return vf.RolloutScore(reward=reward, metrics=metrics)
-        env_results = await env.rubric.score_rollout(
-            prompt, completion, answer, state, task, info, **kwargs
-        )
-        for reward_name, score in env_results.metrics.items():
-            if reward_name in metrics:
-                metrics[reward_name] = score
-        reward = env_results.reward
-        return vf.RolloutScore(reward=reward, metrics=metrics)
-
 
 class MultiTurnEnvGroup(vf.MultiTurnEnv):
     def __init__(
