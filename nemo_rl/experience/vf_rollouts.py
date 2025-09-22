@@ -127,7 +127,8 @@ def run_vf_rollouts(
     current_batch = input_batch.copy()
     current_batch["total_reward"] = [0 for _ in current_batch["message_log"]]
 
-    env_metrics = [None for _ in current_batch["message_log"]]
+    env_metrics_sums = {}
+    env_metrics_counts = {}
 
     # Convert completion to NeMo-RL message log format.
     for g_i, (rollouts, processed_outputs) in enumerate(generate_results):
@@ -137,6 +138,14 @@ def run_vf_rollouts(
 
         for i, completion in enumerate(rollouts.completion):
             assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
+
+            for key, value in rollouts.metrics.items():
+                if isinstance(value, (int, float)):
+                    if key not in env_metrics_sums:
+                        env_metrics_sums[key] = 0.0
+                        env_metrics_counts[key] = 0
+                    env_metrics_sums[key] += value
+                    env_metrics_counts[key] += 1
 
             log = []
             for msg in completion:
@@ -154,7 +163,8 @@ def run_vf_rollouts(
 
             current_batch["message_log"][orig_idx].extend(log)
             current_batch["total_reward"][orig_idx] = rollouts.reward[i]
-            env_metrics[orig_idx] = rollouts.metrics[i]
+
+    env_metrics_means = {k: v / env_metrics_counts[k] for k, v in env_metrics_sums.items()}
 
     # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
     batch_size = len(current_batch["message_log"])
@@ -182,7 +192,6 @@ def run_vf_rollouts(
             "total_tokens": sample_total_tokens[i],
             "assistant_tokens": sample_assistant_tokens[i],
             "env_tokens": 0,
-            env_metrics: env_metrics[i],
         }
         for i in range(batch_size)
     ]
@@ -198,7 +207,8 @@ def run_vf_rollouts(
         "max_turns_reached_rate": 0.0,
         "mean_total_tokens_per_sample": float(sum(sample_total_tokens) / denom),
         "mean_gen_tokens_per_sample": float(sum(sample_assistant_tokens) / denom),
-        "mean_env_tokens_per_sample": 0.0
+        "mean_env_tokens_per_sample": 0.0,
+        "env_metrics": env_metrics_means,
     }
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
