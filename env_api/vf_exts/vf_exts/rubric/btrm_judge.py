@@ -34,7 +34,7 @@ Reply with no other text.
 </response_b>
 """
 
-class PairwiseJudgeRubric(GroupedRubric):
+class PairwiseJudgeRubric(Rubric):
     def __init__(
         self,
         judge_client: OpenAI | None = None,
@@ -51,18 +51,22 @@ class PairwiseJudgeRubric(GroupedRubric):
         self.rubric_prompt = rubric_prompt
         self.judge_sampling_args = judge_sampling_args
 
-    async def score_rollouts_grouped(
+    async def score_rollouts(
         self,
         prompts: List[Messages],
         completions: List[Messages],
-        answer: str,
+        answers: List[str],
         states: List[State],
-        task: str,
-        info: Info,
+        tasks: List[str],
+        infos: List[Info],
         **kwargs,
     ) -> RolloutScores:
         assert len(completions) % 2 == 0, "Number of completions must be even for pairwise comparison"
         
+        answer = answers[0]
+        task = tasks[0]
+        info = infos[0]
+
         was_judge_malformed = []
         
         rewards = []
