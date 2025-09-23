@@ -17,12 +17,12 @@ class _MtEnvGroupRubric(vf.Rubric):
 
     async def score_rollouts(
         self,
-        prompts: List[Messages],
-        completions: List[Messages],
+        prompts: List[vf.Messages],
+        completions: List[vf.Messages],
         answers: List[str],
-        states: List[State],
+        states: List[vf.State],
         tasks: List[str],
-        infos: List[Info],
+        infos: List[vf.Info],
         **kwargs,
     ) -> RolloutScores:
         env = self.env_map.get(tasks[0])
