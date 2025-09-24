@@ -7,11 +7,24 @@ from typing import Any
 
 import torch
 from accelerate import init_empty_weights
-from transformers import AutoConfig, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 
 # Local imports
 from nemo_rl.models.custom.convert import get_model_config
 from nemo_rl.utils.native_checkpoint import load_checkpoint
+
+
+def _resolve_dcp_path(dcp_path: str) -> str:
+    """Resolve a step directory to the actual DCP checkpoint directory if needed.
+
+    If dcp_path contains a 'policy' subdirectory, assume that's the DCP weights dir.
+    Otherwise, return the path as-is.
+    """
+    dcp_path = os.path.abspath(dcp_path)
+    policy_subdir = os.path.join(dcp_path, "policy")
+    if os.path.isdir(policy_subdir):
+        return policy_subdir
+    return dcp_path
 
 
 def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[torch.nn.Module, dict[str, Any], Any]:
@@ -48,7 +61,7 @@ def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[tor
 
 
 def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) -> None:
-    dcp_path = os.path.abspath(dcp_path)
+    dcp_path = _resolve_dcp_path(dcp_path)
     output_dir = os.path.abspath(output_dir)
 
     if not os.path.exists(dcp_path):
@@ -57,7 +70,7 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) ->
     os.makedirs(output_dir, exist_ok=True)
 
     # Load native model and state
-    model, native_state, hf_config = _load_native_model_and_state(dcp_path, hf_model_name)
+    _, native_state, hf_config = _load_native_model_and_state(dcp_path, hf_model_name)
 
     # Build adapter to map native -> HF keys
     _, model_args, adapter_class, _ = get_model_config(hf_config)
@@ -66,12 +79,16 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) ->
     # Convert keys to HF format
     hf_state = adapter.to_hf(native_state)
 
-    # Save weights
-    weights_path = os.path.join(output_dir, "pytorch_model.bin")
-    torch.save(hf_state, weights_path)
+    # Instantiate HF model and load state dict
+    hf_model = AutoModelForCausalLM.from_config(hf_config, trust_remote_code=True)
+    missing, unexpected = hf_model.load_state_dict(hf_state, strict=False)
+    if missing:
+        print(f"[Warning] Missing keys when loading HF state dict: {len(missing)} (showing up to 10): {missing[:10]}")
+    if unexpected:
+        print(f"[Warning] Unexpected keys when loading HF state dict: {len(unexpected)} (showing up to 10): {unexpected[:10]}")
 
-    # Save config
-    hf_config.save_pretrained(output_dir)
+    # Save full HF checkpoint
+    hf_model.save_pretrained(output_dir, safe_serialization=True)
 
     # Save tokenizer (from provided HF model name)
     tokenizer = AutoTokenizer.from_pretrained(hf_model_name, trust_remote_code=True)
@@ -82,7 +99,7 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert TorchTitan (DCP) checkpoint to HuggingFace format")
-    parser.add_argument("dcp_path", type=str, help="Path to Torch DCP checkpoint directory (e.g., checkpoints/step_62/policy)")
+    parser.add_argument("dcp_path", type=str, help="Path to Torch DCP checkpoint directory or step dir (e.g., checkpoints/step_62 or checkpoints/step_62/policy)")
     parser.add_argument("hf_model_name", type=str, help="HuggingFace model name or path used for config/tokenizer (e.g., Qwen/Qwen3-0.6B)")
     parser.add_argument("output_dir", type=str, help="Output directory to write HuggingFace checkpoint")
 
