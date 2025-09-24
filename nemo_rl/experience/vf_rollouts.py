@@ -5,8 +5,34 @@ from nemo_rl.experience.rollouts import BatchedDataDict, DatumSpec, TokenizerTyp
 from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.experience.rollouts import build_rollouts_log
 
-
 import verifiers as vf
+
+def split_rollouts_by_group(
+    prompts: list[vf.Messages],
+    answers: list[str],
+    infos: list[vf.Info],
+    tasks: list[str],
+    grpo_gids: list[int],
+) -> dict[int, list[tuple[vf.Messages, str, vf.Info, str, int]]]:
+    """
+    Split rollouts by GRPO group.
+
+    Args:
+        prompts: List of prompts.
+        answers: List of answers.
+        infos: List of infos.
+        tasks: List of tasks.
+        grpo_gids: List of GRPO group IDs.
+
+    Returns:
+        Dictionary of GRPO group IDs to lists of tuples of (prompt, answer, info, task, grpo_gid, orig_idx).
+    """
+    results_by_group = {}
+    for i, rollout in enumerate(zip(prompts, answers, infos, tasks, grpo_gids)):
+        if rollout[-1] not in results_by_group:
+            results_by_group[rollout[-1]] = []
+        results_by_group[rollout[-1]].append(rollout + (i,))
+    return results_by_group
 
 def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
@@ -14,6 +40,7 @@ def run_vf_rollouts(
     tokenizer: TokenizerType,
     max_new_tokens: int,
     task_to_env: dict[str, EnvironmentInterface],
+    grpo_gids: list[int],
     greedy: bool = False,
 ):
     for env in task_to_env.values():
@@ -49,13 +76,28 @@ def run_vf_rollouts(
     answer = [x.get("answer", "") for x in input_batch["extra_env_info"]]
     task = [x.get("task", "vf_placeholder") for x in input_batch["extra_env_info"]]
 
+    by_group = split_rollouts_by_group(vf_msg_log, answer, info, task, grpo_gids)
+
     # Convert input batch to verifiers input format
-    verifiers_input_batch = {
-        "prompt": vf_msg_log,
-        "answer": answer,
-        "info": info,
-        "task": task,
-    }
+    verifiers_input_batches = []
+
+    for group in by_group.values():
+        group_prompts = []
+        group_answers = []
+        group_infos = []
+        group_tasks = []
+        for rollout in group:
+            group_prompts.append(rollout[0])
+            group_answers.append(rollout[1])
+            group_infos.append(rollout[2])
+            group_tasks.append(rollout[3])
+        
+        verifiers_input_batches.append({
+            "prompt": group_prompts,
+            "answer": group_answers,
+            "info": group_infos,
+            "task": group_tasks,
+        })
 
     sampling_args = {
         "max_tokens": max_new_tokens,
@@ -72,36 +114,59 @@ def run_vf_rollouts(
     if greedy:
         sampling_args["temperature"] = 0.0
 
-    rollout, processed_outputs = ray.get(env.a_generate.remote(
-        inputs=verifiers_input_batch,
-        sampling_args=sampling_args,
-        max_concurrent=256,
-    ))
-    rollout: vf.GenerateOutputs
-    processed_outputs: vf.ProcessedOutputs
+    refs = [
+        env.a_generate.remote(
+            inputs=verifiers_input_batch,
+            sampling_args=sampling_args,
+            max_concurrent=256,
+        )
+        for verifiers_input_batch in verifiers_input_batches
+    ]
+    generate_results = ray.get(refs)
 
     current_batch = input_batch.copy()
-    current_batch["total_reward"] = torch.tensor(rollout.reward)
+    current_batch["total_reward"] = [0 for _ in current_batch["message_log"]]
 
-    # Convert completion to NeMo-RL message log format, and re-tokenize the prompt to avoid including generation prompts.
-    new_msg_logs: list[LLMMessageLogType] = []
-    for i, completion in enumerate(rollout.completion):
-        assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
+    env_metrics_sums = {}
+    env_metrics_counts = {}
 
-        log = []
-        for msg in completion:
-            completion_ids = processed_outputs.completion_ids[i]
+    # Convert completion to NeMo-RL message log format.
+    for g_i, (rollouts, processed_outputs) in enumerate(generate_results):
+        # type hints for convenience
+        rollouts: vf.GenerateOutputs
+        processed_outputs: vf.ProcessedOutputs
 
-            log.append({
-                "role": msg["role"],
-                "content": msg["content"],
-                "tool_calls": msg.get("tool_calls", []) or [],
-                "token_ids": torch.tensor(completion_ids),
-                "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
-            })
-        new_msg_logs.append(log)
+        for i, completion in enumerate(rollouts.completion):
+            assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
 
-    current_batch["message_log"] = new_msg_logs
+            for key, value in rollouts.metrics.items():
+                if isinstance(value, (int, float)):
+                    if key not in env_metrics_sums:
+                        env_metrics_sums[key] = 0.0
+                        env_metrics_counts[key] = 0
+                    env_metrics_sums[key] += value
+                    env_metrics_counts[key] += 1
+
+            log = []
+            for msg in completion:
+                completion_ids = processed_outputs.completion_ids[i]
+
+                log.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "tool_calls": msg.get("tool_calls", []) or [],
+                    "token_ids": torch.tensor(completion_ids),
+                    "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
+                })
+            
+            orig_idx = list(by_group.values())[g_i][i][-1]
+
+            current_batch["message_log"][orig_idx].extend(log)
+            current_batch["total_reward"][orig_idx] = rollouts.reward[i]
+
+    current_batch["total_reward"] = torch.tensor(current_batch["total_reward"])
+
+    env_metrics_means = {k: v / env_metrics_counts[k] for k, v in env_metrics_sums.items()}
 
     # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
     batch_size = len(current_batch["message_log"])
@@ -145,6 +210,7 @@ def run_vf_rollouts(
         "mean_total_tokens_per_sample": float(sum(sample_total_tokens) / denom),
         "mean_gen_tokens_per_sample": float(sum(sample_assistant_tokens) / denom),
         "mean_env_tokens_per_sample": 0.0,
+        "env_metrics": env_metrics_means,
     }
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(

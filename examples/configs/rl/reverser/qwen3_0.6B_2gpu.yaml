@@ -25,7 +25,7 @@ loss_fn:
 checkpointing:
   enabled: true
   checkpoint_dir: "results/grpo_vf_reverser_600M"
-  metric_name: "val_reward"
+  metric_name: "step"
   higher_is_better: true
   keep_top_k: 3
   save_period: 10
@@ -37,22 +37,24 @@ policy:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 256
   train_micro_batch_size: 4
-  generation_batch_size: 32 # Only used when generating using HF backend
+  generation_batch_size: -1 # Only used when generating using HF backend
   logprob_batch_size: 4
   max_total_sequence_length: 512
   precision: "bfloat16"
 
   dtensor_cfg:
+    enabled: false
+  
+  dtensor_v2_cfg:
     enabled: true
-    cpu_offload: False
+    cpu_offload: false
     sequence_parallel: false
     activation_checkpointing: false
     tensor_parallel_size: 1
     context_parallel_size: 1
+    pipeline_parallel_size: 1
+    expert_parallel_size: 1
     custom_parallel_plan: null
-  
-  dtensor_v2_cfg:
-    enabled: false
   
   megatron_cfg:
     enabled: false
@@ -74,7 +76,7 @@ policy:
 
   # makes the training sequence length divisible by the tensor parallel size
   # this is useful for sequence parallel training
-  make_sequence_length_divisible_by: ${policy.dtensor_cfg.tensor_parallel_size}
+  make_sequence_length_divisible_by: ${policy.dtensor_v2_cfg.tensor_parallel_size}
   max_grad_norm: 1.0
 
   optimizer:

@@ -1,5 +1,5 @@
-from .grouped_rubric import GroupedRubric
+from .btrm_judge import PairwiseJudgeRubric
 
-__all__ = ["GroupedRubric"]
+__all__ = ["PairwiseJudgeRubric"]
 
 

@@ -86,14 +86,14 @@ class VfEnvironment(EnvironmentInterface[VfEnvironmentMetadata]):
             self.client = AsyncOpenAI(
                 api_key="n/a",
                 base_url="http://127.0.0.1:8000/v1",
-                http_client=httpx.AsyncClient(
-                    http2=True,
-                    limits=httpx.Limits(
-                        max_connections=28000,
-                        max_keepalive_connections=28000,
-                    ),
-                    timeout=600.0,
-                ),
+                # http_client=httpx.AsyncClient(
+                #     http2=True,
+                #     limits=httpx.Limits(
+                #         max_connections=28000,
+                #         max_keepalive_connections=28000,
+                #     ),
+                #     timeout=600.0,
+                # ),
             )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         results = await self.env.a_generate(

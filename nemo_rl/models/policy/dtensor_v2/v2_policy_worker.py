@@ -352,10 +352,10 @@ class DTensorV2PolicyWorker:
         # 3) Move to GPU + Apply parallelism strategies
         # ------------------------------------------------
 
-        self.tp_size = self.cfg["dtensor_v2_cfg"]["tensor_parallel_size"]
-        self.cp_size = self.cfg["dtensor_v2_cfg"]["context_parallel_size"]
-        self.pp_size = self.cfg["dtensor_v2_cfg"]["pipeline_parallel_size"]
-        self.ep_size = self.cfg["dtensor_v2_cfg"]["expert_parallel_size"]
+        self.tp_size = self.cfg["dtensor_v2_cfg"].get("tensor_parallel_size", 1)
+        self.cp_size = self.cfg["dtensor_v2_cfg"].get("context_parallel_size", 1)
+        self.pp_size = self.cfg["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
+        self.ep_size = self.cfg["dtensor_v2_cfg"].get("expert_parallel_size", 1)
         
         if self.ep_size > 1 and not hasattr(torch, "_grouped_mm"):
             raise RuntimeError("Expert parallelism is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")

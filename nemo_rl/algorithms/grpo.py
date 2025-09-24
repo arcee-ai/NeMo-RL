@@ -603,6 +603,7 @@ def grpo_train(
                         tokenizer=tokenizer,
                         max_new_tokens=master_config["policy"]["generation"]["max_new_tokens"],
                         task_to_env=task_to_env,
+                        grpo_gids=repeated_batch["idx"],
                         greedy=False,
                     )
                 elif _should_use_async_rollouts(master_config):

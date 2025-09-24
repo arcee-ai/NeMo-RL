@@ -74,7 +74,7 @@ policy:
 
   # makes the training sequence length divisible by the tensor parallel size
   # this is useful for sequence parallel training
-  make_sequence_length_divisible_by: ${policy.dtensor_cfg.tensor_parallel_size}
+  make_sequence_length_divisible_by: ${policy.dtensor_v2_cfg.tensor_parallel_size}
   max_grad_norm: 1.0
 
   optimizer:
@@ -102,8 +102,8 @@ policy:
     - milestones: [50]
 
   generation:
-    backend: "vllm"
-    max_new_tokens: ${policy.max_total_sequence_length}
+    backend: "vllm_http"
+    max_new_tokens: null
     temperature: 0.7
     top_p: 0.8
     top_k: 20
