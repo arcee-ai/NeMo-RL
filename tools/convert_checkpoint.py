@@ -69,6 +69,8 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) ->
 
     os.makedirs(output_dir, exist_ok=True)
 
+    torch.distributed.init_process_group()
+
     # Load native model and state
     print("Loading native model and state")
     _, native_state, hf_config = _load_native_model_and_state(dcp_path, hf_model_name)
