@@ -21,7 +21,7 @@ def _resolve_dcp_path(dcp_path: str) -> str:
     Otherwise, return the path as-is.
     """
     dcp_path = os.path.abspath(dcp_path)
-    policy_subdir = os.path.join(dcp_path, "policy")
+    policy_subdir = os.path.join(dcp_path, "policy", "weights")
     if os.path.isdir(policy_subdir):
         return policy_subdir
     return dcp_path
@@ -58,7 +58,7 @@ def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[dic
 
 
 def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) -> None:
-    dcp_path = _resolve_dcp_path(dcp_path) + "/policy/weights"
+    dcp_path = _resolve_dcp_path(dcp_path)
     output_dir = os.path.abspath(output_dir)
 
     if not os.path.exists(dcp_path):
