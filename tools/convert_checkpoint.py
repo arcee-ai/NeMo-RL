@@ -3,15 +3,15 @@
 import argparse
 import os
 import sys
+import tempfile
 from typing import Any
 
 import torch
-from accelerate import init_empty_weights
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 
 # Local imports
 from nemo_rl.models.custom.convert import get_model_config
-from nemo_rl.utils.native_checkpoint import load_checkpoint
+from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 
 
 def _resolve_dcp_path(dcp_path: str) -> str:
@@ -27,37 +27,34 @@ def _resolve_dcp_path(dcp_path: str) -> str:
     return dcp_path
 
 
-def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[torch.nn.Module, dict[str, Any], Any]:
-    """Instantiate TorchTitan-native model on meta and load DCP state.
+def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[dict[str, Any], Any]:
+    """Load native TorchTitan state dict from a DCP checkpoint without dist init.
 
-    Returns the instantiated model, its full state dict (CPU tensors), and the HF config.
+    Uses dcp_to_torch_save to materialize the checkpoint to a temporary torch file, then
+    extracts the native model state dict under the 'model' key.
+
+    Returns (native_state_dict, hf_config).
     """
-    # Always construct config in float32 – weights are mastered in fp32 and sharded by DCP
+    # Load HF config (float32 master weights)
     hf_config = AutoConfig.from_pretrained(
         hf_model_name,
         torch_dtype=torch.float32,
         trust_remote_code=True,
     )
 
-    model_class, model_args, adapter_class, _ = get_model_config(hf_config)
+    # Convert DCP checkpoint to a single torch file, then load and extract 'model'
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_weights = os.path.join(tmpdir, "weights.pt")
+        dcp_to_torch_save(dcp_path, tmp_weights)
+        bundle = torch.load(tmp_weights, map_location="cpu")
 
-    # Build empty model on meta to avoid allocating huge tensors pre-load
-    with init_empty_weights():
-        model = model_class(model_args=model_args)
+    if not isinstance(bundle, dict) or "model" not in bundle:
+        raise RuntimeError(
+            "Unexpected checkpoint bundle format. Expected a dict with a top-level 'model' key."
+        )
 
-    # Load DCP into the model
-    load_checkpoint(model=model, weights_path=os.path.abspath(dcp_path))
-
-    # Collect a CPU state_dict with real tensors
-    state_dict: dict[str, torch.Tensor] = {}
-    for k, v in model.state_dict().items():
-        if isinstance(v, torch.Tensor):
-            state_dict[k] = v.detach().cpu()
-        else:
-            state_dict[k] = v
-
-    # Return model and hf_config (needed for saving config)
-    return model, state_dict, hf_config
+    native_state: dict[str, Any] = bundle["model"]
+    return native_state, hf_config
 
 
 def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) -> None:
@@ -69,11 +66,9 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str) ->
 
     os.makedirs(output_dir, exist_ok=True)
 
-    torch.distributed.init_process_group(rank=0, world_size=1)
-
     # Load native model and state
     print("Loading native model and state")
-    _, native_state, hf_config = _load_native_model_and_state(dcp_path, hf_model_name)
+    native_state, hf_config = _load_native_model_and_state(dcp_path, hf_model_name)
 
     # Build adapter to map native -> HF keys
     print("Building adapter")
