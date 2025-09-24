@@ -110,11 +110,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    try:
-        convert_dcp_to_hf_cli(args.dcp_path, args.hf_model_name, args.output_dir)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    convert_dcp_to_hf_cli(args.dcp_path, args.hf_model_name, args.output_dir)
 
 
 if __name__ == "__main__":
