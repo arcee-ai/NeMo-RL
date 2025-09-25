@@ -27,6 +27,7 @@ from omegaconf import OmegaConf
 import ray
 from ray import serve
 from transformers import PreTrainedTokenizerBase
+import torch
 
 from nemo_rl.environments.vf_environment import VfEnvironment
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
@@ -256,6 +257,10 @@ def main() -> None:
     # Print config
     print("Final config:")
     pprint.pprint(config)
+
+    if not torch.cuda.can_device_access_peer(0, 1):
+        os.environ["NCCL_SHM_DISABLE"] = "1"
+        logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
 
     assert config["policy"]["generation"]["backend"] == "vllm_http", "Verifiers environments only support the \"vllm_http\" generation backend."
 
