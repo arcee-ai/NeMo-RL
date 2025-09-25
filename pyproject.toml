@@ -21,7 +21,7 @@ license = {text = "Apache 2.0"}
 dependencies = [
     "setuptools",
     "ninja",  # for flash-attn parallel build
-    "torch==2.7.1",
+    "torch==2.8.0",
     "triton",
     "colored==2.2.3",
     "ray[default]==2.48.0",
@@ -48,7 +48,7 @@ dependencies = [
     "mlflow",
     "verifiers==0.1.3",
     "vf-exts",
-    "flash-attn==2.7.4.post1",
+    "flash-attn==2.8.3",
     "vllm>=0.10.0"
 ]
 
@@ -58,14 +58,14 @@ automodel = [
     # Flash-attn version should be selected to satisfy both TE + vLLM requirements (xformers in particular)
     # https://github.com/NVIDIA/TransformerEngine/blob/v2.3/transformer_engine/pytorch/attention/dot_product_attention/utils.py#L108
     # https://github.com/facebookresearch/xformers/blob/8354497deb2c04c67fbb2e2ad911e86530da0e90/xformers/ops/fmha/flash.py#L76
-    "flash-attn==2.7.4.post1",
+    "flash-attn==2.8.3",
     "mamba-ssm",
     "causal-conv1d",
 ]
 vllm = [
     "vllm==0.10.0",
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
-    "flash-attn==2.7.4.post1",
+    "flash-attn==2.8.3",
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
     "mamba-ssm",
     # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
@@ -73,9 +73,9 @@ vllm = [
 ]
 # For the vllm_http backend, we use the latest vllm
 vllm-http = [
-    "vllm==0.10.1.1",
+    "vllm==0.10.2",
     "hf-transfer",
-    "flash-attn==2.7.4.post1"
+    "flash-attn==2.8.3"
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
@@ -91,7 +91,7 @@ mcore = [
     # Flash-attn version should be selected to satisfy both TE + vLLM requirements (xformers in particular)
     # https://github.com/NVIDIA/TransformerEngine/blob/v2.3/transformer_engine/pytorch/attention/dot_product_attention/utils.py#L108
     # https://github.com/facebookresearch/xformers/blob/8354497deb2c04c67fbb2e2ad911e86530da0e90/xformers/ops/fmha/flash.py#L76
-    "flash-attn==2.7.4.post1",
+    "flash-attn==2.8.3",
 ]
 
 [dependency-groups]
@@ -99,7 +99,7 @@ mcore = [
 # This is a default group so that we install these even with bare `uv sync`
 build = [
     # Build requirement for TE
-    "torch==2.7.1",
+    "torch==2.8.0",
     # Build requirement for TE
     "setuptools",
     "packaging",
