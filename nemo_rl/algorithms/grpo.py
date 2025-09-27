@@ -498,7 +498,6 @@ def refit_policy_generation(
 # Training & Validation
 # ===============================================================================
 
-
 def grpo_train(
     policy: ColocatablePolicyInterface,
     policy_generation: Optional[GenerationInterface],
@@ -601,6 +600,7 @@ def grpo_train(
                         policy_generation=policy_generation,
                         input_batch=repeated_batch,
                         tokenizer=tokenizer,
+                        max_seq_len=master_config["policy"]["max_total_sequence_length"],
                         max_new_tokens=master_config["policy"]["generation"]["max_new_tokens"],
                         task_to_env=task_to_env,
                         grpo_gids=repeated_batch["idx"],

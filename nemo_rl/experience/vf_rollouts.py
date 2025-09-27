@@ -38,7 +38,8 @@ def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
     input_batch: BatchedDataDict[DatumSpec],
     tokenizer: TokenizerType,
-    max_new_tokens: int,
+    max_seq_len: int,
+    max_new_tokens: int | None,
     task_to_env: dict[str, EnvironmentInterface],
     grpo_gids: list[int],
     greedy: bool = False,
@@ -98,7 +99,7 @@ def run_vf_rollouts(
             "info": group_infos,
             "task": group_tasks,
         })
-
+    
     sampling_args = {
         "max_tokens": max_new_tokens,
         "top_p": policy_generation.cfg.get("top_p", None),
@@ -130,6 +131,8 @@ def run_vf_rollouts(
     env_metrics_sums = {}
     env_metrics_counts = {}
 
+    sample_truncated = [False for _ in current_batch["message_log"]]
+
     # Convert completion to NeMo-RL message log format.
     for g_i, (rollouts, processed_outputs) in enumerate(generate_results):
         # type hints for convenience
@@ -148,8 +151,16 @@ def run_vf_rollouts(
                     env_metrics_counts[key] += 1
 
             log = []
+            orig_idx = list(by_group.values())[g_i][i][-1]
             for msg in completion:
                 completion_ids = processed_outputs.completion_ids[i]
+
+                # Truncate over-length completions
+                prev_tokens = sum([len(msg["token_ids"]) for msg in current_batch["message_log"][orig_idx]])
+                if len(completion_ids) + prev_tokens > max_seq_len:
+                    remaining_tokens = max_seq_len - prev_tokens
+                    completion_ids = completion_ids[:remaining_tokens]
+                    sample_truncated[orig_idx] = True
 
                 log.append({
                     "role": msg["role"],
@@ -158,8 +169,6 @@ def run_vf_rollouts(
                     "token_ids": torch.tensor(completion_ids),
                     "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
                 })
-            
-            orig_idx = list(by_group.values())[g_i][i][-1]
 
             current_batch["message_log"][orig_idx].extend(log)
             current_batch["total_reward"][orig_idx] = rollouts.reward[i]
@@ -190,7 +199,7 @@ def run_vf_rollouts(
     sync_sample_metrics = [
         {
             "terminated": False,
-            "truncated": False,
+            "truncated": sample_truncated[i],
             "total_tokens": sample_total_tokens[i],
             "assistant_tokens": sample_assistant_tokens[i],
             "env_tokens": 0,

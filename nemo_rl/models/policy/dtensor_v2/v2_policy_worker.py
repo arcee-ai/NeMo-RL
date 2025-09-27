@@ -748,7 +748,7 @@ class DTensorV2PolicyWorker:
                                 padding_value=self.tokenizer.eos_token_id,
                                 return_attention_mask=False,
                                 min_seq_len=self.cfg["sequence_packing"][
-                                    "logprob_mb_tokens"
+                                    "train_mb_tokens"
                                 ],  # TODO: this is a WAR for sequence packing, we should fix this. Without this, backward will fail when TP is enabled.
                             )
                             seq_len = input_ids.shape[1]

@@ -2,6 +2,9 @@
 
 .code_ref_for_agent/
 
+*.pickle
+uv.lock
+
 .git
 *.out
 *.log
