@@ -193,7 +193,9 @@ def parallelize_model(
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
     enable_cpu_offload: bool = False,
+    activation_checkpointing: bool = False,
     reshard_after_forward_policy: str = "default",
+    enable_compiled_autograd: bool = False,
 ):
     """
     Apply tensor parallelism, activation checkpointing, torch.compile, and data
@@ -236,9 +238,9 @@ def parallelize_model(
             etp_enabled=False,
         )
 
-    # TODO: Bring this back
-    # if job_config.activation_checkpoint.mode != "none":
-    #     apply_ac(model, job_config.activation_checkpoint)
+    # TODO: Support selective activation checkpointing
+    if activation_checkpointing:
+        apply_ac(model, "full")
 
     # turn on per-TransformerBlock compile after AC wrapping and before FSDP
     if model_compile_enabled:
@@ -297,7 +299,7 @@ def parallelize_model(
             model,
             dp_mesh,
             enable_compile=model_compile_enabled,
-            enable_compiled_autograd=job_config.parallelism.enable_compiled_autograd,
+            enable_compiled_autograd=enable_compiled_autograd,
         )
 
     return model
