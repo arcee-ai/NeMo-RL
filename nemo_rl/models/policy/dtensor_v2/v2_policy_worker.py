@@ -378,7 +378,8 @@ class DTensorV2PolicyWorker:
                 "See https://github.com/NVIDIA-NeMo/RL/issues/659 for more details."
             )
         
-        assert self.ep_size % self.cp_size == 0, "Expert parallel size must be divisible by context parallel size"
+        if self.ep_size > 1:
+            assert self.ep_size % self.cp_size == 0, "Expert parallel size must be divisible by context parallel size"
         
         mesh_info = get_device_mesh_info(
             world_size,
