@@ -194,7 +194,8 @@ def get_device_mesh_info(
     if "cp" in mesh_dim_names:
         dp_shard_cp_names.append("cp")
         dp_cp_names.append("cp")
-        ep_names.append("cp")
+        if ep_size != 1:
+            ep_names.append("cp")
 
     # Non-ETP: EP borrows TP
     if ep_size != 1:
@@ -407,7 +408,10 @@ class DTensorV2PolicyWorker:
         self.dp_mesh = device_mesh[list(dp_names)]._flatten(mesh_dim_name="dp")
         self.dp_shard_cp_mesh = device_mesh[list(dp_shard_cp_names)]._flatten(mesh_dim_name="dp_shard_cp")
         self.dp_cp_mesh = device_mesh[list(dp_cp_names)]._flatten(mesh_dim_name="dp_cp")
-        self.ep_mesh = device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
+        if self.ep_size != 1:
+            self.ep_mesh = device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
+        else:
+            self.ep_mesh = None
 
         self.pp_mesh, self.tp_mesh, self.cp_mesh = (
             device_mesh["pp"],

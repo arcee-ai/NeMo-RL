@@ -23,12 +23,13 @@ def parallelize_qwen3moe(
         mesh,
         cp_size=cp_mesh.size(),
         tp_size=tp_mesh.size(),
-        ep_size=ep_mesh.size(),
+        ep_size=ep_mesh.size() if ep_mesh is not None else 1,
         pp_size=pp_mesh.size(),
         dp_replicate=1,
         dp_shard=mesh["dp_shard_mod_ep"].size() * mesh["dp_shard_in_ep"].size(),
         model_compile_enabled=True,
         param_dtype=param_dtype,
         reduce_dtype=torch.float32,
-        enable_cpu_offload=cpu_offload
+        enable_cpu_offload=cpu_offload,
+        activation_checkpointing=activation_checkpointing
     )
