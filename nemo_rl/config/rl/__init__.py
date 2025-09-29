@@ -16,3 +16,6 @@ class RLConfig(TypedDict):
     logger: GRPOLoggerConfig
     cluster: ClusterConfig
     checkpointing: CheckpointingConfig
+
+# Alias for backwards compatibility
+GRPOMasterConfig = RLConfig

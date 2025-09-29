@@ -25,12 +25,20 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.loss_functions import (
-    ClippedPGLossConfig,
     ClippedPGLossDataDict,
     ClippedPGLossFn,
 )
 from nemo_rl.algorithms.utils import calculate_baseline_and_std_per_prompt, set_seed
-from nemo_rl.data import DataConfig
+from nemo_rl.config import (
+    CheckpointingConfig,
+    ClippedPGLossConfig,
+    ClusterConfig,
+    DataConfig,
+    GRPOConfig,
+    GRPOLoggerConfig,
+    GRPOMasterConfig as MasterConfig,
+    PolicyConfig,
+)
 from nemo_rl.data.datasets import AllTaskProcessedDataset, rl_collate_fn
 from nemo_rl.data.interfaces import (
     DatumSpec,
@@ -40,10 +48,7 @@ from nemo_rl.data.llm_message_utils import (
     get_keys_from_message_log,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import (
-    ClusterConfig,
-    RayVirtualCluster,
-)
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.environments.interfaces import (
     EnvironmentInterface,
 )
@@ -57,13 +62,11 @@ from nemo_rl.models.generation.interfaces import (
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.generation.vllm_http.config import HttpVllmConfig
 from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
-from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.models.policy.lm_policy import Policy
-from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
+from nemo_rl.utils.checkpoint import CheckpointManager
 from nemo_rl.utils.logger import (
     Logger,
-    LoggerConfig,
     print_message_log_samples,
 )
 from nemo_rl.utils.nsys import maybe_gpu_profile_step
@@ -75,20 +78,6 @@ from nemo_rl.experience.vf_rollouts import run_vf_rollouts
 # Configuration
 # ===============================================================================
 TokenizerType = TypeVar("TokenizerType", bound=PreTrainedTokenizerBase)
-
-
-class GRPOConfig(TypedDict):
-    num_prompts_per_step: int
-    num_generations_per_prompt: int
-    max_num_steps: int
-    max_rollout_turns: NotRequired[int]
-    normalize_rewards: bool
-    use_leave_one_out_baseline: bool
-    val_period: int
-    val_batch_size: int
-    val_at_start: bool
-    max_val_samples: int
-    seed: int
 
 
 class GRPOSaveState(TypedDict):
@@ -105,21 +94,6 @@ def _default_grpo_save_state() -> GRPOSaveState:
         "val_reward": -99999999.0,
         "consumed_samples": 0,
     }
-
-
-class GRPOLoggerConfig(LoggerConfig):
-    num_val_samples_to_print: int  # number of val samples to print to stdout
-
-
-class MasterConfig(TypedDict):
-    policy: PolicyConfig
-    loss_fn: ClippedPGLossConfig
-    env: dict[str, Any]
-    data: DataConfig
-    grpo: GRPOConfig
-    logger: GRPOLoggerConfig
-    cluster: ClusterConfig
-    checkpointing: CheckpointingConfig
 
 
 # ===============================================================================

@@ -29,7 +29,7 @@ from nemo_rl.data.hf_datasets.deepscaler import DeepScalerDataset
 from nemo_rl.data.hf_datasets.openmathinstruct2 import OpenMathInstruct2Dataset
 from nemo_rl.data.interfaces import TaskDataProcessFnCallable, TaskDataSpec
 from nemo_rl.data.processors import math_data_processor
-from nemo_rl.models.policy import TokenizerConfig
+from nemo_rl.config import TokenizerConfig
 
 
 def test_math_data_processor():
