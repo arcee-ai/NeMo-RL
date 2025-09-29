@@ -1,11 +1,10 @@
-from dataclasses import dataclass
+from typing import TypedDict, NotRequired
 
-@dataclass
-class DTensorConfig:
+class DTensorConfig(TypedDict):
     enabled: bool
-    cpu_offload: bool | None = None
-    sequence_parallel: bool | None = None
-    activation_checkpointing: bool | None = None
-    tensor_parallel_size: int | None = None
-    context_parallel_size: int | None = None
-    custom_parallel_plan: str | None = None
+    cpu_offload: NotRequired[bool | None]
+    sequence_parallel: NotRequired[bool | None]
+    activation_checkpointing: NotRequired[bool | None]
+    tensor_parallel_size: NotRequired[int | None]
+    context_parallel_size: NotRequired[int | None]
+    custom_parallel_plan: NotRequired[str | None]

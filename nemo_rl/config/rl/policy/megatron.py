@@ -1,7 +1,6 @@
-from dataclasses import dataclass
+from typing import TypedDict, NotRequired
 
-@dataclass
-class MegatronOptimizerConfig:
+class MegatronOptimizerConfig(TypedDict):
     optimizer: str
     lr: float
     min_lr: float
@@ -9,19 +8,15 @@ class MegatronOptimizerConfig:
     bf16: bool
     fp16: bool
     params_dtype: str
-    # adam
     adam_beta1: float
     adam_beta2: float
     adam_eps: float
-    # sgd
     sgd_momentum: float
-    # distributed optimizer
     use_distributed_optimizer: bool
     use_precision_aware_optimizer: bool
     clip_grad: float
 
-@dataclass
-class MegatronSchedulerConfig:
+class MegatronSchedulerConfig(TypedDict):
     start_weight_decay: float
     end_weight_decay: float
     weight_decay_incr_style: str
@@ -30,8 +25,7 @@ class MegatronSchedulerConfig:
     lr_warmup_iters: int
     lr_warmup_init: float
 
-@dataclass
-class MegatronDDPConfig:
+class MegatronDDPConfig(TypedDict):
     grad_reduce_in_fp32: bool
     overlap_grad_reduce: bool
     overlap_param_gather: bool
@@ -39,8 +33,7 @@ class MegatronDDPConfig:
     use_custom_fsdp: bool
     data_parallel_sharding_strategy: str
 
-@dataclass
-class MegatronConfig:
+class MegatronConfig(TypedDict):
     enabled: bool
     empty_unused_memory_level: int
     activation_checkpointing: bool
@@ -56,6 +49,6 @@ class MegatronConfig:
     expert_tensor_parallel_size: int
     expert_model_parallel_size: int
     distributed_data_parallel_config: MegatronDDPConfig
-    defer_fp32_logits: bool | None = None
-    optimizer: MegatronOptimizerConfig | None = None
-    scheduler: MegatronSchedulerConfig | None = None
+    defer_fp32_logits: NotRequired[bool | None]
+    optimizer: NotRequired[MegatronOptimizerConfig | None]
+    scheduler: NotRequired[MegatronSchedulerConfig | None]

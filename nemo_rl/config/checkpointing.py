@@ -1,11 +1,9 @@
-from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any, Union, TypedDict, NotRequired
 import os
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
-@dataclass
-class CheckpointingConfig:
+class CheckpointingConfig(TypedDict):
     """Configuration for checkpoint management.
 
     Attributes:
@@ -21,5 +19,5 @@ class CheckpointingConfig:
     metric_name: str | None
     higher_is_better: bool
     save_period: int
-    keep_top_k: int | None = None
-    checkpoint_must_save_by: str | None = None
+    keep_top_k: NotRequired[int | None]
+    checkpoint_must_save_by: NotRequired[str | None]

@@ -1,6 +1,5 @@
-from dataclasses import dataclass
+from typing import TypedDict
 
-@dataclass
-class ClusterConfig:
+class ClusterConfig(TypedDict):
     gpus_per_node: int
     num_nodes: int

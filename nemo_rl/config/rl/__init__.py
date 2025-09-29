@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from nemo_rl.config.rl.policy import PolicyConfig
 from nemo_rl.config.rl.loss import ClippedPGLossConfig
@@ -8,8 +7,7 @@ from nemo_rl.config.rl.grpo import GRPOConfig, GRPOLoggerConfig
 from nemo_rl.config.cluster import ClusterConfig
 from nemo_rl.config.checkpointing import CheckpointingConfig
 
-@dataclass
-class RLConfig:
+class RLConfig(TypedDict):
     policy: PolicyConfig
     loss_fn: ClippedPGLossConfig
     env: dict[str, Any]

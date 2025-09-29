@@ -1,7 +1,6 @@
-from dataclasses import dataclass
+from typing import TypedDict
 
-@dataclass
-class ClippedPGLossConfig:
+class ClippedPGLossConfig(TypedDict):
     reference_policy_kl_penalty: float
     ratio_clip_min: float
     ratio_clip_max: float
