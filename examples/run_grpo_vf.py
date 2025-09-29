@@ -16,6 +16,8 @@ from copy import deepcopy
 import os
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
+# Prevent verifiers from spamming the console with progress bars when we do parallel rollouts.
+os.environ["TQDM_DISABLE"] = "1"
 
 import argparse
 import os
@@ -30,7 +32,7 @@ from transformers import PreTrainedTokenizerBase
 import torch
 
 from nemo_rl.environments.vf_environment import VfEnvironment
-from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
+from nemo_rl.algorithms.grpo import GRPOTrainer, MasterConfig
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset
@@ -297,32 +299,15 @@ def main() -> None:
         model_name=config["policy"]["model_name"],
     )
 
-    (
-        policy,
-        policy_generation,
-        cluster,
-        dataloader,
-        val_dataloader,
-        loss_fn,
-        logger,
-        checkpointer,
-        grpo_state,
-        master_config,
-    ) = setup(config, tokenizer, dataset, val_dataset)
+    trainer = GRPOTrainer(config, tokenizer, dataset, val_dataset)
     
-    grpo_train(
-        policy,
-        policy_generation,
-        dataloader,
-        val_dataloader,
-        tokenizer,
-        loss_fn,
-        task_to_env,
-        val_task_to_env,
-        logger,
-        checkpointer,
-        grpo_state,
-        master_config,
+    print("\n" + "=" * 60)
+    print(" " * 18 + "SETUP COMPLETE")
+    print("=" * 60 + "\n")
+
+    trainer.train(
+        task_to_env=task_to_env,
+        val_task_to_env=val_task_to_env,
     )
 
 
