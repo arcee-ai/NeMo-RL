@@ -600,6 +600,7 @@ def grpo_train(
                         policy_generation=policy_generation,
                         input_batch=repeated_batch,
                         tokenizer=tokenizer,
+                        vf_semaphore=master_config["env"]["vf"].get("generation_semaphore", None),
                         max_seq_len=master_config["policy"]["max_total_sequence_length"],
                         max_new_tokens=master_config["policy"]["generation"]["max_new_tokens"],
                         task_to_env=task_to_env,

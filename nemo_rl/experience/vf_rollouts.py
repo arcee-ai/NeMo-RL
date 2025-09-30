@@ -1,3 +1,4 @@
+from pydantic.v1 import NoneBytes
 import torch
 import ray
 from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
@@ -38,6 +39,7 @@ def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
     input_batch: BatchedDataDict[DatumSpec],
     tokenizer: TokenizerType,
+    vf_semaphore: int | None,
     max_seq_len: int,
     max_new_tokens: int | None,
     task_to_env: dict[str, EnvironmentInterface],
@@ -115,11 +117,16 @@ def run_vf_rollouts(
     if greedy:
         sampling_args["temperature"] = 0.0
 
+    if vf_semaphore is not None:
+        batch_semaphore = max(1, vf_semaphore // len(verifiers_input_batches))
+    else:
+        batch_semaphore = -1
+
     refs = [
         env.a_generate.remote(
             inputs=verifiers_input_batch,
             sampling_args=sampling_args,
-            max_concurrent=256,
+            max_concurrent=batch_semaphore,
         )
         for verifiers_input_batch in verifiers_input_batches
     ]
