@@ -16,7 +16,7 @@ import glob
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type, Union, get_type_hints
+from typing import Any, Dict, List, Optional, Set, Type, TypedDict, Union, get_type_hints
 
 import pytest
 from omegaconf import OmegaConf

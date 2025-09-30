@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, TypedDict
 
 import mlflow
 import ray
