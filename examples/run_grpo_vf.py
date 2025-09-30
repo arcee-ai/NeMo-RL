@@ -16,7 +16,7 @@ from copy import deepcopy
 import os
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
-# Prevent verifiers from spamming the console with progress bars.
+# Prevent verifiers from spamming the console with progress bars when we do parallel rollouts.
 os.environ["TQDM_DISABLE"] = "1"
 
 import argparse
