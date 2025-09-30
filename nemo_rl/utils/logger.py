@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Mapping, NotRequired, Optional, TypedDict
+from typing import Any, Callable, Mapping, Optional
 
 import mlflow
 import ray
@@ -39,46 +39,18 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from torch.utils.tensorboard import SummaryWriter
 
+from nemo_rl.config.logging import (
+    GPUMonitoringConfig,
+    LoggerConfig,
+    MLflowConfig,
+    TensorboardConfig,
+    WandbConfig,
+)
 from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 # Flag to track if rich logging has been configured
 _rich_logging_configured = False
-
-
-class WandbConfig(TypedDict):
-    project: NotRequired[str]
-    name: NotRequired[str]
-
-
-class TensorboardConfig(TypedDict):
-    log_dir: NotRequired[str]
-
-
-class MLflowConfig(TypedDict):
-    experiment_name: str
-    run_name: str
-    tracking_uri: NotRequired[str]
-
-
-class GPUMonitoringConfig(TypedDict):
-    collection_interval: int | float
-    flush_interval: int | float
-
-
-class LoggerConfig(TypedDict):
-    log_dir: str
-    wandb_enabled: bool
-    tensorboard_enabled: bool
-    mlflow_enabled: bool
-    wandb: WandbConfig
-    tensorboard: TensorboardConfig
-    mlflow: NotRequired[MLflowConfig]
-    monitor_gpus: bool
-    gpu_monitoring: GPUMonitoringConfig
-    num_val_samples_to_print: int
-
-
 class LoggerInterface(ABC):
     """Abstract base class for logger backends."""
 
