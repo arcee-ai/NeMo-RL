@@ -111,7 +111,7 @@ from nemo_rl.models.megatron.refit_utils import (
     get_local_key_to_global_keys,
     get_param_info,
 )
-from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.config import PolicyConfig
 from nemo_rl.models.policy.interfaces import (
     LogprobOutputSpec,
     ReferenceLogprobOutputSpec,

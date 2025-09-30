@@ -25,7 +25,7 @@ from nemo_rl.algorithms.utils import get_tokenizer, set_seed
 from nemo_rl.data.datasets import AllTaskProcessedDataset, rl_collate_fn
 from nemo_rl.data.hf_datasets.openmathinstruct2 import OpenMathInstruct2Dataset
 from nemo_rl.data.interfaces import TaskDataProcessFnCallable, TaskDataSpec
-from nemo_rl.models.policy import TokenizerConfig
+from nemo_rl.config import TokenizerConfig
 
 # Test configuration
 TOKENIZER_CONFIG: TokenizerConfig = {

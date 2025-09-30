@@ -58,7 +58,7 @@ from nemo_rl.models.huggingface.common import (
     get_flash_attention_kwargs,
     pack_sequences,
 )
-from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.config import PolicyConfig
 from nemo_rl.models.policy.interfaces import (
     LogprobOutputSpec,
     ReferenceLogprobOutputSpec,

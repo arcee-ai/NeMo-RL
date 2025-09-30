@@ -32,9 +32,9 @@ from transformers import PreTrainedTokenizerBase
 import torch
 
 from nemo_rl.environments.vf_environment import VfEnvironment
-from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
+from nemo_rl.algorithms.grpo import GRPOTrainer
 from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.data import DataConfig
+from nemo_rl.config import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.data.interfaces import (
     DatumSpec,
@@ -50,6 +50,7 @@ from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
+from nemo_rl.config import RLConfig
 
 import verifiers as vf
 import vf_exts as vfe
@@ -253,7 +254,7 @@ def main() -> None:
         print(f"Overrides: {overrides}")
         config = parse_hydra_overrides(config, overrides)
 
-    config: MasterConfig = OmegaConf.to_container(config, resolve=True)
+    config: RLConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
 
     # Print config
@@ -299,32 +300,15 @@ def main() -> None:
         model_name=config["policy"]["model_name"],
     )
 
-    (
-        policy,
-        policy_generation,
-        cluster,
-        dataloader,
-        val_dataloader,
-        loss_fn,
-        logger,
-        checkpointer,
-        grpo_state,
-        master_config,
-    ) = setup(config, tokenizer, dataset, val_dataset)
+    trainer = GRPOTrainer(config, tokenizer, dataset, val_dataset)
     
-    grpo_train(
-        policy,
-        policy_generation,
-        dataloader,
-        val_dataloader,
-        tokenizer,
-        loss_fn,
-        task_to_env,
-        val_task_to_env,
-        logger,
-        checkpointer,
-        grpo_state,
-        master_config,
+    print("\n" + "=" * 60)
+    print(" " * 18 + "SETUP COMPLETE")
+    print("=" * 60 + "\n")
+
+    trainer.train(
+        task_to_env=task_to_env,
+        val_task_to_env=val_task_to_env,
     )
 
 

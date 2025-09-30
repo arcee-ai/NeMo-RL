@@ -29,11 +29,12 @@ from nemo_rl.data import MathDataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset, eval_collate_fn
 from nemo_rl.data.llm_message_utils import get_keys_from_message_log
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
+from nemo_rl.config import ClusterConfig
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.environments.math_environment import MathEnvConfig
 from nemo_rl.models.generation.interfaces import GenerationConfig
 from nemo_rl.models.generation.vllm import VllmGeneration
-from nemo_rl.models.policy import TokenizerConfig
+from nemo_rl.config import TokenizerConfig
 
 # ===============================================================================
 # Configuration

@@ -27,14 +27,21 @@ from nemo_rl.algorithms.loss_functions import (
     DPOLossFn,
 )
 from nemo_rl.algorithms.utils import set_seed
-from nemo_rl.data import DataConfig
+from nemo_rl.config import (
+    ClusterConfig,
+    CheckpointingConfig,
+    DataConfig,
+    DPOConfig,
+    DPOMasterConfig as MasterConfig,
+    LoggerConfig,
+    PolicyConfig,
+)
 from nemo_rl.data.datasets import AllTaskProcessedDataset, dpo_collate_fn
-from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
-from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.policy.interfaces import PolicyInterface
 from nemo_rl.models.policy.lm_policy import Policy
-from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_rl.utils.logger import Logger, LoggerConfig
+from nemo_rl.utils.checkpoint import CheckpointManager
+from nemo_rl.utils.logger import Logger
 from nemo_rl.utils.nsys import maybe_gpu_profile_step
 from nemo_rl.utils.timer import TimeoutChecker, Timer
 
@@ -54,36 +61,6 @@ def _default_dpo_save_state() -> DPOSaveState:
         "total_steps": 0,
         "consumed_samples": 0,
     }
-
-
-class DPOConfig(TypedDict):
-    max_num_epochs: int
-    max_num_steps: int
-    val_period: int
-    val_batches: int
-    val_global_batch_size: int
-    val_micro_batch_size: int
-    val_at_start: bool
-    seed: int
-
-    reference_policy_kl_penalty: float
-    preference_average_log_probs: bool
-    sft_average_log_probs: bool
-    ## TODO(@ashors) support other loss functions
-    ## https://github.com/NVIDIA-NeMo/RL/issues/193
-    # preference_loss: str
-    # gt_reward_scale: float
-    preference_loss_weight: float
-    sft_loss_weight: float
-
-
-class MasterConfig(TypedDict):
-    policy: PolicyConfig
-    data: DataConfig
-    dpo: DPOConfig
-    logger: LoggerConfig
-    cluster: ClusterConfig
-    checkpointing: CheckpointingConfig
 
 
 # =======================================================
