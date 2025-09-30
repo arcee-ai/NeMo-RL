@@ -95,40 +95,62 @@ class AllTaskProcessedDataset:
             )
 
     def __getitem__(self, idx: int) -> DatumSpec:
-        """Return a single prompt."""
-        entry = self.dataset[idx]
+        """Return a single prompt, skipping overlong prompts by advancing to the next valid sample."""
+        n = len(self.dataset)
+        attempts = 0
+        cur_idx = idx
+        last_err: Optional[Exception] = None
 
-        if isinstance(self.task_data_processors, dict):
-            task_name = entry["task_name"]
+        while attempts < n:
+            entry = self.dataset[cur_idx]
 
-            assert task_name in self.task_data_processors, (
-                f"task processor not provided for {task_name}. Provided processors: {self.task_data_processors.keys()}"
-            )
-            task_data_spec, task_data_processor = self.task_data_processors[task_name]
-        else:
-            task_data_spec = self.default_task_data_spec
-            task_data_processor = self.task_data_processors
+            if isinstance(self.task_data_processors, dict):
+                task_name = entry["task_name"]
 
-        datum_spec = task_data_processor(
-            entry, task_data_spec, self.tokenizer, self.max_seq_length, idx
-        )
-
-        # Check the first processed item for BOS token assertion
-        if (
-            not self._bos_checked
-            and "message_log" in datum_spec
-            and datum_spec["message_log"]
-        ):
-            first_message = datum_spec["message_log"][0]
-            if "token_ids" in first_message:
-                token_ids = first_message["token_ids"]
-                assert isinstance(token_ids, torch.Tensor), (
-                    f"token_ids must be a torch.Tensor, got {type(token_ids)}"
+                assert task_name in self.task_data_processors, (
+                    f"task processor not provided for {task_name}. Provided processors: {self.task_data_processors.keys()}"
                 )
-                assert_no_double_bos(token_ids, self.tokenizer)
-            self._bos_checked = True
+                task_data_spec, task_data_processor = self.task_data_processors[task_name]
+            else:
+                task_data_spec = self.default_task_data_spec
+                task_data_processor = self.task_data_processors
 
-        return datum_spec
+            try:
+                datum_spec = task_data_processor(
+                    entry, task_data_spec, self.tokenizer, self.max_seq_length, cur_idx
+                )
+            except ValueError as e:
+                # Skip samples that exceed the configured maximum input length.
+                msg = str(e.args[0]) if e.args else str(e)
+                if "exceeds specified maximum input length" in msg:
+                    attempts += 1
+                    cur_idx = (cur_idx + 1) % n
+                    last_err = e
+                    continue
+                # Re-raise for all other errors to avoid masking real issues.
+                raise
+
+            # Check the first processed item for BOS token assertion
+            if (
+                not self._bos_checked
+                and "message_log" in datum_spec
+                and datum_spec["message_log"]
+            ):
+                first_message = datum_spec["message_log"][0]
+                if "token_ids" in first_message:
+                    token_ids = first_message["token_ids"]
+                    assert isinstance(token_ids, torch.Tensor), (
+                        f"token_ids must be a torch.Tensor, got {type(token_ids)}"
+                    )
+                    assert_no_double_bos(token_ids, self.tokenizer)
+                self._bos_checked = True
+
+            return datum_spec
+
+        # If we exhausted all entries without finding a valid one, raise the last error or a generic one
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("No valid samples found in dataset.")
 
 
 def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict[Any]:
