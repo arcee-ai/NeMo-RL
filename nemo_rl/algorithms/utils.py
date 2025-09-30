@@ -21,7 +21,7 @@ import torch
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from nemo_rl.data import hf_datasets
-from nemo_rl.models.policy import TokenizerConfig
+from nemo_rl.config import TokenizerConfig
 
 
 def calculate_kl_penalty_joschu2020(

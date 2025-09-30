@@ -25,7 +25,15 @@ from nemo_rl.algorithms.loss_functions import (
     NLLLoss,
 )
 from nemo_rl.algorithms.utils import set_seed
-from nemo_rl.data import DataConfig
+from nemo_rl.config import (
+    ClusterConfig,
+    CheckpointingConfig,
+    DataConfig,
+    LoggerConfig,
+    PolicyConfig,
+    SFTConfig,
+    SFTMasterConfig as MasterConfig,
+)
 from nemo_rl.data.datasets import AllTaskProcessedDataset, rl_collate_fn
 from nemo_rl.data.interfaces import TaskDataSpec
 from nemo_rl.data.llm_message_utils import (
@@ -33,12 +41,11 @@ from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
-from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.policy.interfaces import PolicyInterface
 from nemo_rl.models.policy.lm_policy import Policy
-from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_rl.utils.logger import Logger, LoggerConfig
+from nemo_rl.utils.checkpoint import CheckpointManager
+from nemo_rl.utils.logger import Logger
 from nemo_rl.utils.nsys import maybe_gpu_profile_step
 from nemo_rl.utils.timer import TimeoutChecker, Timer
 
@@ -58,26 +65,6 @@ def _default_sft_save_state() -> SFTSaveState:
         "total_steps": 0,
         "consumed_samples": 0,
     }
-
-
-class SFTConfig(TypedDict):
-    max_num_steps: int
-    max_num_epochs: int
-    val_period: int
-    val_batches: int
-    val_global_batch_size: int
-    val_micro_batch_size: int
-    val_at_start: bool
-    seed: int
-
-
-class MasterConfig(TypedDict):
-    policy: PolicyConfig
-    data: DataConfig
-    sft: SFTConfig
-    logger: LoggerConfig
-    cluster: ClusterConfig
-    checkpointing: CheckpointingConfig
 
 
 # =======================================================
