@@ -305,7 +305,7 @@ class WandbLogger(LoggerInterface):
                 # TODO: Temporary fix for https://github.com/wandb/wandb/issues/10369
                 # Inject proper UTF-8 encoding header.
                 metrics[k] = wandb.Html(
-                    f"<head><meta charset=\"utf-8\"></head><body>{self.render_rollout_log(v)}</body>"
+                    f"<head><meta charset=\"utf-8\"><style>pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, Menlo, 'Liberation Mono', Consolas, monospace; font-size: 12px; margin: 0.25em 0; }} table {{ border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 4px; text-align: left; vertical-align: top; }} h2, h3 {{ margin: 8px 0 4px; }} p {{ margin: 4px 0; }}</style></head><body>{self.render_rollout_log(v)}</body>"
                 )
 
         # If step_metric is provided, use the corresponding value from metrics as step
@@ -380,12 +380,12 @@ class WandbLogger(LoggerInterface):
                 
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
-                    message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br />")
+                    message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;")
                                         
                     if message["role"] == "tool":
                         continue
                     
-                    content += f"<p><b>[{message['role']}]:</b> {message_fixed}</p>"
+                    content += f"<div><b>[{message['role']}]:</b><pre>{message_fixed}</pre></div>"
                 
                     tool_calls = message.get("tool_calls", [])
                     if len(tool_calls) > 0:
