@@ -760,49 +760,49 @@ class GRPOTrainer:
             else:
                 policy_generation.prepare_for_generation()
 
-            with timer.time("generation"):
-                if "vf" in self.master_config["env"]:
-                    # Use verifiers rollouts
-                    repeated_batch, rollout_metrics = run_vf_rollouts(
-                        policy_generation=policy_generation,
-                        input_batch=repeated_batch,
-                        tokenizer=self.tokenizer,
-                        vf_semaphore=self.master_config["env"]["vf"].get("generation_semaphore", None),
-                        max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
-                        max_new_tokens=self.master_config["policy"]["generation"]["max_new_tokens"],
-                        task_to_env=task_to_env,
-                        grpo_gids=repeated_batch["idx"],
-                        greedy=False,
-                    )
-                elif self._should_use_async_rollouts(self.master_config):
-                    # Use async rollouts if vLLM async engine is enabled
-                    (
-                        repeated_batch,
-                        rollout_metrics,
-                    ) = run_async_multi_turn_rollout(
-                        policy_generation=policy_generation,
-                        input_batch=repeated_batch,
-                        tokenizer=self.tokenizer,
-                        task_to_env=task_to_env,
-                        max_seq_len=self.master_config["policy"][
-                            "max_total_sequence_length"
-                        ],
-                        max_rollout_turns=max_rollout_turns,
-                        greedy=False,
-                    )
-                else:
-                    repeated_batch, rollout_metrics = run_multi_turn_rollout(
-                        policy_generation=policy_generation,
-                        input_batch=repeated_batch,
-                        tokenizer=self.tokenizer,
-                        task_to_env=task_to_env,
-                        max_seq_len=self.master_config["policy"][
-                            "max_total_sequence_length"
-                        ],
-                        max_rollout_turns=max_rollout_turns,
-                        greedy=False,
-                    )
-                policy_generation.finish_generation()
+        with timer.time("generation"):
+            if "vf" in self.master_config["env"]:
+                # Use verifiers rollouts
+                repeated_batch, rollout_metrics = run_vf_rollouts(
+                    policy_generation=policy_generation,
+                    input_batch=repeated_batch,
+                    tokenizer=self.tokenizer,
+                    vf_semaphore=self.master_config["env"]["vf"].get("generation_semaphore", None),
+                    max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
+                    max_new_tokens=self.master_config["policy"]["generation"]["max_new_tokens"],
+                    task_to_env=task_to_env,
+                    grpo_gids=repeated_batch["idx"],
+                    greedy=False,
+                )
+            elif self._should_use_async_rollouts(self.master_config):
+                # Use async rollouts if vLLM async engine is enabled
+                (
+                    repeated_batch,
+                    rollout_metrics,
+                ) = run_async_multi_turn_rollout(
+                    policy_generation=policy_generation,
+                    input_batch=repeated_batch,
+                    tokenizer=self.tokenizer,
+                    task_to_env=task_to_env,
+                    max_seq_len=self.master_config["policy"][
+                        "max_total_sequence_length"
+                    ],
+                    max_rollout_turns=max_rollout_turns,
+                    greedy=False,
+                )
+            else:
+                repeated_batch, rollout_metrics = run_multi_turn_rollout(
+                    policy_generation=policy_generation,
+                    input_batch=repeated_batch,
+                    tokenizer=self.tokenizer,
+                    task_to_env=task_to_env,
+                    max_seq_len=self.master_config["policy"][
+                        "max_total_sequence_length"
+                    ],
+                    max_rollout_turns=max_rollout_turns,
+                    greedy=False,
+                )
+            policy_generation.finish_generation()
 
         return repeated_batch, rollout_metrics, policy_generation_stale
 
