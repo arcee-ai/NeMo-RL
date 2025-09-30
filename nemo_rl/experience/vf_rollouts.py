@@ -149,16 +149,40 @@ def run_vf_rollouts(
         for i, completion in enumerate(rollouts.completion):
             assert isinstance(completion, list), "NeMo-RL currently only supports chat completions."
 
+            # Map back to original sample and task for this rollout
+            group_items = list(by_group.values())[g_i]
+            orig_idx = group_items[i][-1]
+            task_name = group_items[i][3]
+
+            # Ensure a place to store per-sample env metrics for logging
+            if "metrics" not in current_batch["extra_env_info"][orig_idx]:
+                current_batch["extra_env_info"][orig_idx]["metrics"] = {}
+
+            # Attach per-sample final reward (verifiers' weighted reward)
+            final_reward_key = f"{task_name}/final_reward"
+            final_reward_val = float(rollouts.reward[i])
+            current_batch["extra_env_info"][orig_idx]["metrics"][final_reward_key] = final_reward_val
+            env_metrics_sums[final_reward_key] = env_metrics_sums.get(final_reward_key, 0.0) + final_reward_val
+            env_metrics_counts[final_reward_key] = env_metrics_counts.get(final_reward_key, 0) + 1
+
+            # Attach per-sample metrics and aggregate group means
             for key, value in rollouts.metrics.items():
+                agg_key = f"{task_name}/{key}"
                 if isinstance(value, (int, float)):
-                    if key not in env_metrics_sums:
-                        env_metrics_sums[key] = 0.0
-                        env_metrics_counts[key] = 0
-                    env_metrics_sums[key] += value
-                    env_metrics_counts[key] += 1
+                    # Treat as a scalar metric for this group; attach to this sample and aggregate
+                    v = float(value)
+                    current_batch["extra_env_info"][orig_idx]["metrics"][agg_key] = v
+                    env_metrics_sums[agg_key] = env_metrics_sums.get(agg_key, 0.0) + v
+                    env_metrics_counts[agg_key] = env_metrics_counts.get(agg_key, 0) + 1
+                elif isinstance(value, list):
+                    # Typical verifiers output: list[float] per sample in group
+                    if i < len(value):
+                        v = float(value[i])
+                        current_batch["extra_env_info"][orig_idx]["metrics"][agg_key] = v
+                        env_metrics_sums[agg_key] = env_metrics_sums.get(agg_key, 0.0) + v
+                        env_metrics_counts[agg_key] = env_metrics_counts.get(agg_key, 0) + 1
 
             log = []
-            orig_idx = list(by_group.values())[g_i][i][-1]
             for msg in completion:
                 completion_ids = processed_outputs.completion_ids[i]
 
@@ -183,6 +207,8 @@ def run_vf_rollouts(
     current_batch["total_reward"] = torch.tensor(current_batch["total_reward"])
 
     env_metrics_means = {k: v / env_metrics_counts[k] for k, v in env_metrics_sums.items()}
+    # Also expose flattened top-level metrics for W&B charts, matching multi-turn path style
+    flattened_env_metrics = {f"env/{k}": v for k, v in env_metrics_means.items()}
 
     # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
     batch_size = len(current_batch["message_log"])
@@ -228,6 +254,9 @@ def run_vf_rollouts(
         "mean_env_tokens_per_sample": 0.0,
         "env_metrics": env_metrics_means,
     }
+
+    # Merge flattened env metrics to top-level for easy plotting in W&B
+    rollout_metrics.update(flattened_env_metrics)
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
         message_logs=current_batch["message_log"],
