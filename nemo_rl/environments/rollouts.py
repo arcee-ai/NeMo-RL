@@ -1,10 +1,12 @@
-from pydantic.v1 import NoneBytes
+from typing import Any
+
 import torch
 import ray
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.data.interfaces import DatumSpec
+from nemo_rl.data.llm_message_utils import get_keys_from_message_log
 from nemo_rl.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
-from nemo_rl.experience.rollouts import BatchedDataDict, DatumSpec, TokenizerType, LLMMessageLogType
 from nemo_rl.environments.interfaces import EnvironmentInterface
-from nemo_rl.experience.rollouts import build_rollouts_log
 
 import verifiers as vf
 
@@ -35,10 +37,42 @@ def split_rollouts_by_group(
         results_by_group[rollout[-1]].append(rollout + (i,))
     return results_by_group
 
+
+def build_rollouts_log(
+    message_logs: list[list[dict[str, Any]]],
+    grpo_group_ids: list[int],
+    total_rewards: list[float],
+    extra_env_infos: list[dict[str, Any]],
+    sample_metrics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Construct rich per-sample rollout logs for metrics dashboards."""
+
+    rollout_log: list[dict[str, Any]] = []
+    for i in range(len(message_logs)):
+        filtered_messages = get_keys_from_message_log(
+            message_logs[i], ["role", "content", "tool_calls", "tool_call_id"]
+        ).copy()
+
+        metrics = sample_metrics[i]
+        rollout_log.append(
+            {
+                "messages": filtered_messages,
+                "grpo_group_id": grpo_group_ids[i],
+                "total_reward": float(total_rewards[i]),
+                "terminated": bool(metrics.get("terminated", False)),
+                "truncated": bool(metrics.get("truncated", False)),
+                "total_tokens": int(metrics.get("total_tokens", 0)),
+                "assistant_tokens": int(metrics.get("assistant_tokens", 0)),
+                "env_tokens": int(metrics.get("env_tokens", 0)),
+                "env_metrics": extra_env_infos[i].get("metrics", {}),
+            }
+        )
+
+    return rollout_log
+
 def run_vf_rollouts(
     policy_generation: VllmHttpGeneration,
     input_batch: BatchedDataDict[DatumSpec],
-    tokenizer: TokenizerType,
     vf_semaphore: int | None,
     max_seq_len: int,
     max_new_tokens: int | None,
@@ -184,7 +218,7 @@ def run_vf_rollouts(
 
     env_metrics_means = {k: v / env_metrics_counts[k] for k, v in env_metrics_sums.items()}
 
-    # Compute per-sample metrics similar to rollouts.run_multi_turn_rollout
+    # Compute per-sample metrics to populate rollout logs
     batch_size = len(current_batch["message_log"])
 
     sample_assistant_tokens: list[int] = []
@@ -214,7 +248,7 @@ def run_vf_rollouts(
         for i in range(batch_size)
     ]
 
-    # Aggregate rollout metrics to mirror keys from run_multi_turn_rollout
+    # Aggregate rollout metrics to mirror legacy rollout logging keys
     denom = max(batch_size, 1)
     rollout_metrics = {
         "total_turns": batch_size,

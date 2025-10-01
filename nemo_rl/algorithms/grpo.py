@@ -49,13 +49,7 @@ from nemo_rl.data.llm_message_utils import (
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.environments.interfaces import (
-    EnvironmentInterface,
-)
-from nemo_rl.experience.rollouts import (
-    run_async_multi_turn_rollout,
-    run_multi_turn_rollout,
-)
+from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
@@ -72,7 +66,7 @@ from nemo_rl.utils.logger import (
 from nemo_rl.utils.nsys import maybe_gpu_profile_step
 from nemo_rl.utils.timer import TimeoutChecker, Timer
 
-from nemo_rl.experience.vf_rollouts import run_vf_rollouts
+from nemo_rl.environments.rollouts import run_vf_rollouts
 
 # ===============================================================================
 # Configuration
@@ -749,47 +743,24 @@ class GRPOTrainer:
                 policy_generation.prepare_for_generation()
 
         with timer.time("generation"):
-            if "vf" in self.master_config["env"]:
-                # Use verifiers rollouts
-                repeated_batch, rollout_metrics = run_vf_rollouts(
-                    policy_generation=policy_generation,
-                    input_batch=repeated_batch,
-                    tokenizer=self.tokenizer,
-                    vf_semaphore=self.master_config["env"]["vf"].get("generation_semaphore", None),
-                    max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
-                    max_new_tokens=self.master_config["policy"]["generation"]["max_new_tokens"],
-                    task_to_env=task_to_env,
-                    grpo_gids=repeated_batch["idx"],
-                    greedy=False,
+            if "vf" not in self.master_config.get("env", {}):
+                raise RuntimeError(
+                    "GRPOTrainer currently only supports verifiers environments."
                 )
-            elif self._should_use_async_rollouts(self.master_config):
-                # Use async rollouts if vLLM async engine is enabled
-                (
-                    repeated_batch,
-                    rollout_metrics,
-                ) = run_async_multi_turn_rollout(
-                    policy_generation=policy_generation,
-                    input_batch=repeated_batch,
-                    tokenizer=self.tokenizer,
-                    task_to_env=task_to_env,
-                    max_seq_len=self.master_config["policy"][
-                        "max_total_sequence_length"
-                    ],
-                    max_rollout_turns=max_rollout_turns,
-                    greedy=False,
-                )
-            else:
-                repeated_batch, rollout_metrics = run_multi_turn_rollout(
-                    policy_generation=policy_generation,
-                    input_batch=repeated_batch,
-                    tokenizer=self.tokenizer,
-                    task_to_env=task_to_env,
-                    max_seq_len=self.master_config["policy"][
-                        "max_total_sequence_length"
-                    ],
-                    max_rollout_turns=max_rollout_turns,
-                    greedy=False,
-                )
+
+            env_cfg = self.master_config["env"]["vf"]
+            generation_cfg = self.master_config["policy"]["generation"]
+
+            repeated_batch, rollout_metrics = run_vf_rollouts(
+                policy_generation=policy_generation,
+                input_batch=repeated_batch,
+                vf_semaphore=env_cfg.get("generation_semaphore"),
+                max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
+                max_new_tokens=generation_cfg.get("max_new_tokens"),
+                task_to_env=task_to_env,
+                grpo_gids=repeated_batch["idx"],
+                greedy=False,
+            )
             policy_generation.finish_generation()
 
         return repeated_batch, rollout_metrics, policy_generation_stale
@@ -1113,19 +1084,6 @@ class GRPOTrainer:
         logger.log_metrics(metrics, step + 1, prefix="train")
         logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
-    # ------------------------------------------------------------------
-    # Shared helpers
-    # ------------------------------------------------------------------
-    def _should_use_async_rollouts(self) -> bool:
-        generation_config = self.master_config["policy"].get("generation")
-        if generation_config is None:
-            return False
-        backend = generation_config.get("backend", "")
-        if backend not in ["vllm", "vllm_http"]:
-            return False
-        vllm_cfg = generation_config.get("vllm_cfg", {})
-        return vllm_cfg.get("async_engine", False)
-
     def _refit_policy_generation(
         self,
         policy: ColocatablePolicyInterface,
@@ -1197,6 +1155,11 @@ class GRPOTrainer:
             print("  ⚠️ No validation dataloader provided, skipping validation")
             return {}, {}
 
+        if "vf" not in self.master_config.get("env", {}):
+            raise RuntimeError(
+                "Validation currently only supports verifiers environments."
+            )
+
         timer = Timer()
         with timer.time("total_validation_time"):
             print(f"▶ Starting validation at step {step}...")
@@ -1213,37 +1176,26 @@ class GRPOTrainer:
                 if batch_idx >= max_batches:
                     break
 
-                if self._should_use_async_rollouts():
-                    (
-                        val_batch,
-                        gen_metrics,
-                    ) = run_async_multi_turn_rollout(
-                        policy_generation,
-                        val_batch,
-                        self.tokenizer,
-                        val_task_to_env,
-                        max_seq_len=self.master_config["policy"][
-                            "max_total_sequence_length"
-                        ],
-                        max_rollout_turns=self.master_config["grpo"].get(
-                            "max_rollout_turns", 999999
-                        ),
-                        greedy=False,
+                if val_task_to_env is None:
+                    raise RuntimeError(
+                        "Validation requires a verifiers environment mapping."
                     )
-                else:
-                    val_batch, gen_metrics = run_multi_turn_rollout(
-                        policy_generation,
-                        val_batch,
-                        self.tokenizer,
-                        val_task_to_env,
-                        max_seq_len=self.master_config["policy"][
-                            "max_total_sequence_length"
-                        ],
-                        max_rollout_turns=self.master_config["grpo"].get(
-                            "max_rollout_turns", 999999
-                        ),
-                        greedy=False,
-                    )
+
+                env_cfg = self.master_config["env"]["vf"]
+                generation_cfg = self.master_config["policy"]["generation"]
+
+                val_batch, gen_metrics = run_vf_rollouts(
+                    policy_generation=policy_generation,
+                    input_batch=val_batch,
+                    vf_semaphore=env_cfg.get("generation_semaphore"),
+                    max_seq_len=self.master_config["policy"][
+                        "max_total_sequence_length"
+                    ],
+                    max_new_tokens=generation_cfg.get("max_new_tokens"),
+                    task_to_env=val_task_to_env,
+                    grpo_gids=val_batch["idx"],
+                    greedy=False,
+                )
                 rewards = val_batch["total_reward"]
 
                 total_rewards.extend(rewards.tolist())
