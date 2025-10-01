@@ -31,7 +31,3 @@ class DataConfig(TypedDict):
     split: NotRequired[str]
     shuffle: NotRequired[bool]
 
-
-class MathDataConfig(DataConfig):
-    problem_key: str
-    solution_key: str

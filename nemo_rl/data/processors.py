@@ -24,57 +24,52 @@ from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType, TaskDataSpec
 TokenizerType = PreTrainedTokenizerBase
 
 
-# Example of a generic math data processor
-def math_data_processor(
+def hf_math_data_processor(
     datum_dict: dict[str, Any],
     task_data_spec: TaskDataSpec,
     tokenizer: TokenizerType,
     max_seq_length: int,
     idx: int,
 ) -> DatumSpec:
-    """Process a datum dictionary (directly loaded from dataset) into a DatumSpec for the Math Environment."""
-    problem = datum_dict["problem"]
-    solution = str(datum_dict["expected_answer"])
-    extra_env_info = {"ground_truth": solution}
+    """Process chat-formatted math samples into a DatumSpec.
 
-    message_log: LLMMessageLogType = []
+    This matches the behaviour of the legacy GRPO math script, keeping support for
+    datasets that provide `messages` with user and assistant turns.
+    """
 
-    # system prompt
-    if task_data_spec.system_prompt:
-        sys_prompt: dict[str, str | torch.Tensor] = {
-            "role": "system",
-            "content": task_data_spec.system_prompt,
-        }
-        sys = tokenizer.apply_chat_template(
-            [cast(dict[str, str], sys_prompt)],
-            tokenize=False,
-            add_generation_prompt=False,
-            add_special_tokens=False,
-        )
-        sys_prompt["token_ids"] = tokenizer(sys, return_tensors="pt")["input_ids"][0]
-        message_log.append(sys_prompt)
+    messages = datum_dict.get("messages", [])
+    if len(messages) < 2:
+        raise ValueError("Expected at least user and assistant messages in datum.")
 
-    # user prompt
-    if task_data_spec.prompt:
-        problem = task_data_spec.prompt.format(problem)
-    user_message = {"role": "user", "content": problem}
-    message = tokenizer.apply_chat_template(
+    user_problem = messages[0]["content"]
+    ground_truth = messages[1]["content"]
+
+    prompt_template = getattr(task_data_spec, "prompt", None)
+    if prompt_template:
+        user_problem = prompt_template.format(user_problem)
+
+    user_message = {"role": "user", "content": user_problem}
+    formatted_message = tokenizer.apply_chat_template(
         [user_message],
         tokenize=False,
         add_generation_prompt=True,
         add_special_tokens=False,
     )
-    user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
-    user_message["content"] = message
-    message_log.append(user_message)
 
+    user_message["token_ids"] = tokenizer(
+        formatted_message,
+        return_tensors="pt",
+        add_special_tokens=False,
+    )["input_ids"][0]
+    user_message["content"] = formatted_message
+
+    message_log: LLMMessageLogType = [user_message]
     length = sum(len(m["token_ids"]) for m in message_log)
 
     loss_multiplier = 1.0
     if length > max_seq_length:
-        # make smaller and mask out
-        for indiv_message in message_log:
-            indiv_message["token_ids"] = indiv_message["token_ids"][
+        for chat_message in message_log:
+            chat_message["token_ids"] = chat_message["token_ids"][
                 : min(4, max_seq_length // len(message_log))
             ]
         loss_multiplier = 0.0
@@ -82,7 +77,7 @@ def math_data_processor(
     output: DatumSpec = {
         "message_log": message_log,
         "length": length,
-        "extra_env_info": extra_env_info,
+        "extra_env_info": {"ground_truth": ground_truth},
         "loss_multiplier": loss_multiplier,
         "idx": idx,
     }

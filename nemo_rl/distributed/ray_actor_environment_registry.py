@@ -36,10 +36,6 @@ ACTOR_ENVIRONMENT_REGISTRY: dict[str, str] = {
     "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker": VLLM_EXECUTABLE,
     "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker": PY_EXECUTABLES.SYSTEM,
     "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker": MCORE_EXECUTABLE,
-    "nemo_rl.environments.math_environment.MathEnvironment": PY_EXECUTABLES.SYSTEM,
-    "nemo_rl.environments.code_environment.CodeEnvironment": PY_EXECUTABLES.SYSTEM,
-    "nemo_rl.environments.games.sliding_puzzle.SlidingPuzzleEnv": PY_EXECUTABLES.SYSTEM,
-    "nemo_rl.environments.tools.retriever.RAGEnvironment": PY_EXECUTABLES.SYSTEM,
     "nemo_rl.environments.vf_environment.VfEnvironment": PY_EXECUTABLES.SYSTEM,
 }
 
