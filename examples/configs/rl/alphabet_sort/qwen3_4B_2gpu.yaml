@@ -52,10 +52,6 @@ policy:
     activation_checkpointing: true
     tensor_parallel_size: 1
     custom_parallel_plan: null
-  
-  megatron_cfg:
-    enabled: false
-
   # See docs/design-docs/sequence-packing-and-dynamic-batching.md 
   # for more details on dynamic batching and sequence packing.
   dynamic_batching:

@@ -48,12 +48,8 @@ class VllmHttpWorkerExtension:
     ) -> None:
         """Prepare the info for refit.
 
-        DtensorPolicyWorker:
+        Dtensor-based policy workers:
             colocated inference: state_dict_info is None
-            non-colocated inference: state_dict_info is a dict of {tensor_name: (shape, dtype)}
-
-        MegatronPolicyWorker:
-            colocated inference: state_dict_info is a dict of {tensor_name: (shape, dtype, numel)}
             non-colocated inference: state_dict_info is a dict of {tensor_name: (shape, dtype)}
         """
         self.state_dict_info = state_dict_info  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__ so assignments like this should be ignored

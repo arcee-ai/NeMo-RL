@@ -283,9 +283,7 @@ class GRPOTrainer:
                 * cluster_config["num_nodes"],
                 use_gpus=True,
                 num_gpus_per_node=cluster_config["gpus_per_node"],
-                max_colocated_worker_groups=1
-                if generation_config["backend"] == "megatron"
-                else 2,
+                max_colocated_worker_groups=2,
             )
             print(
                 f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes"
@@ -297,11 +295,6 @@ class GRPOTrainer:
                 cluster_config["num_nodes"],
                 cluster_config["gpus_per_node"],
             )
-
-        assert generation_config["backend"] != "megatron", (
-            "Non-colocated inference is not supported for Megatron generation backends. "
-            "Please use vLLM backend for generation."
-        )
 
         train_gpus_per_node = cluster_config["gpus_per_node"]
         train_nodes = cluster_config["num_nodes"]
@@ -377,11 +370,6 @@ class GRPOTrainer:
         inference_cluster: RayVirtualCluster,
         policy_config: PolicyConfig,
     ) -> Optional[GenerationInterface]:
-        if backend == "megatron":
-            print(
-                f"  ✓ Using {backend} backend for generation with {policy_config['model_name']}"
-            )
-            return None
         if backend == "vllm":
             generation_config = cast(VllmConfig, generation_config)
             policy_generation = VllmGeneration(

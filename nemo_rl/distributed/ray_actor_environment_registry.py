@@ -23,9 +23,6 @@ VLLM_EXECUTABLE = (
 VLLM_HTTP_EXECUTABLE = (
     PY_EXECUTABLES.SYSTEM if USE_SYSTEM_EXECUTABLE else PY_EXECUTABLES.VLLM_HTTP
 )
-MCORE_EXECUTABLE = (
-    PY_EXECUTABLES.SYSTEM if USE_SYSTEM_EXECUTABLE else PY_EXECUTABLES.MCORE
-)
 
 ACTOR_ENVIRONMENT_REGISTRY: dict[str, str] = {
     "nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe": VLLM_HTTP_EXECUTABLE,
@@ -35,7 +32,6 @@ ACTOR_ENVIRONMENT_REGISTRY: dict[str, str] = {
     # This will be reverted to PY_EXECUTABLES.BASE once https://github.com/NVIDIA-NeMo/RL/issues/501 is resolved.
     "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker": VLLM_EXECUTABLE,
     "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker": PY_EXECUTABLES.SYSTEM,
-    "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker": MCORE_EXECUTABLE,
     "nemo_rl.environments.vf_environment.VfEnvironment": PY_EXECUTABLES.SYSTEM,
 }
 

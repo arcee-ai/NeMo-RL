@@ -17,7 +17,7 @@
 This script loads a HuggingFace model and analyzes the input and output embeddings
 to detect patterns that suggest the model may be untrained or improperly initialized.
 
-uv run --extra mcore 3.check_hf_model_embeddings_untrained.py --model nvidia/Nemotron-H-8B-Base-8K
+uv run tools/model_diagnostics/3.check_hf_model_embeddings_untrained.py --model nvidia/Nemotron-H-8B-Base-8K
 """
 
 import argparse
