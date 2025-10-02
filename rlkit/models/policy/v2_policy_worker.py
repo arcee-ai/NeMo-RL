@@ -18,7 +18,7 @@ import itertools
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Generator, Iterable, Optional, Set, Union, cast
+from typing import Any, Callable, Generator, Iterable, Optional, Set, Union, cast
 import logging
 
 import ray
@@ -43,8 +43,6 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
 )
-from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
-
 from rlkit.algorithms.interfaces import LossFunction, LossType
 from rlkit.algorithms.loss_functions import SequencePackingLossWrapper
 from rlkit.distributed.batched_data_dict import BatchedDataDict
@@ -81,6 +79,7 @@ from rlkit.utils.native_checkpoint import (
 from rlkit.utils.nsys import wrap_with_nvtx_name
 
 from rlkit.models.custom.convert import get_model_config
+from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
 
 
 @contextmanager
@@ -273,7 +272,7 @@ class DTensorV2PolicyWorker:
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
 
-        self.cpu_offload = self.cfg["dtensor_v2_cfg"]["cpu_offload"]
+        self.cpu_offload = self.cfg["dtensor_v2_cfg"].get("cpu_offload", False)
         self.max_grad_norm = self.cfg["max_grad_norm"]
 
         if self.cfg["precision"] == "float32":
@@ -310,41 +309,102 @@ class DTensorV2PolicyWorker:
         self._is_reward_model = self.cfg.get("reward_model_cfg", {}).get(
             "enabled", False
         )
-        if self._is_reward_model:
-            raise NotImplementedError("Reward models are not yet supported for DTensorV2")
-        
-        
-        # TODO: Make this not hardcoded to llama3
-        model_class, model_args, adapter_class, model_parallelize_function = get_model_config(model_config)
+        self.allow_custom_modeling_code = self.cfg["dtensor_v2_cfg"].get(
+            "allow_custom_modeling_code", True
+        )
 
-        self.adapter = adapter_class(model_args=model_args, hf_assets_path=model_name)
+        custom_model_setup: Optional[
+            tuple[
+                type[nn.Module],
+                Any,
+                type[BaseStateDictAdapter],
+                Callable,
+            ]
+        ] = None
+        if self.allow_custom_modeling_code and not self._is_reward_model:
+            try:
+                custom_model_setup = get_model_config(model_config)
+            except ValueError as exc:
+                logging.info(
+                    "Falling back to Hugging Face implementation for %s: %s",
+                    model_config.model_type,
+                    exc,
+                )
+
+        self.uses_custom_model = custom_model_setup is not None
+        self.adapter: Optional[BaseStateDictAdapter]
+        self.adapter = None
+        self._custom_parallelize_function: Optional[Callable] = None
+
+        if self.uses_custom_model and self.rank == 0:
+            logging.info(f"Using custom model implementation for {model_name}")
+        else:
+            logging.info(f"Using HuggingFace implementation for {model_name}")
 
         full_state_dict = None
-        if self.rank == 0:
-            print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="cpu",  # load weights onto CPU initially
-                trust_remote_code=True,
-                config=model_config,
+        if self.uses_custom_model:
+            custom_model_class, model_args, adapter_class, model_parallelize_function = (
+                custom_model_setup  # type: ignore[arg-type]
             )
-            hf_state_dict = model.state_dict()
-            full_state_dict = self.adapter.from_hf(hf_state_dict)
-            assert full_state_dict is not None, "Failed to convert HF state dict to TT state dict"
-            del model
-
-        print(f"[Rank {self.rank}] Initializing empty model for FSDP...")
-        # All ranks initialize model on meta device, so FSDP can shard it.
-        # The actual weights will be broadcast from rank 0.
-
-        with init_empty_weights():
-            self.model = model_class(
-                model_args=model_args
+            self.adapter = adapter_class(
+                model_args=model_args, hf_assets_path=model_name
             )
+            self._custom_parallelize_function = model_parallelize_function
 
-        # TODO: Find equivalent of this in TT-type model
-        # if self.model.config.pad_token_id is None:
-        #     self.model.config.pad_token_id = tokenizer.pad_token_id
+            if self.rank == 0:
+                print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map="cpu",  # load weights onto CPU initially
+                    trust_remote_code=True,
+                    config=model_config,
+                )
+                hf_state_dict = model.state_dict()
+                full_state_dict = self.adapter.from_hf(hf_state_dict)
+                assert (
+                    full_state_dict is not None
+                ), "Failed to convert HF state dict to custom state dict"
+                del model
+
+            print("Initializing custom model on meta device...")
+            with init_empty_weights():
+                self.model = custom_model_class(model_args=model_args)
+        else:
+            if self._is_reward_model:
+                rm_cfg = self.cfg.get("reward_model_cfg", {})
+                rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
+                if rm_type == "bradley_terry":
+                    model_class = AutoModelForSequenceClassification
+                    if model_config.num_labels != 1:
+                        print(
+                            "model_config.num_labels is not 1. Setting it to 1 for Bradley-Terry reward models."
+                        )
+                        model_config.num_labels = 1
+                else:
+                    raise ValueError(f"Unknown reward model type: {rm_type}")
+            else:
+                model_class = AutoModelForCausalLM
+
+            if self.rank == 0:
+                print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
+                model = model_class.from_pretrained(
+                    model_name,
+                    device_map="cpu",
+                    trust_remote_code=True,
+                    config=model_config,
+                )
+                full_state_dict = model.state_dict()
+                del model
+
+            print("Initializing Hugging Face model on meta device...")
+            with init_empty_weights():
+                self.model = model_class.from_config(
+                    model_config,
+                    trust_remote_code=True,
+                )
+
+            if getattr(getattr(self.model, "config", None), "pad_token_id", None) is None:
+                self.model.config.pad_token_id = tokenizer.pad_token_id
 
         # caching since this property is not always preserved after FSDP
         self.tokenizer = tokenizer
@@ -357,16 +417,20 @@ class DTensorV2PolicyWorker:
         self.cp_size = self.cfg["dtensor_v2_cfg"].get("context_parallel_size", 1)
         self.pp_size = self.cfg["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
         self.ep_size = self.cfg["dtensor_v2_cfg"].get("expert_parallel_size", 1)
-        
+
         if self.ep_size > 1 and not hasattr(torch, "_grouped_mm"):
-            raise RuntimeError("Expert parallelism is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")
-        
+            raise RuntimeError(
+                "Expert parallelism is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information."
+            )
+
         if self.cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
                 "Context parallel is not supported for sequence packing. Refer to https://github.com/NVIDIA/RLKit/blob/main/docs/model-quirks.md#context-parallel-with-fsdp2 for more details."
             )
-        sequence_parallel_enabled = self.cfg["dtensor_v2_cfg"]["sequence_parallel"]
-        
+        sequence_parallel_enabled = self.cfg["dtensor_v2_cfg"].get(
+            "sequence_parallel", False
+        )
+
         if sequence_parallel_enabled and self.tp_size == 1:
             print(
                 "[WARNING]: sequence_parallel=True, but tp_size=1 which has no effect. Enable tp_size > 1 to use sequence parallelism."
@@ -378,10 +442,12 @@ class DTensorV2PolicyWorker:
                 "Please either set cp_size = 1 or disable sequence parallel. "
                 "See https://github.com/NVIDIA-NeMo/RL/issues/659 for more details."
             )
-        
+
         if self.ep_size > 1:
-            assert self.ep_size % self.cp_size == 0, "Expert parallel size must be divisible by context parallel size"
-        
+            assert (
+                self.ep_size % self.cp_size == 0
+            ), "Expert parallel size must be divisible by context parallel size"
+
         mesh_info = get_device_mesh_info(
             world_size,
             self.tp_size,
@@ -390,10 +456,10 @@ class DTensorV2PolicyWorker:
             self.pp_size,
             always_include_all=True,
         )
-        
+
         mesh_shape = mesh_info["mesh_shape"]
         mesh_dim_names = mesh_info["mesh_dim_names"]
-        
+
         dp_names = mesh_info["dp_names"]
         dp_shard_cp_names = mesh_info["dp_shard_cp_names"]
         dp_cp_names = mesh_info["dp_cp_names"]
@@ -402,12 +468,16 @@ class DTensorV2PolicyWorker:
         device_mesh = torch.distributed.device_mesh.init_device_mesh(
             "cuda",
             mesh_shape,
-            mesh_dim_names=mesh_dim_names
+            mesh_dim_names=mesh_dim_names,
         )
-        
+
         self.dp_mesh = device_mesh[list(dp_names)]._flatten(mesh_dim_name="dp")
-        self.dp_shard_cp_mesh = device_mesh[list(dp_shard_cp_names)]._flatten(mesh_dim_name="dp_shard_cp")
-        self.dp_cp_mesh = device_mesh[list(dp_cp_names)]._flatten(mesh_dim_name="dp_cp")
+        self.dp_shard_cp_mesh = device_mesh[list(dp_shard_cp_names)]._flatten(
+            mesh_dim_name="dp_shard_cp"
+        )
+        self.dp_cp_mesh = device_mesh[list(dp_cp_names)]._flatten(
+            mesh_dim_name="dp_cp"
+        )
         if self.ep_size != 1:
             self.ep_mesh = device_mesh[list(ep_names)]._flatten(mesh_dim_name="ep")
         else:
@@ -425,50 +495,51 @@ class DTensorV2PolicyWorker:
         self.dp_size = self.dp_mesh.size()
         self.device_mesh = device_mesh
 
-        self.model = model_parallelize_function(
-            self.model,
-            self.device_mesh,
-            self.dp_mesh,
-            self.tp_mesh,
-            self.ep_mesh,
-            self.pp_mesh,
-            self.cp_mesh,
-            param_dtype=self.dtype,
-            sequence_parallel=sequence_parallel_enabled,
-            cpu_offload=self.cpu_offload,
-            activation_checkpointing=self.cfg["dtensor_v2_cfg"][
-                "activation_checkpointing"
-            ]
+        activation_checkpointing = self.cfg["dtensor_v2_cfg"].get(
+            "activation_checkpointing", False
         )
+        if self.uses_custom_model:
+            self.model = self._custom_parallelize_function(  # type: ignore[operator]
+                self.model,
+                self.device_mesh,
+                self.dp_mesh,
+                self.tp_mesh,
+                self.ep_mesh,
+                self.pp_mesh,
+                self.cp_mesh,
+                param_dtype=self.dtype,
+                sequence_parallel=sequence_parallel_enabled,
+                cpu_offload=self.cpu_offload,
+                activation_checkpointing=activation_checkpointing,
+            )
+        else:
+            self.model = _parallelize_model(
+                self.model,
+                self.dp_cp_mesh,
+                self.tp_mesh,
+                param_dtype=self.dtype,
+                sequence_parallel=sequence_parallel_enabled,
+                cpu_offload=self.cpu_offload,
+                activation_checkpointing=activation_checkpointing,
+                custom_parallel_plan=self.cfg["dtensor_v2_cfg"].get(
+                    "custom_parallel_plan"
+                ),
+            )
 
         print(f"[Rank {self.rank}] Loading state dict from rank 0...")
         # This will broadcast the state dict from rank 0 to all other ranks
         # and load it into the FSDP model.
         set_model_state_dict(
             self.model,
-            model_state_dict=full_state_dict, # type: ignore
+            model_state_dict=full_state_dict,  # type: ignore[arg-type]
             options=StateDictOptions(
                 full_state_dict=True,
                 broadcast_from_rank0=True,
             ),
         )
 
-        # Handle tied word embeddings after loading the state dict
-        # We need to actually tie the parameters at the model level
-        
-        # TODO: I am 90% sure this is unnecessary for TT-type models, but double-check.
-        # is_tied_lm_head = hasattr(self.model, "lm_head") and getattr(
-        #     getattr(self.model, "config", {}), "tie_word_embeddings", False
-        # )
-        # if is_tied_lm_head:
-        #     embed_tokens_weight = None
-        #     for name, param in self.model.named_parameters():
-        #         if "embed_tokens" in name and name.endswith(".weight"):
-        #             embed_tokens_weight = param
-        #             break
-
-        #     if embed_tokens_weight is not None:
-        #         self.model.lm_head.weight = embed_tokens_weight
+        if not self.uses_custom_model:
+            self._tie_word_embeddings_if_needed()
 
         if self.cpu_offload:
             self.model = self.move_to_device(self.model, "cpu")
@@ -536,6 +607,61 @@ class DTensorV2PolicyWorker:
             None
         )
         self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
+
+    def _tie_word_embeddings_if_needed(self) -> None:
+        if not hasattr(self.model, "lm_head"):
+            return
+        config = getattr(self.model, "config", None)
+        if config is None or not getattr(config, "tie_word_embeddings", False):
+            return
+
+        embed_tokens_weight = None
+        for name, param in self.model.named_parameters():
+            if "embed_tokens" in name and name.endswith(".weight"):
+                embed_tokens_weight = param
+                break
+
+        if embed_tokens_weight is not None:
+            self.model.lm_head.weight = embed_tokens_weight
+
+    def _build_forward_kwargs(
+        self,
+        *,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        position_ids: Optional[torch.Tensor],
+        flash_attn_kwargs: Optional[Any],
+        use_cache: bool,
+    ) -> dict[str, Any]:
+        if self.uses_custom_model:
+            return {"tokens": input_ids}
+
+        kwargs: dict[str, Any] = {
+            "input_ids": input_ids,
+            "use_cache": use_cache,
+        }
+        if attention_mask is not None:
+            kwargs["attention_mask"] = attention_mask
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+        if flash_attn_kwargs and not self._is_reward_model:
+            kwargs["flash_attn_kwargs"] = flash_attn_kwargs
+        return kwargs
+
+    def _compute_model_logits(self, model_kwargs: dict[str, Any]) -> torch.Tensor:
+        outputs = self.model(**model_kwargs)
+        if self.uses_custom_model:
+            return outputs
+
+        if hasattr(outputs, "logits"):
+            return outputs.logits
+        return self.model.lm_head(outputs.last_hidden_state)
+
+    def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
+        state_dict = self.model.state_dict()
+        if self.adapter is not None:
+            return self.adapter.to_hf(state_dict)
+        return state_dict
 
     # Refer to nemo impl. Below is original comment.
     # based on https://github.com/pytorch/torchtitan/blob/main/torchtitan/distributed/utils.py#L113
@@ -797,16 +923,15 @@ class DTensorV2PolicyWorker:
 
                     with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                         with torch.autocast(device_type="cuda", dtype=self.dtype):
-                            # TODO: support these other args
-                            model_args = dict(
-                                tokens=input_ids,
-                                # attention_mask=attention_mask,
-                                # position_ids=position_ids,
-                                # use_cache=False,
-                                # flash_attn_kwargs=flash_attn_kwargs,
+                            model_args = self._build_forward_kwargs(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask,
+                                position_ids=position_ids,
+                                flash_attn_kwargs=flash_attn_kwargs,
+                                use_cache=False,
                             )
 
-                            logits = self.model(**model_args)
+                            logits = self._compute_model_logits(model_args)
 
                         # Apply temperature scaling
                         logits = self._apply_temperature_scaling(logits)
@@ -1085,14 +1210,14 @@ class DTensorV2PolicyWorker:
 
                 with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
-                        # TODO: support these other args
-                        logits = self.model(
-                            input_ids,
-                            # attention_mask=attention_mask_input_all_ones,
-                            # position_ids=position_ids,
-                            # use_cache=False,
-                            # flash_attn_kwargs=flash_attn_kwargs,
+                        model_args = self._build_forward_kwargs(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask_input_all_ones,
+                            position_ids=position_ids,
+                            flash_attn_kwargs=flash_attn_kwargs,
+                            use_cache=False,
                         )
+                        logits = self._compute_model_logits(model_args)
 
                     # Apply temperature scaling
                     logits = self._apply_temperature_scaling(logits)
@@ -1311,35 +1436,79 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
-        tt_state_dict = self.model.state_dict()
-        # Convert to HF for refit
-        hf_state_dict = self.adapter.to_hf(tt_state_dict)
+        state_dict_for_refit = self._export_state_dict()
 
         if self.is_generation_colocated:
             # Collect info for streaming multiple tensors
             self.refit_param_info = []
-            for name, tensor in hf_state_dict.items():
-                print(f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}")
+            for name, tensor in state_dict_for_refit.items():
+                print(
+                    f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}"
+                )
                 # dtensor's numel will return complete tensor instead of only local tensor
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
-
         else:
             # Collect info for collective communication
             state_dict_info = {}
-            for name, tensor in hf_state_dict.items():
+            for name, tensor in state_dict_for_refit.items():
                 state_dict_info[name] = (tensor.shape, self.dtype)
 
             return state_dict_info
 
     @torch.no_grad()
     def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
-        raise NotImplementedError("Not implemented for DTensorV2")
+        from rlkit.utils.nvml import get_free_memory_bytes
+
+        if self.cpu_offload:
+            self.model = self.move_to_cuda(self.model)
+
+        export_state_dict = self._export_state_dict()
+        self._held_sharded_state_dict_reference = export_state_dict
+
+        if self.refit_param_info is None:
+            self.refit_param_info = []
+            for name, tensor in export_state_dict.items():
+                size_in_bytes = tensor.element_size() * tensor.numel()
+                self.refit_param_info.append((name, size_in_bytes))
+
+        device_idx = torch.cuda.current_device()
+        total_available_bytes = get_free_memory_bytes(device_idx)
+        memory_ratio = os.getenv("RLKIT_REFIT_BUFFER_MEMORY_RATIO", "0.8")
+        total_available_bytes *= float(memory_ratio)
+
+        return self.refit_param_info, total_available_bytes
 
     @torch.no_grad()
     @wrap_with_nvtx_name("dtensor_policy_worker/get_weights_ipc_handles")
     def get_weights_ipc_handles(self, keys: Iterable[str]) -> dict[str, Any]:
-        raise NotImplementedError("Not implemented for DTensorV2")
+        assert self._held_sharded_state_dict_reference is not None, (
+            "prepare_weights_for_ipc must be called before get_weights_ipc_handles"
+        )
+
+        if self._held_streamed_param_reference is not None:
+            del self._held_streamed_param_reference
+            self._held_streamed_param_reference = None
+
+        converted_params: dict[str, torch.Tensor] = {}
+        for key in keys:
+            tensor = self._held_sharded_state_dict_reference[key]
+            if isinstance(tensor, DTensor):
+                full_tensor = tensor.full_tensor()
+            else:
+                full_tensor = tensor
+            converted_params[key] = full_tensor.to(self.dtype, non_blocking=True)
+
+        self._held_streamed_param_reference = converted_params
+
+        device_uuid = self.report_device_id()
+        all_handles = []
+        for key, param in converted_params.items():
+            handle = get_handle_from_tensor(param)
+            all_handles.append((key, handle))
+
+        serialized = (False, all_handles)
+        return {device_uuid: serialized}
 
     @torch.no_grad()
     def broadcast_weights_for_collective(self) -> None:
@@ -1351,12 +1520,10 @@ class DTensorV2PolicyWorker:
                 "using non-colocated generation since it will have an extra onload and offload at refit stage."
             )
             self.model = self.move_to_cuda(self.model)
-        
-        tt_state_dict = self.model.state_dict()
 
         # Broadcast the weights for collective communication
-        hf_state_dict = self.adapter.to_hf(tt_state_dict)
-        for name, tensor in hf_state_dict.items():
+        export_state_dict = self._export_state_dict()
+        for name, tensor in export_state_dict.items():
             if isinstance(tensor, DTensor):
                 tensor = tensor.full_tensor()
             if self.rank == 0:

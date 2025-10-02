@@ -31,7 +31,7 @@ ACTOR_ENVIRONMENT_REGISTRY: dict[str, str] = {
     # Temporary workaround for the coupled implementation of DTensorPolicyWorker and vLLM.
     # This will be reverted to PY_EXECUTABLES.BASE once https://github.com/NVIDIA-NeMo/RL/issues/501 is resolved.
     "rlkit.models.policy.dtensor_policy_worker.DTensorPolicyWorker": VLLM_EXECUTABLE,
-    "rlkit.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker": PY_EXECUTABLES.SYSTEM,
+    "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker": PY_EXECUTABLES.SYSTEM,
     "rlkit.environments.vf_environment.VfEnvironment": PY_EXECUTABLES.SYSTEM,
 }
 
