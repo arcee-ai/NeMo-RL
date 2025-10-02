@@ -19,7 +19,7 @@ import pytest
 import torch
 import yaml
 
-from nemo_rl.utils.checkpoint import CheckpointManager
+from rlkit.utils.checkpoint import CheckpointManager
 
 
 @pytest.fixture

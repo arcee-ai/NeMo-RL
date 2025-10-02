@@ -13,7 +13,7 @@
 # limitations under the License.
 import torch
 
-from nemo_rl.distributed.collectives import (
+from rlkit.distributed.collectives import (
     gather_jagged_object_lists,
     rebalance_nd_tensor,
 )

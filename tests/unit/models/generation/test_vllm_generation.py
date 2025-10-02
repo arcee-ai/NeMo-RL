@@ -18,15 +18,15 @@ import pytest
 import ray
 import torch
 
-from nemo_rl.algorithms.grpo import refit_policy_generation
-from nemo_rl.algorithms.loss_functions import NLLLoss
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.models.generation import configure_generation_config
-from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
-from nemo_rl.config import PolicyConfig
-from nemo_rl.models.policy.lm_policy import Policy
+from rlkit.algorithms.grpo import refit_policy_generation
+from rlkit.algorithms.loss_functions import NLLLoss
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.distributed.virtual_cluster import RayVirtualCluster
+from rlkit.models.generation import configure_generation_config
+from rlkit.models.generation.vllm import VllmConfig, VllmGeneration
+from rlkit.config import PolicyConfig
+from rlkit.models.policy.lm_policy import Policy
 
 model_name = "Qwen/Qwen3-0.6B"
 # Define basic vLLM test config
@@ -318,7 +318,7 @@ async def test_vllm_policy_generation_async(
         vllm_config["vllm_cfg"]["tensor_parallel_size"] = tensor_parallel_size
         vllm_config["vllm_cfg"]["pipeline_parallel_size"] = pipeline_parallel_size
         dtensor_config = basic_dtensor_test_config
-        from nemo_rl.models.policy.lm_policy import Policy
+        from rlkit.models.policy.lm_policy import Policy
 
         print("creating vllm policy...")
         async_policy = VllmGeneration(cluster, vllm_config)
@@ -386,7 +386,7 @@ def test_vllm_worker_seed_behavior(cluster, tokenizer):
     1. Different workers generate different outputs for identical prompts due to different seeds
     2. When forced to use the same seed, workers generate identical outputs
     """
-    from nemo_rl.models.generation.vllm import VllmGenerationWorker
+    from rlkit.models.generation.vllm import VllmGenerationWorker
 
     unique_prompts = [
         "Hello, my name is",
@@ -424,7 +424,7 @@ def test_vllm_worker_seed_behavior(cluster, tokenizer):
     policy = VllmGeneration(cluster, vllm_config)
     policy.finish_generation()
 
-    from nemo_rl.models.policy.lm_policy import Policy
+    from rlkit.models.policy.lm_policy import Policy
 
     dtensor_config = basic_dtensor_test_config
     lm_policy = Policy(cluster, dtensor_config, tokenizer)
@@ -869,7 +869,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
     cluster, tokenizer, tensor_parallel_size
 ):
     """Test that the vLLM prefix cache is correctly reset when weights change."""
-    from nemo_rl.models.policy.lm_policy import Policy
+    from rlkit.models.policy.lm_policy import Policy
 
     # Create configs
     vllm_config = deepcopy(basic_vllm_test_config)
@@ -972,7 +972,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
 
 def test_vllm_weight_update_memory(cluster, tokenizer):
     """Test that vLLM streaming weight update and can save memory."""
-    from nemo_rl.models.policy.lm_policy import Policy
+    from rlkit.models.policy.lm_policy import Policy
 
     if cluster.num_gpus_per_node < 2:
         pytest.skip("Need at least 2 GPUs per node for this test")
@@ -1040,7 +1040,7 @@ def test_vllm_weight_update_memory(cluster, tokenizer):
 @pytest.mark.parametrize("is_eval", [True, False])
 def test_vllm_generation_with_stop(cluster, test_input_data, tokenizer, is_eval):
     """Test vLLM generation with stop."""
-    from nemo_rl.models.policy.lm_policy import Policy
+    from rlkit.models.policy.lm_policy import Policy
 
     # Create separate configs for each policy
     vllm_config = deepcopy(basic_vllm_test_config)

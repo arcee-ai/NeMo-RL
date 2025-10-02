@@ -18,7 +18,7 @@ import tempfile
 
 import pytest
 
-from nemo_rl.data.hf_datasets.dpo import DPODataset
+from rlkit.data.hf_datasets.dpo import DPODataset
 
 
 @pytest.fixture

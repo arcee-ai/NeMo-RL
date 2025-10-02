@@ -14,13 +14,13 @@
 import pytest
 import torch
 
-from nemo_rl.algorithms.loss_functions import (
+from rlkit.algorithms.loss_functions import (
     ClippedPGLossFn,
     DPOLossFn,
     NLLLoss,
 )
-from nemo_rl.algorithms.utils import masked_mean
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from rlkit.algorithms.utils import masked_mean
+from rlkit.distributed.batched_data_dict import BatchedDataDict
 
 
 def setup_dpo_loss_test_data(vocab_size=16, batch_size=1):

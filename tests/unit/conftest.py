@@ -26,7 +26,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from nemo_rl.distributed.virtual_cluster import init_ray
+from rlkit.distributed.virtual_cluster import init_ray
 
 dir_path = os.path.dirname(os.path.abspath(__file__))
 
@@ -117,7 +117,7 @@ def _unit_test_data(request):
         start_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         metrics={},
         gpu_types=[],
-        coverage="[n/a] run with --cov=nemo_rl",
+        coverage="[n/a] run with --cov=rlkit",
     )
     session.config._unit_test_data = unit_test_data
     return unit_test_data
@@ -144,7 +144,7 @@ def session_data(request, init_ray_cluster, _unit_test_data):
     ############################################################
     # 2. Gather the ray metadata #
     ############################################################
-    from nemo_rl.utils.logger import RayGpuMonitorLogger
+    from rlkit.utils.logger import RayGpuMonitorLogger
 
     logger = RayGpuMonitorLogger(
         collection_interval=float("inf"),
@@ -254,7 +254,7 @@ def ray_gpu_monitor(init_ray_cluster):
 
     This fixture doesn't need to be called directly.
     """
-    from nemo_rl.utils.logger import RayGpuMonitorLogger
+    from rlkit.utils.logger import RayGpuMonitorLogger
 
     gpu_monitor = RayGpuMonitorLogger(
         collection_interval=1,

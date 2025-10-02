@@ -14,7 +14,7 @@
 import pytest
 from transformers import AutoTokenizer
 
-from nemo_rl.data.hf_datasets.squad import SquadDataset
+from rlkit.data.hf_datasets.squad import SquadDataset
 
 
 @pytest.mark.hf_gated
