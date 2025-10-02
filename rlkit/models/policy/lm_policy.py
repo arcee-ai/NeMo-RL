@@ -48,7 +48,7 @@ from rlkit.utils.flops_tracker import (
     get_default_hf_config,
     get_theoretical_tflops,
 )
-from rlkit.models.policy.dtensor_v2.v2_policy_worker import get_device_mesh_info
+from rlkit.models.policy.v2_policy_worker import get_device_mesh_info
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
@@ -82,7 +82,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         if dtv2_enable:
             worker_builder_cls = (
-                "rlkit.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker"
+                "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker"
             )
             tp_size = config["dtensor_v2_cfg"].get("tensor_parallel_size", 1)
             cp_size = config["dtensor_v2_cfg"].get("context_parallel_size", 1)
