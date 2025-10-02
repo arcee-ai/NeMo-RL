@@ -54,12 +54,6 @@ class PY_EXECUTABLES:
     # For the newer vllm_http backend, we use the latest vllm
     VLLM_HTTP = "uv run --locked --extra vllm_http"
 
-    # Megatron-core (and nemo dependencies)
-    # We always run with --reinstall to avoid issues where someone runs "uv run ... --extra mcore ..."
-    # but the submodules are not downloaded yet. This results in errors where it appears Megatron/Nemo
-    # aren't installed. Simple workaround is to always run the mcore py_executable with --reinstall.
-    MCORE = "uv run --reinstall --extra mcore"
-
 
 @ray.remote  # pragma: no cover
 def _get_node_ip_and_free_port() -> tuple[str, int]:

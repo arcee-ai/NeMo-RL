@@ -11,78 +11,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import abc
-from typing import Generic, NamedTuple, TypeVar
+from __future__ import annotations
 
-from torch import Tensor
-
-from nemo_rl.data.interfaces import LLMMessageLogType
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-
-# Type variable for environment-specific metadata
-MetadataT = TypeVar("MetadataT")
+from typing import Any, Protocol, runtime_checkable
 
 
-class EnvironmentReturn(NamedTuple, Generic[MetadataT]):
-    """Standard batched return type for environment step methods.
+@runtime_checkable
+class EnvironmentInterface(Protocol):
+    """Minimal protocol for environments supported by the verifiers rollout system.
 
-    **All elements are batched.**
-    observations: New observation from the environment.
-                  It's a (batched) 'message' type, which is a dict
-                  with keys 'role' and 'content'.
-    metadata: Updated metadata from the environment.
-    next_stop_strings: The stop strings for the next turn.
-                       If your environment is a game or similar,
-                       you may want to return a list of stop strings
-                       that are valid actions for the next turn or
-                       similar. This field lets you control this per turn.
-    rewards: the rewards for this turn.
-    terminateds: whether the episode ended this turn.
-    answers: the answers for this turn.
+    The verifiers shim only exposes an async ``a_generate`` entry-point that mirrors
+    the public ``verifiers`` API. Legacy step-based rollouts are no longer
+    supported, so the interface is intentionally narrow.
     """
 
-    observations: list[dict[str, str]]
-    metadata: list[MetadataT]
-    next_stop_strings: list[list[str] | None] | list[None]
-    rewards: Tensor
-    terminateds: Tensor
-    answers: list[str | None] | None
-
-
-class EnvironmentInterface(abc.ABC, Generic[MetadataT]):
-    @abc.abstractmethod
-    def step(
+    async def a_generate(
         self,
-        message_log_batch: list[LLMMessageLogType],
-        metadata: list[MetadataT],
-    ) -> EnvironmentReturn[MetadataT]:
-        """Runs a step in the environment. Allows for asynchrony with remote servers, but it's not required (this function is a ray remote).
-
-        message_log_batch: batch of OpenAI-API-like message logs that represent interactions with the LLM.
-                  Each element is a list[dict[str, Union[str, torch.Tensor]]].
-                  For example, if this were a Math Environment, then the message log
-                  would be
-                  [
-                    {"role": "user", "content": "problem"},
-                    {"role": "assistant", "content": "response"},
-                  ]
-                  but if this were a code environment
-                  with feedback, it would be:
-                  [
-                    {"role": "user", "content": "problem"},
-                    {"role": "assistant", "content": "response"},
-                    {"role": "user", "content": "code result"},
-                    {"role": "assistant", "content": "model response"},
-                  ]
-        metadata:     batch of whatever the environment needs to keep track of. I.e.
-                      math solutions, code unit tests, or agent states. Can be None if episode terminated.
-
-        Returns:
-        - EnvironmentReturn NamedTuple containing observations, metadata, next_stop_strings, rewards, and terminateds flags.
-        """
-
-    @abc.abstractmethod
-    def global_post_process_and_metrics(
-        self, batch: BatchedDataDict
-    ) -> tuple[BatchedDataDict, dict]:
-        """Post processing function after all rollouts are done for the batch and returns metrics."""
+        inputs: Any,
+        sampling_args: dict[str, Any] | None = None,
+        score_rollouts: bool = True,
+        max_concurrent: int = -1,
+        **kwargs: Any,
+    ) -> Any:
+        ...

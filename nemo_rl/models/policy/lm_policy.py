@@ -75,20 +75,12 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         tp_size = 1
         pp_size = 1
         cp_size = 1
-        
+
         dtv2_enable = config.get("dtensor_v2_cfg", {}).get("enabled", False)
+        dtensor_cfg = config.get("dtensor_cfg", {}) or {}
+        dtensor_enable = dtensor_cfg.get("enabled", False)
 
-        megatron_enable = config.get("megatron_cfg", {}).get("enabled", False)
-        if megatron_enable:
-            worker_builder_cls = (
-                "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker"
-            )
-            tp_size = config["megatron_cfg"]["tensor_model_parallel_size"]
-            pp_size = config["megatron_cfg"]["pipeline_model_parallel_size"]
-            cp_size = config["megatron_cfg"]["context_parallel_size"]
-
-            env_vars = config["megatron_cfg"].get("env_vars", {})
-        elif dtv2_enable:
+        if dtv2_enable:
             worker_builder_cls = (
                 "nemo_rl.models.policy.dtensor_v2.v2_policy_worker.DTensorV2PolicyWorker"
             )
@@ -98,18 +90,16 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             ep_size = config["dtensor_v2_cfg"].get("expert_parallel_size", 1)
             env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
         else:
-            assert config["dtensor_cfg"]["enabled"], (
-                "Please either set policy.megatron_cfg.enabled=true to use Megatron training backend, ",
-                "set policy.dtensor_cfg.enabled=true to use DTensor training backend, ",
-                "or set policy.torchtitan_cfg.enabled=true to use TorchTitan training backend.",
+            assert dtensor_enable, (
+                "Please set policy.dtensor_cfg.enabled=true to use the DTensor training backend "
+                "or set policy.torchtitan_cfg.enabled=true to use the TorchTitan backend."
             )
             worker_builder_cls = (
                 "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
             )
-            tp_size = config["dtensor_cfg"]["tensor_parallel_size"]
-            cp_size = config["dtensor_cfg"]["context_parallel_size"]
-
-            env_vars = config["dtensor_cfg"].get("env_vars", {})
+            tp_size = dtensor_cfg.get("tensor_parallel_size", 1)
+            cp_size = dtensor_cfg.get("context_parallel_size", 1)
+            env_vars = dtensor_cfg.get("env_vars", {})
 
         if dtv2_enable:
             dp_size = cluster.world_size() // (tp_size * cp_size * pp_size * ep_size)

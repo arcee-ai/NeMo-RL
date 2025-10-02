@@ -2,7 +2,6 @@ from typing import Any, Union, TypedDict, NotRequired
 
 from .dtv1 import DTensorConfig
 from .dtv2 import DTensorV2Config
-from .megatron import MegatronConfig
 
 class TokenizerConfig(TypedDict):
     name: str
@@ -80,7 +79,6 @@ class PolicyConfig(TypedDict):
     generation_batch_size: NotRequired[int | None]
     reward_model_cfg: NotRequired[RewardModelConfig | None]
     dtensor_cfg: NotRequired[DTensorConfig | None]
-    megatron_cfg: NotRequired[MegatronConfig | None]
     dtensor_v2_cfg: NotRequired[DTensorV2Config | None]
     sequence_packing: NotRequired[SequencePackingConfig | None]
     max_grad_norm: NotRequired[Union[float, int, None]]

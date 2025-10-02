@@ -39,18 +39,11 @@ def pytest_addoption(parser):
         default=False,
         help="Include tests that require HuggingFace token access",
     )
-    parser.addoption(
-        "--mcore-only",
-        action="store_true",
-        default=False,
-        help="Run ONLY mcore tests (combine with --hf-gated to include mcore+hf_gated tests)",
-    )
 
 
 def pytest_collection_modifyitems(config, items):
     """Modify test collection to skip tests based on markers unless explicitly requested."""
     run_hf_gated = config.getoption("--hf-gated")
-    run_mcore_only = config.getoption("--mcore-only")
     marker_expr = config.getoption("-m", default="")
 
     # If user specified -m marker expressions, let pytest handle everything normally
@@ -60,27 +53,11 @@ def pytest_collection_modifyitems(config, items):
     # Filter tests based on the desired configurations
     new_items = []
 
-    if run_mcore_only and run_hf_gated:
-        # Configuration 4: Only mcore tests, including ones with hf_gated
-        new_items = [item for item in items if item.get_closest_marker("mcore")]
-    elif run_mcore_only:
-        # Configuration 3: Only mcore tests, excluding ones with hf_gated
-        new_items = [
-            item
-            for item in items
-            if item.get_closest_marker("mcore")
-            and not item.get_closest_marker("hf_gated")
-        ]
-    elif run_hf_gated:
-        # Configuration 2: Default tests + hf_gated tests, excluding mcore
-        new_items = [item for item in items if not item.get_closest_marker("mcore")]
+    if run_hf_gated:
+        new_items = list(items)
     else:
-        # Configuration 1: Default only - exclude both hf_gated and mcore
         new_items = [
-            item
-            for item in items
-            if not item.get_closest_marker("hf_gated")
-            and not item.get_closest_marker("mcore")
+            item for item in items if not item.get_closest_marker("hf_gated")
         ]
 
     # Update the items list in-place
