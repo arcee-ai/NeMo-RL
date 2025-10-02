@@ -5,13 +5,13 @@ import json
 import os
 import torch
 import torch.nn.functional as F
-from nemo_rl.models.custom.qwen3.model import Qwen3Model
-from nemo_rl.models.custom.qwen3.args import Qwen3ModelArgs
-from nemo_rl.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
+from rlkit.models.custom.qwen3.model import Qwen3Model
+from rlkit.models.custom.qwen3.args import Qwen3ModelArgs
+from rlkit.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from nemo_rl.models.custom.attention import init_attention_mask
+from rlkit.models.custom.attention import init_attention_mask
 
 args_8b = Qwen3ModelArgs(
     dim=1024,

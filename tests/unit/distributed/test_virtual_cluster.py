@@ -19,13 +19,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import ray
 
-from nemo_rl.distributed.virtual_cluster import (
+from rlkit.distributed.virtual_cluster import (
     PY_EXECUTABLES,
     RayVirtualCluster,
     ResourceInsufficientError,
     _get_node_ip_and_free_port,
 )
-from nemo_rl.utils.venvs import create_local_venv
+from rlkit.utils.venvs import create_local_venv
 from tests.unit.conftest import TEST_ASSETS_DIR
 
 
@@ -44,10 +44,10 @@ def test_get_node_ip_and_free_port_does_not_start_with_zero():
 
 
 def test_env_max_retries_invalid_value():
-    """Test that NRL_VIRTUAL_CLUSTER_MAX_RETRIES rejects invalid values (less than or equal to zero)."""
+    """Test that RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES rejects invalid values (less than or equal to zero)."""
 
     # Mock environment with invalid max_retries value
-    env_vars = {"NRL_VIRTUAL_CLUSTER_MAX_RETRIES": "0"}
+    env_vars = {"RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES": "0"}
 
     with patch.dict(os.environ, env_vars, clear=True):
         with pytest.raises(AssertionError):
@@ -56,10 +56,10 @@ def test_env_max_retries_invalid_value():
 
 
 def test_env_max_retries_non_integer():
-    """Test that NRL_VIRTUAL_CLUSTER_MAX_RETRIES handles non-integer values properly."""
+    """Test that RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES handles non-integer values properly."""
 
     # Mock environment with non-integer max_retries value
-    env_vars = {"NRL_VIRTUAL_CLUSTER_MAX_RETRIES": "not_a_number"}
+    env_vars = {"RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES": "not_a_number"}
 
     with patch.dict(os.environ, env_vars, clear=True):
         with pytest.raises(ValueError):
@@ -68,13 +68,13 @@ def test_env_max_retries_non_integer():
 
 
 def test_env_max_retries_default_value():
-    """Test that default value for NRL_VIRTUAL_CLUSTER_MAX_RETRIES is used when not set."""
+    """Test that default value for RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES is used when not set."""
 
     # Ensure environment variable is not set
     with (
         patch.dict(os.environ, {}, clear=True),
         patch(
-            "nemo_rl.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
+            "rlkit.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
         ) as mock_init,
     ):
         # Mock successful initialization
@@ -90,16 +90,16 @@ def test_env_max_retries_default_value():
 
 
 def test_env_max_retries_exhausted():
-    """Test that NRL_VIRTUAL_CLUSTER_MAX_RETRIES correctly handles the case where all retries fail."""
+    """Test that RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES correctly handles the case where all retries fail."""
 
     # Set specific retry count to 4
     retry_count = 4
-    env_vars = {"NRL_VIRTUAL_CLUSTER_MAX_RETRIES": str(retry_count)}
+    env_vars = {"RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES": str(retry_count)}
 
     with (
         patch.dict(os.environ, env_vars, clear=True),
         patch(
-            "nemo_rl.distributed.virtual_cluster.RayVirtualCluster._create_placement_groups_internal"
+            "rlkit.distributed.virtual_cluster.RayVirtualCluster._create_placement_groups_internal"
         ) as mock_init,
         patch("time.sleep") as mock_sleep,
     ):
@@ -131,9 +131,9 @@ def test_ray_reinit_on_cuda_devices_change():
         patch("ray.cluster_resources") as mock_cluster_resources,
     ):
         # First call with CUDA_VISIBLE_DEVICES=0
-        mock_cluster_resources.return_value = {"GPU": 1, "nrl_tag_0": 1}
+        mock_cluster_resources.return_value = {"GPU": 1, "rlkit_tag_0": 1}
         with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0"}, clear=True):
-            from nemo_rl.distributed.virtual_cluster import init_ray
+            from rlkit.distributed.virtual_cluster import init_ray
 
             init_ray()
 
@@ -143,7 +143,7 @@ def test_ray_reinit_on_cuda_devices_change():
         mock_ray_shutdown.reset_mock()
 
         # Second call with CUDA_VISIBLE_DEVICES=1
-        mock_cluster_resources.return_value = {"GPU": 1, "nrl_tag_0": 1}
+        mock_cluster_resources.return_value = {"GPU": 1, "rlkit_tag_0": 1}
         with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "1"}, clear=True):
             init_ray()
 
@@ -156,7 +156,7 @@ def test_ray_reinit_on_cuda_devices_change():
         # Verify that the second init call included the new tag
         second_init_call = mock_ray_init.call_args_list[1]
         assert "resources" in second_init_call[1]
-        assert "nrl_tag_1" in second_init_call[1]["resources"]
+        assert "rlkit_tag_1" in second_init_call[1]["resources"]
 
 
 def test_ray_uses_same_cluster_for_permuted_cuda_devices():
@@ -168,12 +168,12 @@ def test_ray_uses_same_cluster_for_permuted_cuda_devices():
         patch("ray.cluster_resources") as mock_cluster_resources,
     ):
         # Expected sorted tag
-        expected_tag = "nrl_tag_0_2"
+        expected_tag = "rlkit_tag_0_2"
 
         # First call with CUDA_VISIBLE_DEVICES="0,2"
         mock_cluster_resources.return_value = {"GPU": 2, expected_tag: 1}
         with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,2"}, clear=True):
-            from nemo_rl.distributed.virtual_cluster import init_ray
+            from rlkit.distributed.virtual_cluster import init_ray
 
             init_ray()
 
@@ -186,7 +186,7 @@ def test_ray_uses_same_cluster_for_permuted_cuda_devices():
         # Second call with CUDA_VISIBLE_DEVICES="2,0"
         mock_cluster_resources.return_value = {"GPU": 2, expected_tag: 1}
         with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "2,0"}, clear=True):
-            from nemo_rl.distributed.virtual_cluster import init_ray
+            from rlkit.distributed.virtual_cluster import init_ray
 
             init_ray()
 

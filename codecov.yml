@@ -10,4 +10,4 @@ coverage:
         if_ci_failed: error
         if_not_found: success
 fixes:
-  - "/opt/nemo-rl/::"
+  - "/opt/rlkit/::"

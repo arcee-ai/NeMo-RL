@@ -18,8 +18,8 @@ import tempfile
 import pytest
 from transformers import AutoTokenizer
 
-from nemo_rl.data.hf_datasets.chat_templates import COMMON_CHAT_TEMPLATES
-from nemo_rl.data.hf_datasets.prompt_response_dataset import (
+from rlkit.data.hf_datasets.chat_templates import COMMON_CHAT_TEMPLATES
+from rlkit.data.hf_datasets.prompt_response_dataset import (
     PromptResponseDataset,
 )
 

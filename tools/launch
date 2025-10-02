@@ -139,7 +139,7 @@ for SCRIPT in $SCRIPTS; do
         RELEASE_ARGS=()
         if [[ -n "${IS_RELEASE}" ]]; then
             RELEASE_ARGS=(
-                logger.wandb.project=nemo-rl-release
+                logger.wandb.project=rlkit-release
                 logger.wandb.name=$(basename $SCRIPT .sh)-$(git rev-parse --short HEAD)
             )
         fi

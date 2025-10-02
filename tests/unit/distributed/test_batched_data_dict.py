@@ -14,7 +14,7 @@
 import pytest
 import torch
 
-from nemo_rl.distributed.batched_data_dict import (
+from rlkit.distributed.batched_data_dict import (
     BatchedDataDict,
     DynamicBatchingArgs,
     SequencePackingArgs,

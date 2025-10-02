@@ -67,7 +67,7 @@ logger:
   monitor_gpus: true
   num_val_samples_to_print: 0  # Number of validation samples to pretty print on terminal
   wandb:
-    project: nemo-rl
+    project: rlkit
     name: sft-qwen2.5-32b-4n8g-fsdp2tp8sp-actckpt
   tensorboard:
     log_dir: tb_logs-sft-dev-squad

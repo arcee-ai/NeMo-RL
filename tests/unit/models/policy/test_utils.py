@@ -17,7 +17,7 @@ import unittest
 import unittest.mock
 from unittest.mock import MagicMock, patch
 
-from nemo_rl.models.policy.utils import configure_expandable_segments
+from rlkit.models.policy.utils import configure_expandable_segments
 
 
 class TestConfigureExpandableSegments(unittest.TestCase):

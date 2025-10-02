@@ -19,7 +19,7 @@ uv run examples/run_dpo.py \
     dpo.max_num_steps=$MAX_STEPS \
     logger.log_dir=$LOG_DIR \
     logger.wandb_enabled=True \
-    logger.wandb.project=nemo-rl \
+    logger.wandb.project=rlkit \
     logger.wandb.name=$EXP_NAME \
     logger.monitor_gpus=True \
     logger.tensorboard_enabled=True \

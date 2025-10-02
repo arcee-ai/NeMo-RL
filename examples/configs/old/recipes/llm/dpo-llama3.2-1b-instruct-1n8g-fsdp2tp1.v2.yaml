@@ -85,7 +85,7 @@ logger:
   monitor_gpus: true
   num_val_samples_to_print: 0  # Number of validation samples to pretty print on terminal
   wandb:
-    project: nemo-rl
+    project: rlkit
     name: dpo-llama3.2-1b-instruct-1n8g-fsdp2tp1
   tensorboard: {}
   gpu_monitoring:

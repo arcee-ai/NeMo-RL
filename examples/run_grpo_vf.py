@@ -31,26 +31,26 @@ from ray import serve
 from transformers import PreTrainedTokenizerBase
 import torch
 
-from nemo_rl.environments.vf_environment import VfEnvironment
-from nemo_rl.algorithms.grpo import GRPOTrainer
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.config import DataConfig
-from nemo_rl.data.datasets import AllTaskProcessedDataset
-from nemo_rl.data.interfaces import (
+from rlkit.environments.vf_environment import VfEnvironment
+from rlkit.algorithms.grpo import GRPOTrainer
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.config import DataConfig
+from rlkit.data.datasets import AllTaskProcessedDataset
+from rlkit.data.interfaces import (
     DatumSpec,
     LLMMessageLogType,
     TaskDataSpec,
 )
-from nemo_rl.distributed.ray_actor_environment_registry import (
+from rlkit.distributed.ray_actor_environment_registry import (
     get_actor_python_env,
 )
-from nemo_rl.distributed.virtual_cluster import init_ray
-from nemo_rl.environments.interfaces import EnvironmentInterface
-from nemo_rl.models.generation import configure_generation_config
-from nemo_rl.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
-from nemo_rl.utils.config import load_config, parse_hydra_overrides
-from nemo_rl.utils.logger import get_next_experiment_dir
-from nemo_rl.config import RLConfig
+from rlkit.distributed.virtual_cluster import init_ray
+from rlkit.environments.interfaces import EnvironmentInterface
+from rlkit.models.generation import configure_generation_config
+from rlkit.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
+from rlkit.utils.config import load_config, parse_hydra_overrides
+from rlkit.utils.logger import get_next_experiment_dir
+from rlkit.config import RLConfig
 
 import verifiers as vf
 import vf_exts as vfe
@@ -128,7 +128,7 @@ def create_data_processor(vf_env: vf.MultiTurnEnv, tokenizer_kwargs: dict[str, A
         # Add user overrides
         msg_tokenizer_kwargs.update(tokenizer_kwargs)
         
-        # NeMo-RL expects a format with a standard message log alongside token IDs.
+        # RLKit expects a format with a standard message log alongside token IDs.
         # Go through and convert each message.
         for i, message in enumerate(prompt_messages):
             # Add the assistant generation header after the final user message so
@@ -204,7 +204,7 @@ def setup_data(
     vf_env = VfEnvironment.options(  # type: ignore # it's wrapped with ray.remote
         runtime_env={
             "py_executable": get_actor_python_env(
-                "nemo_rl.environments.vf_environment.VfEnvironment"
+                "rlkit.environments.vf_environment.VfEnvironment"
             ),
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }

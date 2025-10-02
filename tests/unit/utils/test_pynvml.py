@@ -14,14 +14,14 @@
 import os
 from unittest.mock import patch
 
-from nemo_rl.utils.nvml import (
+from rlkit.utils.nvml import (
     device_id_to_physical_device_id,
     get_device_uuid,
     nvml_context,
 )
 
 
-@patch("nemo_rl.utils.nvml.pynvml")
+@patch("rlkit.utils.nvml.pynvml")
 def test_nvml_context(mock_pynvml):
     """Test that nvml_context initializes and shuts down NVML."""
     with nvml_context():
@@ -42,8 +42,8 @@ def test_device_id_conversion():
         assert device_id_to_physical_device_id(1) == 3
 
 
-@patch("nemo_rl.utils.nvml.device_id_to_physical_device_id")
-@patch("nemo_rl.utils.nvml.pynvml")
+@patch("rlkit.utils.nvml.device_id_to_physical_device_id")
+@patch("rlkit.utils.nvml.pynvml")
 def test_get_device_uuid(mock_pynvml, mock_convert_id):
     """Test that get_device_uuid correctly retrieves a UUID."""
 

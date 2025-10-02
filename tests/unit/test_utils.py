@@ -15,8 +15,8 @@ from typing import Any, Optional
 
 import torch
 
-from nemo_rl.algorithms.interfaces import LossType
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from rlkit.algorithms.interfaces import LossType
+from rlkit.distributed.batched_data_dict import BatchedDataDict
 
 
 class SimpleLoss:

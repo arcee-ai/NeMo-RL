@@ -17,7 +17,7 @@ import pytest
 import ray
 import torch
 
-from nemo_rl.distributed.model_utils import (
+from rlkit.distributed.model_utils import (
     ChunkedDistributedLogprob,
     DistributedLogprob,
     _compute_distributed_log_softmax,
@@ -26,13 +26,13 @@ from nemo_rl.distributed.model_utils import (
     from_parallel_logits_to_logprobs,
     from_parallel_logits_to_logprobs_packed_sequences,
 )
-from nemo_rl.distributed.named_sharding import NamedSharding
-from nemo_rl.distributed.ray_actor_environment_registry import (
+from rlkit.distributed.named_sharding import NamedSharding
+from rlkit.distributed.ray_actor_environment_registry import (
     ACTOR_ENVIRONMENT_REGISTRY,
     PY_EXECUTABLES,
 )
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
+from rlkit.distributed.virtual_cluster import RayVirtualCluster
+from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 
 
 @ray.remote(num_gpus=1)

@@ -16,26 +16,26 @@
 import os
 from unittest.mock import Mock, mock_open, patch
 
-from nemo_rl import _patch_nsight_file
+from rlkit import _patch_nsight_file
 
 
 class TestNsightPatching:
     """Test cases for the _patch_nsight_file function."""
 
     def test_no_patching_when_env_var_not_set(self):
-        """Test that patching is skipped when NRL_NSYS_WORKER_PATTERNS is not set."""
+        """Test that patching is skipped when RLKIT_NSYS_WORKER_PATTERNS is not set."""
         # Ensure env var is not set
         with patch.dict(os.environ, {}, clear=True):
-            with patch("nemo_rl.logging") as mock_logging:
+            with patch("rlkit.logging") as mock_logging:
                 _patch_nsight_file()
                 # Should not log anything since function returns early
                 mock_logging.info.assert_not_called()
                 mock_logging.warning.assert_not_called()
 
     def test_patching_when_env_var_set(self):
-        """Test that patching proceeds when NRL_NSYS_WORKER_PATTERNS is set."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        """Test that patching proceeds when RLKIT_NSYS_WORKER_PATTERNS is set."""
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 # Mock the ray import inside the function
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/fake/path/nsight.py"
@@ -54,8 +54,8 @@ class TestNsightPatching:
 
     def test_successful_patching(self):
         """Test successful patching of a file."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 # Mock the ray import
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/fake/path/nsight.py"
@@ -87,8 +87,8 @@ class TestNsightPatching:
 
     def test_already_patched_file(self):
         """Test that already patched files are detected and skipped."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/fake/path/nsight.py"
 
@@ -113,8 +113,8 @@ class TestNsightPatching:
 
     def test_expected_line_not_found(self):
         """Test handling when expected line is not found in file."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/fake/path/nsight.py"
 
@@ -139,8 +139,8 @@ class TestNsightPatching:
 
     def test_import_error_handling(self):
         """Test graceful handling of ImportError."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 # Mock the import to raise ImportError
                 with patch(
                     "builtins.__import__", side_effect=ImportError("Ray not found")
@@ -153,8 +153,8 @@ class TestNsightPatching:
 
     def test_file_not_found_error_handling(self):
         """Test graceful handling of FileNotFoundError."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/nonexistent/path/nsight.py"
 
@@ -171,8 +171,8 @@ class TestNsightPatching:
 
     def test_permission_error_handling(self):
         """Test graceful handling of PermissionError."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging") as mock_logging:
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging") as mock_logging:
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/fake/path/nsight.py"
 
@@ -190,8 +190,8 @@ class TestNsightPatching:
 
     def test_line_replacement_accuracy(self):
         """Test that the exact line replacement is accurate."""
-        with patch.dict(os.environ, {"NRL_NSYS_WORKER_PATTERNS": "test_pattern"}):
-            with patch("nemo_rl.logging"):
+        with patch.dict(os.environ, {"RLKIT_NSYS_WORKER_PATTERNS": "test_pattern"}):
+            with patch("rlkit.logging"):
                 mock_nsight = Mock()
                 mock_nsight.__file__ = "/fake/path/nsight.py"
 

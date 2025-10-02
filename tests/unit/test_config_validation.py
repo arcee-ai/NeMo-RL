@@ -22,7 +22,7 @@ import pytest
 from omegaconf import OmegaConf
 from typing_extensions import NotRequired
 
-from nemo_rl.config import (
+from rlkit.config import (
     CheckpointingConfig,
     ClusterConfig,
     DataConfig,
@@ -33,7 +33,7 @@ from nemo_rl.config import (
     PolicyConfig,
     SFTConfig,
 )
-from nemo_rl.utils.config import load_config_with_inheritance
+from rlkit.utils.config import load_config_with_inheritance
 
 
 def get_keys_from_typeddict(typed_dict_class: dict) -> Set[str]:
@@ -193,7 +193,7 @@ def test_all_config_files_have_required_keys():
                 )
                 # GRPO also has a loss_fn section
                 if "loss_fn" in config_dict:
-                    from nemo_rl.algorithms.loss_functions import ClippedPGLossConfig
+                    from rlkit.algorithms.loss_functions import ClippedPGLossConfig
 
                     section_validations.append(("loss_fn", ClippedPGLossConfig))
             else:

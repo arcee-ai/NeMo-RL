@@ -16,7 +16,7 @@ import argparse
 
 import yaml
 
-from nemo_rl.utils.native_checkpoint import convert_dcp_to_hf
+from rlkit.utils.native_checkpoint import convert_dcp_to_hf
 
 
 def parse_args():
@@ -54,7 +54,7 @@ def main():
     # https://github.com/NVIDIA-NeMo/RL/pull/148/files
     # tokenizer should be copied from policy/tokenizer/* instead of relying on the model name
     # We can expose a arg at the top level --tokenizer_path to plumb that through.
-    # This is more stable than relying on the current NeMo-RL get_tokenizer() which can
+    # This is more stable than relying on the current RLKit get_tokenizer() which can
     # change release to release.
     tokenizer_name_or_path = config["policy"]["model_name"]
 

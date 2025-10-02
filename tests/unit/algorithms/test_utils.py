@@ -16,8 +16,8 @@ from datetime import datetime
 
 import pytest
 
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.data.hf_datasets.chat_templates import COMMON_CHAT_TEMPLATES
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.data.hf_datasets.chat_templates import COMMON_CHAT_TEMPLATES
 
 
 @pytest.fixture

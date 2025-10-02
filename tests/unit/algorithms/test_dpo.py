@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import torch
 
-from nemo_rl.algorithms.dpo import add_ref_logprobs_to_data
+from rlkit.algorithms.dpo import add_ref_logprobs_to_data
 
 
 class MockPolicy:

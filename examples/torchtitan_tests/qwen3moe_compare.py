@@ -2,7 +2,7 @@ from accelerate import init_empty_weights
 import torch
 import torch.nn.functional as F
 
-from nemo_rl.models.custom.convert import get_model_config
+from rlkit.models.custom.convert import get_model_config
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 model_name = "Qwen/Qwen3-30B-A3B-Instruct-2507"
