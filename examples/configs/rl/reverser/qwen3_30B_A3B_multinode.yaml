@@ -122,7 +122,7 @@ policy:
       enabled: false
       resources:
         gpus_per_node: 8
-        num_nodes: null
+        num_nodes: 1
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
