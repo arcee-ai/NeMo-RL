@@ -120,7 +120,7 @@ policy:
     colocated:
       enabled: false
       resources:
-        gpus_per_node: 8
+        gpus_per_node: 4
         num_nodes: 2
 
 data:
