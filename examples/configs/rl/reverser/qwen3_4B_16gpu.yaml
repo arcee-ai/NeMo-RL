@@ -50,7 +50,7 @@ policy:
     cpu_offload: false
     sequence_parallel: false
     activation_checkpointing: false
-    tensor_parallel_size: 4
+    tensor_parallel_size: 2
     context_parallel_size: 1
     pipeline_parallel_size: 1
     expert_parallel_size: 1
@@ -111,7 +111,7 @@ policy:
     vllm_cfg:
       async_engine: false
       precision: ${policy.precision}
-      tensor_parallel_size: 8
+      tensor_parallel_size: 1
       pipeline_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
@@ -120,8 +120,8 @@ policy:
     colocated:
       enabled: false
       resources:
-        gpus_per_node: 4
-        num_nodes: 2
+        gpus_per_node: 6
+        num_nodes: 1
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
