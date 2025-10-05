@@ -2,10 +2,11 @@
 grpo:
   num_prompts_per_step: 3
   num_generations_per_prompt: 16
-  max_rollout_turns: 10 # prefer to use verifiers to set turn limits
+  max_rollout_turns: 10
   max_num_steps: 1000000
-  normalize_rewards: true
+  normalize_rewards: false
   use_leave_one_out_baseline: true
+  minibatch_advantage_renorm: true  # Set to true to enable z-score renorm for stability
   val_period: 0
   val_at_start: false
   max_val_samples: 0
@@ -13,11 +14,10 @@ grpo:
   seed: 42
 
 loss_fn:
-  reference_policy_kl_penalty: 0.01
-  ratio_clip_min: 0.2
-  ratio_clip_max: 0.2
+  reference_policy_kl_penalty: 0  # if disabled, reference model won't be loaded and saves memory
+  ratio_clip_min: 0.2 
+  ratio_clip_max: 0.28 # 0.26-0.28 range per magistral report
   ratio_clip_c: null
-  # (default off) loss formulation improvements (docs/guides/grpo.md#loss)
   use_on_policy_kl_approximation: false
   use_importance_sampling_correction: false
   token_level_loss: true
