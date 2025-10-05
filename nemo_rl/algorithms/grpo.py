@@ -350,6 +350,10 @@ def setup(
         weights_path = None
         optimizer_path = None
 
+    init_reference_model = loss_config["reference_policy_kl_penalty"] != 0
+    if not init_reference_model:
+        print("KL coefficient is 0, skipping reference model loading")
+    
     policy = Policy(
         cluster=train_cluster,
         config=policy_config,
@@ -357,6 +361,7 @@ def setup(
         weights_path=weights_path,
         optimizer_path=optimizer_path,
         init_optimizer=True,
+        init_reference_model=init_reference_model,
     )
 
     # if it is not colocated inference, initialize collective communication for update weights
@@ -710,9 +715,14 @@ def grpo_train(
             print("▶ Computing logprobs...")
             with timer.time("policy_and_reference_logprobs"):
                 fprop_logprobs = policy.get_logprobs(train_data)["logprobs"]
-                reference_logprobs = policy.get_reference_policy_logprobs(train_data)[
-                    "reference_logprobs"
-                ]
+                
+                if master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
+                    reference_logprobs = policy.get_reference_policy_logprobs(train_data)[
+                        "reference_logprobs"
+                    ]
+                else:
+                    reference_logprobs = torch.zeros_like(fprop_logprobs)
+                
                 train_data["prev_logprobs"] = fprop_logprobs
                 train_data["reference_policy_logprobs"] = reference_logprobs
 
