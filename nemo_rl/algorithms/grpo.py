@@ -84,6 +84,7 @@ class GRPOConfig(TypedDict):
     max_rollout_turns: NotRequired[int]
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
+    minibatch_advantage_renorm: NotRequired[bool]
     val_period: int
     val_batch_size: int
     val_at_start: bool
@@ -657,14 +658,24 @@ def grpo_train(
                         "use_leave_one_out_baseline"
                     ],
                 )
+                # Simple group baseline: A_i = R_i - R̄ (no std normalization)
                 advantages = (rewards - baseline).unsqueeze(-1)
 
-                if master_config["grpo"]["normalize_rewards"]:
-                    # don't sharpen the ones with no variation
-                    zero_std_mask = std > 0
-                    advantages[zero_std_mask] = (
-                        advantages[zero_std_mask] / std.unsqueeze(-1)[zero_std_mask]
-                    )
+                # Filter zero-advantage groups (all generations have identical rewards)
+                zero_variance_mask = std == 0
+                if zero_variance_mask.any():
+                    num_filtered = zero_variance_mask.sum().item()
+                    print(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
+                    repeated_batch["loss_multiplier"] = repeated_batch["loss_multiplier"] * (~zero_variance_mask).float()
+
+                # Optional: z-score advantages within the mini-batch for stability
+                if master_config["grpo"].get("minibatch_advantage_renorm", False):
+                    valid_advantages = advantages[repeated_batch["loss_multiplier"] > 0]
+                    if len(valid_advantages) > 1:
+                        adv_mean = valid_advantages.mean()
+                        adv_std = valid_advantages.std()
+                        if adv_std > 0:
+                            advantages = (advantages - adv_mean) / adv_std
 
             with timer.time("data_processing"):
                 # Add loss mask and advantages to each message in LLMMessageLogType
