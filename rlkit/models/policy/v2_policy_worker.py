@@ -337,13 +337,9 @@ class DTensorV2PolicyWorker:
         self.adapter = None
         self._custom_parallelize_function: Optional[Callable] = None
 
-        if self.uses_custom_model and self.rank == 0:
-            logging.info(f"Using custom model implementation for {model_name}")
-        else:
-            logging.info(f"Using HuggingFace implementation for {model_name}")
-
         full_state_dict = None
         if self.uses_custom_model:
+            logging.info(f"Using custom model implementation for {model_name}")
             custom_model_class, model_args, adapter_class, model_parallelize_function = (
                 custom_model_setup  # type: ignore[arg-type]
             )
@@ -371,6 +367,7 @@ class DTensorV2PolicyWorker:
             with init_empty_weights():
                 self.model = custom_model_class(model_args=model_args)
         else:
+            logging.info(f"Using HuggingFace implementation for {model_name}")
             if self._is_reward_model:
                 rm_cfg = self.cfg.get("reward_model_cfg", {})
                 rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
