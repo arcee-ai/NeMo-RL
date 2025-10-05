@@ -6,7 +6,6 @@ grpo:
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
-  minibatch_advantage_renorm: true
   val_period: 0
   val_at_start: false
   max_val_samples: 0
@@ -14,7 +13,7 @@ grpo:
   seed: 42
 
 loss_fn:
-  reference_policy_kl_penalty: 0.0
+  reference_policy_kl_penalty: 0.01
   ratio_clip_min: 0.2
   ratio_clip_max: 0.2
   ratio_clip_c: null
@@ -99,7 +98,7 @@ policy:
 
   generation:
     backend: "vllm_http"
-    max_new_tokens: 768
+    max_new_tokens: null
     temperature: 0.7
     top_p: 0.8
     top_k: 20
