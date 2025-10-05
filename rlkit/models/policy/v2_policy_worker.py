@@ -18,6 +18,7 @@ import itertools
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
+import re
 from typing import Any, Callable, Generator, Iterable, Optional, Set, Union, cast
 import logging
 
@@ -336,13 +337,9 @@ class DTensorV2PolicyWorker:
         self.adapter = None
         self._custom_parallelize_function: Optional[Callable] = None
 
-        if self.uses_custom_model and self.rank == 0:
-            logging.info(f"Using custom model implementation for {model_name}")
-        else:
-            logging.info(f"Using HuggingFace implementation for {model_name}")
-
         full_state_dict = None
         if self.uses_custom_model:
+            logging.info(f"Using custom model implementation for {model_name}")
             custom_model_class, model_args, adapter_class, model_parallelize_function = (
                 custom_model_setup  # type: ignore[arg-type]
             )
@@ -370,6 +367,7 @@ class DTensorV2PolicyWorker:
             with init_empty_weights():
                 self.model = custom_model_class(model_args=model_args)
         else:
+            logging.info(f"Using HuggingFace implementation for {model_name}")
             if self._is_reward_model:
                 rm_cfg = self.cfg.get("reward_model_cfg", {})
                 rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
@@ -551,9 +549,61 @@ class DTensorV2PolicyWorker:
 
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
-            self.optimizer = optimizer_cls(
-                self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
-            )
+            
+            if self.cfg["optimizer"].get("scalar_optim") is not None:
+                scalar_param_optim = self.cfg["optimizer"]["scalar_optim"]
+                
+                # Gather all params by tensor type
+                muon_params = []
+                non_muon_params = []
+                
+                # For convenience, include a sensible default.
+                if self.uses_custom_model:
+                    default_extra_params = ["output.weight", "tok_embeddings.weight"]
+                else:
+                    default_extra_params = ["lm_head.weight", "embed_tokens.weight"]
+                
+                scalar_optim_extra_params = self.cfg["optimizer"].get("non_muon_params", default_extra_params)
+                
+                found_extra_params = []
+                
+                for name, param in self.model.named_parameters():
+                    if param.ndim == 2:
+                        found = False
+                        for extra_param in scalar_optim_extra_params:
+                            if re.match(extra_param, name):
+                                non_muon_params.append(param)
+                                found_extra_params.append(extra_param)
+                                found = True
+                                break
+                        if not found:
+                            muon_params.append(param)
+                    else:
+                        non_muon_params.append(param)
+                
+                for extra_param in scalar_optim_extra_params:
+                    if extra_param not in found_extra_params:
+                        raise ValueError(f"Did not find '{extra_param}' in model parameters, but it was specified for exclusion from Muon. Please specify your own non_muon_params in the config.")
+                
+                param_groups = [dict(params=muon_params)]
+                param_groups.append(
+                    dict(
+                        params=non_muon_params,
+                        algorithm=scalar_param_optim,
+                        **self.cfg["optimizer"].get("scalar_optim_kwargs", {})
+                    )
+                )
+                
+                # Create optimizer
+                self.optimizer = optimizer_cls(
+                    param_groups, **self.cfg["optimizer"]["kwargs"]
+                )
+            else:
+                if "muon" in self.cfg["optimizer"]["name"].lower():
+                    raise ValueError("Please specify policy.optimizer.scalar_optim to use the Muon optimizer.")
+                self.optimizer = optimizer_cls(
+                    self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
+                )
         else:
             self.optimizer = None
 

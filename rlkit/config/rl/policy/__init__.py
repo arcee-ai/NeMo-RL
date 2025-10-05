@@ -45,6 +45,9 @@ class RewardModelConfig(TypedDict):
 
 class PytorchOptimizerConfig(TypedDict):
     name: str
+    scalar_optim: NotRequired[str | None]
+    scalar_optim_kwargs: NotRequired[dict[str, Any] | None]
+    non_muon_params: NotRequired[list[str] | None]
     kwargs: dict[str, Any]
 
 

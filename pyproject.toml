@@ -49,7 +49,8 @@ dependencies = [
     "verifiers==0.1.3",
     "vf-exts",
     "flash-attn==2.7.4.post1",
-    "vllm>=0.10.0"
+    "vllm>=0.10.0",
+    "dion @ https://github.com/microsoft/dion.git"
 ]
 
 [project.optional-dependencies]
