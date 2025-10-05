@@ -796,7 +796,7 @@ class GRPOTrainer:
             zero_variance_mask = std == 0
             if zero_variance_mask.any():
                 num_filtered = zero_variance_mask.sum().item()
-                print(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
+                print(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // self.master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
                 repeated_batch["loss_multiplier"] = repeated_batch["loss_multiplier"] * (~zero_variance_mask).float()
 
             # Optional: z-score advantages within the mini-batch for stability
