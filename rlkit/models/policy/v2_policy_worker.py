@@ -599,6 +599,8 @@ class DTensorV2PolicyWorker:
                     param_groups, **self.cfg["optimizer"]["kwargs"]
                 )
             else:
+                if "muon" in self.cfg["optimizer"]["name"].lower():
+                    raise ValueError("Please specify policy.optimizer.scalar_optim to use the Muon optimizer.")
                 self.optimizer = optimizer_cls(
                     self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
                 )
