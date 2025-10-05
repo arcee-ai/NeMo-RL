@@ -170,7 +170,7 @@ class GRPOTrainer:
             self.tokenizer,
             weights_path,
             optimizer_path,
-            init_reference_model=init_reference_model
+            init_reference_model=init_reference_model,
         )
 
         if not colocated_inference:
@@ -398,6 +398,7 @@ class GRPOTrainer:
         tokenizer: TokenizerType,
         weights_path: Optional[Path],
         optimizer_path: Optional[Path],
+        init_reference_model: bool,
     ) -> ColocatablePolicyInterface:
         return Policy(
             cluster=train_cluster,
@@ -406,6 +407,7 @@ class GRPOTrainer:
             weights_path=weights_path,
             optimizer_path=optimizer_path,
             init_optimizer=True,
+            init_reference_model=init_reference_model,
         )
 
     def _initialize_collective_communication(
