@@ -24,6 +24,10 @@ release_run*
 ckpts/
 3rdparty/vllm
 
+.beamignore
+.DS_Store
+test_traces_beam/
+
 # Test
 coverage.json
 .coverage*
