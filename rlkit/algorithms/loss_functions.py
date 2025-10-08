@@ -165,6 +165,8 @@ class ClippedPGLossFn(LossFunction):
                 next_token_logits_wo_last, dim=-1
             )
             next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
+            if next_tokens.dtype != torch.int64:
+                raise ValueError("next_tokens must be of type int64, got " + str(next_tokens.dtype) + " with shape " + str(next_tokens.shape) + " and " + str(next_tokens))
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)

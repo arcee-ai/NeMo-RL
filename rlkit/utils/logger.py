@@ -46,7 +46,7 @@ from rlkit.config.logging import (
     TensorboardConfig,
     WandbConfig,
 )
-from rlkit.data.interfaces import LLMMessageLogType
+from rlkit.data.messages import APIMessage
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 
 # Flag to track if rich logging has been configured
@@ -881,14 +881,24 @@ class Logger(LoggerInterface):
         # Create full path within log directory
         filepath = os.path.join(self.base_log_dir, filename)
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        def fix_sample_recursive(sample: Any) -> Any:
+            if isinstance(sample, torch.Tensor):
+                return sample.tolist()
+            elif isinstance(sample, list):
+                return [fix_sample_recursive(v) for v in sample]
+            elif isinstance(sample, dict):
+                return {k: fix_sample_recursive(v) for k, v in sample.items()}
+            else:
+                return sample
 
         # Write to JSONL file
         with open(filepath, "w") as f:
             for i, sample in enumerate(to_log.make_microbatch_iterator(1)):
+                fixed_sample = {}
                 for key, value in sample.items():
-                    if isinstance(value, torch.Tensor):
-                        sample[key] = value.tolist()
-                f.write(json.dumps({**sample, "idx": i}) + "\n")
+                    fixed_sample[key] = fix_sample_recursive(value)
+                f.write(json.dumps({**fixed_sample, "idx": i}) + "\n")
 
         print(f"Logged data to {filepath}")
 
@@ -1085,7 +1095,7 @@ def configure_rich_logging(
 
 
 def print_message_log_samples(
-    message_logs: list[LLMMessageLogType],
+    message_logs: list[list[APIMessage]],
     rewards: list[float],
     num_samples: int = 5,
     step: int = 0,

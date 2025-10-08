@@ -1,10 +1,10 @@
 from typing import Any
 
+from openai.types.chat import ChatCompletion
 import torch
 import ray
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.data.interfaces import DatumSpec
-from rlkit.data.llm_message_utils import get_keys_from_message_log
 from rlkit.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
 from rlkit.environments.interfaces import EnvironmentInterface
 
@@ -49,14 +49,10 @@ def build_rollouts_log(
 
     rollout_log: list[dict[str, Any]] = []
     for i in range(len(message_logs)):
-        filtered_messages = get_keys_from_message_log(
-            message_logs[i], ["role", "content", "tool_calls", "tool_call_id"]
-        ).copy()
-
         metrics = sample_metrics[i]
         rollout_log.append(
             {
-                "messages": filtered_messages,
+                "messages": message_logs[i],
                 "grpo_group_id": grpo_group_ids[i],
                 "total_reward": float(total_rewards[i]),
                 "terminated": bool(metrics.get("terminated", False)),
@@ -76,44 +72,18 @@ def run_vf_rollouts(
     vf_semaphore: int | None,
     max_seq_len: int,
     max_new_tokens: int | None,
-    task_to_env: dict[str, EnvironmentInterface],
+    env: EnvironmentInterface,
     grpo_gids: list[int],
     greedy: bool = False,
 ):
-    for env in task_to_env.values():
-        assert hasattr(env, "a_generate"), "Verifiers environments require a VfEnvironment."
-    
-    assert len(task_to_env) == 1, "Verifiers environments are not supported with multiple RLKit tasks. Use vf_exts.MultiTurnEnvGroup instead."
-    
-    env = list(task_to_env.values())[0]
-
     assert isinstance(policy_generation, VllmHttpGeneration), "Verifiers environments require a vLLM client."
-
-    vf_msg_log: list[vf.Messages] = []
-
-    for messages in input_batch["message_log"]:
-        log = []
-        for message in messages:
-            entry = {
-                "role": message["role"],
-                "content": message["content"],
-            }
-            # Only include tool_calls for assistant messages when present and non-empty
-            if (
-                message.get("role") == "assistant"
-                and message.get("tool_calls")
-                and len(message["tool_calls"]) > 0
-            ):
-                entry["tool_calls"] = message["tool_calls"]
-            log.append(entry)
-        
-        vf_msg_log.append(log)
     
-    info = [x.get("info", {}) for x in input_batch["extra_env_info"]]
-    answer = [x.get("answer", "") for x in input_batch["extra_env_info"]]
-    task = [x.get("task", "vf_placeholder") for x in input_batch["extra_env_info"]]
+    prompt = input_batch["prompt"]
+    info = input_batch["info"]
+    answer = input_batch["answer"]
+    task = input_batch["task"]
 
-    by_group = split_rollouts_by_group(vf_msg_log, answer, info, task, grpo_gids)
+    by_group = split_rollouts_by_group(prompt, answer, info, task, grpo_gids)
 
     # Convert input batch to verifiers input format
     verifiers_input_batches = []
@@ -167,21 +137,28 @@ def run_vf_rollouts(
     generate_results = ray.get(refs)
 
     current_batch = input_batch.copy()
-    current_batch["total_reward"] = [0 for _ in current_batch["message_log"]]
+    current_batch["reward"] = [0 for _ in current_batch["prompt"]]
 
     env_metrics_sums = {}
     env_metrics_counts = {}
 
-    sample_truncated = [False for _ in current_batch["message_log"]]
+    sample_truncated = [False for _ in current_batch["prompt"]]
+    
+    current_batch["completion"] = [[] for _ in current_batch["prompt"]]
 
     # Convert completion to RLKit message log format.
-    for g_i, (rollouts, processed_outputs) in enumerate(generate_results):
+    for g_i, rollouts in enumerate(generate_results):
         # type hints for convenience
         rollouts: vf.GenerateOutputs
-        processed_outputs: vf.ProcessedOutputs
-
+        
         for i, completion in enumerate(rollouts.completion):
             assert isinstance(completion, list), "RLKit currently only supports chat completions."
+            
+            if "responses" not in rollouts.state[i]:
+                raise ValueError("No chat completions API responses found in rollouts.state.")
+            
+            responses: list[ChatCompletion] = rollouts.state[i]["responses"]
+            responses_idx = 0
 
             for key, value in rollouts.metrics.items():
                 if isinstance(value, (int, float)):
@@ -194,56 +171,64 @@ def run_vf_rollouts(
             log = []
             orig_idx = list(by_group.values())[g_i][i][-1]
             for msg in completion:
-                completion_ids = processed_outputs.completion_ids[i]
+                if msg["role"] == "assistant":
+                    result = responses[responses_idx]
+                    responses_idx += 1
+                    
+                    logprobs_obj = result.choices[0].logprobs.content
+                    
+                    token_ids = []
+                    generation_logprobs = []
+                    for logprob_obj in logprobs_obj:
+                        token_ids.append(int(logprob_obj.token.split(":")[-1]))
+                        generation_logprobs.append(logprob_obj.logprob)
+                    
+                    # We patch vLLM to return the full canonical prompt alongside our completion, so we should see at least one -9999 in the completion logprobs.
+                    assert -9999 in generation_logprobs, "vLLM full-sequence monkey-patch appears to have failed, no prompt tokens in completion logprobs"
 
-                # Truncate over-length completions
-                prev_tokens = sum([len(msg["token_ids"]) for msg in current_batch["message_log"][orig_idx]])
-                if len(completion_ids) + prev_tokens > max_seq_len:
-                    remaining_tokens = max_seq_len - prev_tokens
-                    completion_ids = completion_ids[:remaining_tokens]
-                    sample_truncated[orig_idx] = True
+                    log.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                        "tool_calls": msg.get("tool_calls", []) or [],
+                        "token_ids": torch.tensor(token_ids),
+                        "generation_logprobs": torch.tensor(generation_logprobs),
+                    })
+                else:
+                    log.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                        "tool_calls": msg.get("tool_calls", []) or []
+                    })
 
-                log.append({
-                    "role": msg["role"],
-                    "content": msg["content"],
-                    "tool_calls": msg.get("tool_calls", []) or [],
-                    "token_ids": torch.tensor(completion_ids),
-                    "generation_logprobs": torch.tensor(processed_outputs.completion_logprobs[i]),
-                })
+            current_batch["completion"][orig_idx].extend(log)
+            current_batch["reward"][orig_idx] = rollouts.reward[i]
 
-            current_batch["message_log"][orig_idx].extend(log)
-            current_batch["total_reward"][orig_idx] = rollouts.reward[i]
-
-    current_batch["total_reward"] = torch.tensor(current_batch["total_reward"])
+    current_batch["reward"] = torch.tensor(current_batch["reward"])
 
     env_metrics_means = {k: v / env_metrics_counts[k] for k, v in env_metrics_sums.items()}
 
     # Compute per-sample metrics to populate rollout logs
-    batch_size = len(current_batch["message_log"])
+    batch_size = len(current_batch["prompt"])
 
     sample_assistant_tokens: list[int] = []
     sample_total_tokens: list[int] = []
 
-    for log in current_batch["message_log"]:
+    for completion in current_batch["completion"]:
         assistant_tokens = 0
-        for msg in log:
+        for msg in completion:
             if msg.get("role") == "assistant":
-                token_ids = msg.get("token_ids", [])
-                # token_ids may be a list[int] or torch.Tensor; handle both
-                if isinstance(token_ids, torch.Tensor):
-                    assistant_tokens += int(token_ids.numel())
-                else:
-                    assistant_tokens += len(token_ids)
+                token_ids = msg["token_ids"].tolist()
+                
+                assistant_tokens += len([x for i, x in enumerate(token_ids) if msg["generation_logprobs"][i] != -9999])
+        sample_total_tokens.append(completion[-1]["token_ids"].numel())
         sample_assistant_tokens.append(assistant_tokens)
-        sample_total_tokens.append(assistant_tokens)  # No environment messages added in this path
 
     sync_sample_metrics = [
         {
             "terminated": False,
             "truncated": sample_truncated[i],
-            "total_tokens": sample_total_tokens[i],
             "assistant_tokens": sample_assistant_tokens[i],
-            "env_tokens": 0,
+            "total_tokens": sample_total_tokens[i]
         }
         for i in range(batch_size)
     ]
@@ -264,10 +249,10 @@ def run_vf_rollouts(
     }
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
-        message_logs=current_batch["message_log"],
+        message_logs=[prompt + completion for prompt, completion in zip(current_batch["prompt"], current_batch["completion"])],
         grpo_group_ids=current_batch["idx"],
-        total_rewards=[current_batch["total_reward"][i].item() for i in range(len(current_batch["message_log"]))],
-        extra_env_infos=current_batch["extra_env_info"],
+        total_rewards=[current_batch["reward"][i].item() for i in range(len(current_batch["reward"]))],
+        extra_env_infos=[{"metrics": env_metrics_means} for _ in range(len(current_batch["prompt"]))],
         sample_metrics=sync_sample_metrics,
     )
 

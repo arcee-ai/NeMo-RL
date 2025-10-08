@@ -71,11 +71,4 @@ class VfEnvironment(EnvironmentInterface):
             **kwargs,
         )
 
-        # Process the environment results for things like tokenization and logprobs.
-        return results, self.env.process_env_results_vllm(
-            prompts=results.prompt,
-            completions=results.completion,
-            states=results.state,
-            rewards=results.reward,
-            processing_class=self.tokenizer,
-        )
+        return results

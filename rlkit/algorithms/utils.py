@@ -23,6 +23,59 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from rlkit.data import hf_datasets
 from rlkit.config import TokenizerConfig
 
+def vector_subseq_starts(start_index: int, a: torch.Tensor, b: torch.Tensor) -> int:
+    """
+    Return a list of the indices of the occurrences of b in a after start_index.
+    """
+    n, m = a.numel(), b.numel()
+    if m == 0 or m > n: 
+        print("returning -1 because m == 0 or m > n")
+        return -1
+    
+    start_index = max(0, min(start_index, n))  # clamp
+    rem = n - start_index
+    if rem < m:
+        print("returning -1 because rem < m")
+        return -1
+
+    # search in a[start:] and offset the result by 'start'
+    windows = a.narrow(0, start_index, rem).unfold(0, m, 1)   # (rem-m+1, m)
+    matches = (windows == b).all(dim=1)
+    indices = torch.nonzero(matches, as_tuple=False)
+    return [start_index + idx.item() for idx in indices]
+
+
+def _pad_tensor(
+    tensor: torch.Tensor,
+    max_len: int,
+    pad_side: str,
+    pad_value: int = 0,
+) -> torch.Tensor:
+    """Pad a tensor to the specified length.
+
+    Args:
+        tensor: Tensor to pad
+        max_len: Length to pad to
+        pad_side: Whether to pad on the 'left' or 'right'
+        pad_value: Value to use for padding
+
+    Returns:
+        torch.Tensor: Padded tensor
+    """
+    pad_len = max_len - tensor.size(0)
+    if pad_len <= 0:
+        return tensor
+
+    padding = torch.full(
+        (pad_len, *tensor.shape[1:]),
+        pad_value,
+        dtype=tensor.dtype,
+        device=tensor.device,
+    )
+    return torch.cat(
+        [padding, tensor] if pad_side == "left" else [tensor, padding], dim=0
+    )
+
 
 def calculate_kl_penalty_joschu2020(
     logprobs_policy: torch.Tensor, logprobs_reference: torch.Tensor
@@ -36,78 +89,6 @@ def calculate_kl_penalty_joschu2020(
     """
     r = logprobs_reference - logprobs_policy
     return torch.exp(r) - r - 1
-
-
-def calculate_baseline_and_std_per_prompt(
-    prompts: torch.Tensor,
-    rewards: torch.Tensor,
-    valid_mask: torch.Tensor,
-    leave_one_out_baseline: bool = True,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Function to compute a baseline for each (prompt, response) pair in the batch.
-
-    The same baseline is calculated for each prompt. Samples set to 0 in 'valid_mask'
-    are not included in the baseline calculation.
-
-    prompts:    tensor (b, s)     Tensor of prompts the model used. May be on any device
-    rewards:    tensor (b,)       Float-valued rewards. May be on any device
-    valid_mask: tensor (b,)       Vector of 0/1, where 0 is to ignore and 1 is to keep
-    leave_one_out_baseline: bool  Compute an unbiased baseline by leaving out the sample that
-                                  the baseline is for (from RLOO https://arxiv.org/abs/2402.14740)
-
-    Returns:
-    tensor (b,), tensor (b,) of baselines and std on the same device as 'rewards'
-    """
-    unique_prompts = torch.unique(prompts, dim=0)
-
-    baseline = torch.zeros_like(rewards)
-    sq_baseline = torch.zeros_like(rewards)
-    device_ordinal = rewards.get_device()
-    if device_ordinal == -1:
-        reward_device = torch.device("cpu")
-    else:
-        reward_device = torch.device(reward_device)
-
-    for i in range(len(unique_prompts)):
-        is_matching_prompt = (prompts == unique_prompts[i]).all(1)
-        prompt_idx = torch.arange(len(prompts), device=reward_device)[
-            is_matching_prompt
-        ]
-
-        if leave_one_out_baseline:
-            baseline_mask_matrix = (1 - torch.eye(len(prompt_idx))).to(reward_device)
-        else:
-            baseline_mask_matrix = torch.ones((len(prompt_idx), len(prompt_idx))).to(
-                reward_device
-            )
-
-        if valid_mask[prompt_idx].sum() <= 1:
-            # Ignore sample: there are no valid responses, so set baseline equal to reward
-            # to ignore it in the loss computation
-            baseline[prompt_idx] = rewards[prompt_idx]
-        else:
-            num_valid = valid_mask[prompt_idx].float().sum() - int(
-                leave_one_out_baseline
-            )
-            prompt_baseline = (
-                torch.matmul(
-                    baseline_mask_matrix, rewards[prompt_idx] * valid_mask[prompt_idx]
-                )
-                / num_valid
-            )
-            prompt_baseline_square = (
-                torch.matmul(
-                    baseline_mask_matrix,
-                    torch.pow(rewards[prompt_idx], 2) * valid_mask[prompt_idx],
-                )
-                / num_valid
-            )
-
-            baseline[prompt_idx] = prompt_baseline
-            sq_baseline[prompt_idx] = prompt_baseline_square
-
-    std = (sq_baseline - baseline.square()).sqrt().nan_to_num(0)
-    return baseline, std
 
 
 def surpress_user_warnings(f):  # type: ignore

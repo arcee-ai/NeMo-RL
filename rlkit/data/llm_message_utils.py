@@ -24,6 +24,7 @@ from rlkit.data.interfaces import (
     TaskDataSpec,
 )
 from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.algorithms.utils import _pad_tensor
 
 Tensor = torch.Tensor
 TokenizerType = PreTrainedTokenizerBase
@@ -148,38 +149,6 @@ def add_loss_mask_to_message_log(
                     message["token_loss_mask"] = torch.zeros_like(
                         cast(Tensor, message["token_ids"])
                     )
-
-
-def _pad_tensor(
-    tensor: Tensor,
-    max_len: int,
-    pad_side: str,
-    pad_value: int = 0,
-) -> Tensor:
-    """Pad a tensor to the specified length.
-
-    Args:
-        tensor: Tensor to pad
-        max_len: Length to pad to
-        pad_side: Whether to pad on the 'left' or 'right'
-        pad_value: Value to use for padding
-
-    Returns:
-        torch.Tensor: Padded tensor
-    """
-    pad_len = max_len - tensor.size(0)
-    if pad_len <= 0:
-        return tensor
-
-    padding = torch.full(
-        (pad_len, *tensor.shape[1:]),
-        pad_value,
-        dtype=tensor.dtype,
-        device=tensor.device,
-    )
-    return torch.cat(
-        [padding, tensor] if pad_side == "left" else [tensor, padding], dim=0
-    )
 
 
 def _validate_tensor_consistency(tensors: list[Tensor]) -> None:

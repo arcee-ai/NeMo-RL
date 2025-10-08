@@ -828,11 +828,6 @@ class DTensorV2PolicyWorker:
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
         seq_dim_size = data.get("input_ids").shape[sequence_dim]
-        for k, v in data.items():
-            if torch.is_tensor(v) and len(v.shape) > 1:
-                assert v.shape[sequence_dim] == seq_dim_size, (
-                    f"Dim 1 must be the sequence dim, expected dim 1={seq_dim_size} but got shape {v.shape}"
-                )
 
         if eval_mode:
             ctx: AbstractContextManager[Any] = torch.no_grad()
@@ -1157,11 +1152,6 @@ class DTensorV2PolicyWorker:
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
         seq_dim_size = data.get("input_ids").shape[sequence_dim]
-        for k, v in data.items():
-            if torch.is_tensor(v) and len(v.shape) > 1:
-                assert v.shape[sequence_dim] == seq_dim_size, (
-                    f"Dim 1 must be the sequence dim, expected dim 1={seq_dim_size} but got shape {v.shape}"
-                )
 
         all_log_probs = []
         self.model.eval()
