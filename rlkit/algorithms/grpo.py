@@ -777,7 +777,7 @@ class GRPOTrainer:
         if device_ordinal == -1:
             reward_device = torch.device("cpu")
         else:
-            reward_device = torch.device(reward_device)
+            reward_device = torch.device(f"cuda:{device_ordinal}")
 
         for i in range(len(unique_indices)):
             is_matching_prompt = (indices == unique_indices[i])
