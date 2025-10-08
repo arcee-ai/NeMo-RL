@@ -154,6 +154,9 @@ def run_vf_rollouts(
         for i, completion in enumerate(rollouts.completion):
             assert isinstance(completion, list), "RLKit currently only supports chat completions."
             
+            if "responses" not in rollouts.state[i]:
+                raise ValueError("No chat completions API responses found in rollouts.state.")
+            
             responses: list[ChatCompletion] = rollouts.state[i]["responses"]
             responses_idx = 0
 
