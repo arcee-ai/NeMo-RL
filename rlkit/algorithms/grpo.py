@@ -611,11 +611,7 @@ class GRPOTrainer:
             policy_generation_stale = False
         else:
             policy_generation.prepare_for_generation()
-        val_metrics, validation_timings = self._validate(
-            policy_generation,
-            val_dataloader,
-            step=0,
-        )
+        val_metrics, validation_timings = self._validate(0)
         policy_generation.finish_generation()
         logger.log_metrics(val_metrics, 0, prefix="validation")
         logger.log_metrics(validation_timings, 0, prefix="timing/validation")
@@ -881,10 +877,7 @@ class GRPOTrainer:
             else:
                 self.policy_generation.prepare_for_generation()
 
-            val_metrics, validation_timings = self._validate(
-                self.policy_generation,
-                step=step + 1,
-            )
+            val_metrics, validation_timings = self._validate(step+1)
             self.policy_generation.finish_generation()
             logger.log_metrics(validation_timings, step + 1, prefix="timing/validation")
             logger.log_metrics(val_metrics, step + 1, prefix="validation")
