@@ -14,6 +14,9 @@
 
 from copy import deepcopy
 import os
+
+from datasets import Dataset
+from openai.types.chat import ChatCompletionMessageToolCallUnion
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
 # Prevent verifiers from spamming the console with progress bars when we do parallel rollouts.
@@ -35,10 +38,9 @@ from rlkit.environments.vf_environment import VfEnvironment
 from rlkit.algorithms.grpo import GRPOTrainer
 from rlkit.algorithms.utils import get_tokenizer
 from rlkit.config import DataConfig
-from rlkit.data.datasets import AllTaskProcessedDataset
 from rlkit.data.interfaces import (
     DatumSpec,
-    LLMMessageLogType,
+    APIMessage,
     TaskDataSpec,
 )
 from rlkit.distributed.ray_actor_environment_registry import (
@@ -78,127 +80,30 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 
 TokenizerType = PreTrainedTokenizerBase
 
-# Slightly odd closure for verifiers env in the data processor, which needs a specific signature.
-def create_data_processor(vf_env: vf.MultiTurnEnv, tokenizer_kwargs: dict[str, Any]) -> Callable:
-    vf_tools: dict[str, list[Callable]] = defaultdict(lambda: [])
-    if isinstance(vf_env, vfe.MultiTurnEnvGroup):
-        env_map = vf_env.env_map
-        vf_tools = {}
-        for env_id in env_map:
-            sub_env = env_map[env_id]
-            if isinstance(sub_env, vf.ToolEnv):
-                vf_tools[env_id] = sub_env.tools
-            else:
-                vf_tools[env_id] = []
-    elif isinstance(vf_env, vf.ToolEnv):
-        vf_tools = defaultdict(lambda: vf_env.tools)
-    else:
-        vf_tools = defaultdict(lambda: [])
-        
-    # TaskDataProcessFnCallable
-    def vf_data_processor(
-        datum_dict: dict[str, Any],
-        task_data_spec: TaskDataSpec,
-        tokenizer: TokenizerType,
-        max_seq_length: int,
-        idx: int,
-    ) -> DatumSpec:
-        """Process a datum dictionary (single example from a verifiers dataset) into a DatumSpec for the VfEnvironment."""    
-        vf_task = datum_dict.get("task", "env_0")
-        prompt_messages = datum_dict["prompt"]
-        extra_env_info = {key: datum_dict[key] for key in datum_dict if key != "prompt"}
-        
-        if not("answer" in extra_env_info or "info" in extra_env_info):
-            raise ValueError("One of 'answer' or 'info' must be present in each datapoint. Found neither.", datum_dict)
-
-        message_log: LLMMessageLogType = []
-
-        msg_tokenizer_kwargs = {
-            "chat_template_kwargs": {
-                "tokenize": False,
-                "add_special_tokens": True,
-                "tools": vf_tools[vf_task] # type: ignore
-            },
-            "tokenize_kwargs": {
-                "return_tensors": "pt",
-                "add_special_tokens": False,
-            }
-        }
-
-        # Add user overrides
-        msg_tokenizer_kwargs.update(tokenizer_kwargs)
-        
-        # RLKit expects a format with a standard message log alongside token IDs.
-        # Go through and convert each message.
-        for i, message in enumerate(prompt_messages):
-            # Add the assistant generation header after the final user message so
-            # the model starts generating after the header rather than emitting it.
-            add_gen_prompt = (
-                i == len(prompt_messages) - 1 and message.get("role") == "user"
-            )
-            add_tools = (i == 0)
-
-            chat_template_kwargs = deepcopy(msg_tokenizer_kwargs["chat_template_kwargs"])
-            if not add_tools:
-                chat_template_kwargs["tools"] = None
-
-            raw_message: str = tokenizer.apply_chat_template(  # type: ignore
-                [message],
-                add_generation_prompt=add_gen_prompt,
-                **chat_template_kwargs
-            )
-
-            message["token_ids"] = tokenizer(
-                raw_message,
-                **msg_tokenizer_kwargs["tokenize_kwargs"]
-            )["input_ids"][0]
-
-            message["tokenizer_kwargs"] = msg_tokenizer_kwargs
-            
-            message_log.append(message)
-
-        length = sum(len(m["token_ids"]) for m in message_log)
-
-        if length > max_seq_length:
-            raise ValueError(f"Prompt length {length} exceeds specified maximum input length {max_seq_length}.", datum_dict)
-
-        output: DatumSpec = {
-            "message_log": message_log,
-            "length": length,
-            "extra_env_info": extra_env_info,
-            "loss_multiplier": 1.0,
-            "idx": idx,
-            "task_name": "vf",
-        }
-        return output
-
-    return vf_data_processor
-
 
 def setup_data(
-    tokenizer: TokenizerType,
-    data_config: DataConfig,
-    env_configs: dict[str, Any],
+    env_config: dict[str, Any],
     model_name: str,
-    seed: int,
 ) -> tuple[
-    AllTaskProcessedDataset,
-    Optional[AllTaskProcessedDataset],
-    dict[str, EnvironmentInterface],
-    dict[str, EnvironmentInterface],
+    Dataset,
+    Optional[Dataset],
+    EnvironmentInterface,
+    dict[str, list[ChatCompletionMessageToolCallUnion]]
 ]:
-    print("\n▶ Loading verifiers environment dataset...")
+    logging.info("Loading and processing verifiers environment dataset...")
     
     # Load the verifiers environment, just to get the dataset. This is not used for grading.
-    vf_env_loaded = vf.load_environment(env_configs["vf"]["environment_name"])
+    vf_env_local = vf.load_environment(env_config["vf"]["environment_name"])
     
     # This same requirement is also in the environment worker.
-    assert isinstance(vf_env_loaded, vf.MultiTurnEnv), "Verifiers environment must be a MultiTurnEnv or subclass"
-    
-    assert vf_env_loaded.dataset is not None, "Verifiers environment must have an associated dataset"
+    assert isinstance(vf_env_local, vf.MultiTurnEnv), "Verifiers environment must be a MultiTurnEnv or subclass"
+    assert vf_env_local.dataset is not None, "Verifiers environment must have an associated dataset"
     
     # Fixes up stuff like "question" to normal message log prompts.
-    data = vf_env_loaded.format_dataset(vf_env_loaded.dataset)
+    dataset = vf_env_local.format_dataset(vf_env_local.dataset)
+    val_dataset = vf_env_local.format_dataset(vf_env_local.eval_dataset) if vf_env_local.eval_dataset else None
+    
+    logging.info("Setting up verifiers environment worker...")
 
     # This is the Ray worker that actually runs the environment.
     vf_env = VfEnvironment.options(  # type: ignore # it's wrapped with ray.remote
@@ -208,33 +113,9 @@ def setup_data(
             ),
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }
-    ).remote(env_configs["vf"], model_name)
+    ).remote(env_config["vf"], model_name)
     
-    vf_data_processor = create_data_processor(vf_env_loaded, data_config.get("tokenizer_kwargs", {}))
-    
-    dataset = AllTaskProcessedDataset(
-        data,
-        tokenizer,
-        TaskDataSpec("vf"),
-        vf_data_processor,
-        max_seq_length=data_config["max_input_seq_length"],
-    )
-
-    val_dataset: Optional[AllTaskProcessedDataset] = None
-    if vf_env_loaded.eval_dataset:
-        val_dataset = AllTaskProcessedDataset(
-            vf_env_loaded.eval_dataset,
-            tokenizer,
-            TaskDataSpec("vf"),
-            vf_data_processor,
-            max_seq_length=data_config["max_input_seq_length"],
-        )
-    else:
-        val_dataset = None
-
-    task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: vf_env)
-    task_to_env["vf"] = vf_env
-    return dataset, val_dataset, task_to_env, task_to_env
+    return dataset, val_dataset, vf_env
 
 
 def main() -> None:
@@ -290,26 +171,25 @@ def main() -> None:
     (
         dataset,
         val_dataset,
-        task_to_env,
-        val_task_to_env,
+        vf_env
     ) = setup_data(
-        tokenizer=tokenizer,
-        data_config=config["data"],
-        env_configs=config["env"],
-        seed=config["grpo"]["seed"],
+        env_config=config["env"],
         model_name=config["policy"]["model_name"],
     )
 
-    trainer = GRPOTrainer(config, tokenizer, dataset, val_dataset)
+    trainer = GRPOTrainer(
+        master_config=config,
+        tokenizer=tokenizer,
+        dataset=dataset,
+        val_dataset=val_dataset,
+        env=vf_env
+    )
     
     print("\n" + "=" * 60)
     print(" " * 18 + "SETUP COMPLETE")
     print("=" * 60 + "\n")
 
-    trainer.train(
-        task_to_env=task_to_env,
-        val_task_to_env=val_task_to_env,
-    )
+    trainer.train()
 
 
 if __name__ == "__main__":

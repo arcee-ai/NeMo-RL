@@ -13,36 +13,47 @@
 # limitations under the License.
 import os
 from dataclasses import dataclass
-from typing import Any, NotRequired, Optional, Protocol, TypedDict, Union
+from typing import Any, Literal, NotRequired, Optional, Protocol, TypedDict, Union
 
 import torch
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-# OpenAI-API-like message log, but every messsage may contain associated tensors (i.e. tokenized strings and logprobs) in addition to the original "content" string
-LLMMessageLogType = list[dict[str, Union[str, torch.Tensor]]]
-
-# Flattened message log where all tensors and data are concatenated together for a conversation
-# Converts a conversation from list-of-turns format to key-value format with concatenated tensors
-FlatMessagesType = dict[str, Union[list[str], torch.Tensor]]
+from rlkit.data.messages import APIMessage
 
 PathLike = Union[str, "os.PathLike[Any]"]
 TokenizerType = PreTrainedTokenizerBase
 
-
 class DatumSpec(TypedDict):
-    message_log: LLMMessageLogType
-    length: int  # total (concatenated) length of the message tensors
-    extra_env_info: dict[str, Any]
-    loss_multiplier: float  # multiplier for the loss for this datum. 0 to mask out (say the sample is invalid)
+    # GRPO group ID
     idx: int
-    task_name: NotRequired[str]
-    stop_strings: NotRequired[list[str]]  # Optional stop strings for generation
-    __extra__: NotRequired[Any]  # This allows additional fields of any type
-
+    
+    # Necessary for verifiers rollouts
+    prompt: list[APIMessage]
+    answer: NotRequired[str] = None
+    info: NotRequired[dict[str, Any]] = None
+    task: str
+    
+    # Filled in after rollouts completed
+    completion: NotRequired[list[APIMessage]] = None
+    reward: NotRequired[float] = None
+    
+    # Filled in after tokenization
+    input_ids: NotRequired[torch.Tensor] = None
+    generation_logprobs: NotRequired[torch.Tensor] = None
+    token_mask: NotRequired[torch.Tensor] = None
+    sample_mask: NotRequired[torch.Tensor] = None
+    input_lengths: NotRequired[int] = None
+    
+    # Filled in after rewards
+    advantages: NotRequired[torch.Tensor] = None
+    
+    # Filled in after logprobs
+    prev_logprobs: NotRequired[torch.Tensor] = None
+    reference_policy_logprobs: NotRequired[torch.Tensor] = None
 
 class DPODatumSpec(TypedDict):
-    message_log_chosen: LLMMessageLogType
-    message_log_rejected: LLMMessageLogType
+    message_log_chosen: list[APIMessage]
+    message_log_rejected: list[APIMessage]
     length_chosen: int
     length_rejected: int
     loss_multiplier: float

@@ -11,13 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 import os
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, NotRequired, Optional, TypedDict, TypeVar, cast
 
+from datasets import Dataset
 import numpy as np
+from openai.types.chat import ChatCompletionMessageToolCallUnion
 import ray
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -28,7 +31,7 @@ from rlkit.algorithms.loss_functions import (
     ClippedPGLossDataDict,
     ClippedPGLossFn,
 )
-from rlkit.algorithms.utils import calculate_baseline_and_std_per_prompt, set_seed
+from rlkit.algorithms.utils import set_seed, vector_subseq_starts, _pad_tensor
 from rlkit.config import (
     CheckpointingConfig,
     ClippedPGLossConfig,
@@ -39,14 +42,10 @@ from rlkit.config import (
     GRPOMasterConfig as MasterConfig,
     PolicyConfig,
 )
-from rlkit.data.datasets import AllTaskProcessedDataset, rl_collate_fn
 from rlkit.data.interfaces import (
     DatumSpec,
 )
-from rlkit.data.llm_message_utils import (
-    batched_message_log_to_flat_message,
-    get_keys_from_message_log,
-)
+from rlkit.data.messages import APIMessage
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.environments.interfaces import EnvironmentInterface
@@ -67,6 +66,8 @@ from rlkit.utils.nsys import maybe_gpu_profile_step
 from rlkit.utils.timer import TimeoutChecker, Timer
 
 from rlkit.environments.rollouts import run_vf_rollouts
+
+import verifiers as vf
 
 # ===============================================================================
 # Configuration
@@ -103,12 +104,16 @@ class GRPOTrainer:
         self,
         master_config: MasterConfig,
         tokenizer: TokenizerType,
-        dataset: AllTaskProcessedDataset,
-        val_dataset: Optional[AllTaskProcessedDataset] = None,
+        dataset: Dataset,
+        val_dataset: Optional[Dataset],
+        env: EnvironmentInterface
     ) -> None:
         self.master_config = master_config
         self.tokenizer = tokenizer
-
+        self.dataset = dataset
+        self.val_dataset = val_dataset
+        self.env = env
+        
         policy_config = self.master_config["policy"]
         generation_config = policy_config["generation"]
         loss_config = self.master_config["loss_fn"]
@@ -149,8 +154,11 @@ class GRPOTrainer:
         backend = generation_config["backend"]
         generation_config["model_name"] = policy_config["model_name"]
 
-        policy_generation = self._initialize_generation_interface(
-            backend, generation_config, inference_cluster, policy_config
+        self.policy_generation = self._initialize_generation_interface(
+            backend=backend,
+            generation_config=generation_config,
+            inference_cluster=inference_cluster,
+            policy_config=policy_config,
         )
 
         if last_checkpoint_path:
@@ -164,7 +172,7 @@ class GRPOTrainer:
         if not init_reference_model:
             print("KL coefficient is 0, skipping reference model loading")
 
-        policy = self._initialize_policy(
+        self.policy = self._initialize_policy(
             train_cluster,
             policy_config,
             self.tokenizer,
@@ -175,8 +183,6 @@ class GRPOTrainer:
 
         if not colocated_inference:
             self._initialize_collective_communication(
-                policy,
-                policy_generation,
                 train_cluster,
                 inference_cluster,
                 inference_nodes,
@@ -184,16 +190,12 @@ class GRPOTrainer:
                 backend,
             )
 
-        state_dict_info = policy.prepare_refit_info()
-        if policy_generation is not None:
-            policy_generation.prepare_refit_info(state_dict_info)
+        state_dict_info = self.policy.prepare_refit_info()
+        if self.policy_generation is not None:
+            self.policy_generation.prepare_refit_info(state_dict_info)
 
         loss_fn = ClippedPGLossFn(loss_config)
 
-        self.dataset = dataset
-        self.val_dataset = val_dataset
-        self.policy = policy
-        self.policy_generation = policy_generation
         self.train_cluster = train_cluster
         self.inference_cluster = inference_cluster
         self.clusters = (train_cluster, inference_cluster)
@@ -224,18 +226,20 @@ class GRPOTrainer:
 
     def _setup_dataloaders(
         self,
-        dataset: AllTaskProcessedDataset,
-        val_dataset: Optional[AllTaskProcessedDataset],
+        dataset: Dataset,
+        val_dataset: Optional[Dataset],
         data_config: DataConfig,
         grpo_config: GRPOConfig,
         last_checkpoint_path: Optional[str],
     ) -> tuple[StatefulDataLoader, Optional[StatefulDataLoader]]:
+        rl_collate_fn = lambda batch: {k: [x[k] for x in batch] for k in batch[0]}
+        
         dataloader = StatefulDataLoader(
             dataset,
             batch_size=grpo_config["num_prompts_per_step"],
             shuffle=data_config["shuffle"],
-            collate_fn=rl_collate_fn,
             drop_last=True,
+            collate_fn=rl_collate_fn,
         )
         if last_checkpoint_path is not None:
             dataloader_state_dict = torch.load(
@@ -412,31 +416,29 @@ class GRPOTrainer:
 
     def _initialize_collective_communication(
         self,
-        policy: ColocatablePolicyInterface,
-        policy_generation: Optional[GenerationInterface],
         train_cluster: RayVirtualCluster,
         inference_cluster: RayVirtualCluster,
         inference_nodes: int,
         inference_gpus_per_node: int,
         backend: str,
     ) -> None:
-        assert policy_generation is not None, (
+        assert self.policy_generation is not None, (
             "policy_generation should not be None when collective communication is required"
         )
         ip, port = train_cluster.get_master_address_and_port()
         world_size = inference_nodes * inference_gpus_per_node + 1
         if backend == "vllm_http":
             world_size = (
-                policy_generation.tp_size
-                * policy_generation.dp_size
-                * policy_generation.pp_size
+                self.policy_generation.tp_size
+                * self.policy_generation.dp_size
+                * self.policy_generation.pp_size
                 + 1
             )
         print(
             f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})"
         )
-        futures_train = policy.init_collective(ip, port, world_size)
-        futures_inference = policy_generation.init_collective(ip, port, world_size)
+        futures_train = self.policy.init_collective(ip, port, world_size)
+        futures_inference = self.policy_generation.init_collective(ip, port, world_size)
 
         print(
             f"Waiting for {len(futures_train)} training workers to init communication..."
@@ -451,67 +453,7 @@ class GRPOTrainer:
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
-    def train(
-        self,
-        policy: Optional[ColocatablePolicyInterface] = None,
-        policy_generation: Optional[GenerationInterface] = None,
-        dataloader: Optional[StatefulDataLoader] = None,
-        val_dataloader: Optional[StatefulDataLoader] = None,
-        loss_fn: Optional[LossFunction] = None,
-        task_to_env: Optional[dict[str, EnvironmentInterface]] = None,
-        val_task_to_env: Optional[dict[str, EnvironmentInterface]] = None,
-        logger: Optional[Logger] = None,
-        checkpointer: Optional[CheckpointManager] = None,
-        grpo_save_state: Optional[GRPOSaveState] = None,
-    ) -> None:
-        task_to_env = task_to_env or self.task_to_env
-        if task_to_env is None:
-            raise ValueError(
-                "task_to_env must be provided either during train() or set previously."
-            )
-
-        policy = policy or self.policy
-        if policy is None:
-            raise ValueError(
-                "Policy must be provided either via setup() or by passing it to train()."
-            )
-
-        policy_generation = policy_generation or self.policy_generation
-        dataloader = dataloader or self.dataloader
-        loss_fn = loss_fn or self.loss_fn
-        logger = logger or self.logger
-        checkpointer = checkpointer or self.checkpointer
-        grpo_save_state = grpo_save_state or self.grpo_save_state
-
-        if dataloader is None:
-            raise ValueError(
-                "Dataloader must be available from setup() or passed to train()."
-            )
-        if loss_fn is None:
-            raise ValueError(
-                "Loss function must be available from setup() or passed to train()."
-            )
-        if logger is None:
-            raise ValueError(
-                "Logger must be available from setup() or passed to train()."
-            )
-        if checkpointer is None:
-            raise ValueError(
-                "CheckpointManager must be available from setup() or passed to train()."
-            )
-        if grpo_save_state is None:
-            raise ValueError(
-                "GRPO save state must be available from setup() or passed to train()."
-            )
-
-        if val_dataloader is None:
-            val_dataloader = self.val_dataloader
-        if val_task_to_env is None:
-            val_task_to_env = self.val_task_to_env
-
-        self.task_to_env = task_to_env
-        self.val_task_to_env = val_task_to_env
-
+    def train(self) -> None:
         timer = Timer()
         timeout = TimeoutChecker(
             timeout=self.master_config["checkpointing"]["checkpoint_must_save_by"],
@@ -520,23 +462,14 @@ class GRPOTrainer:
         timeout.start_iterations()
 
         need_refit = True
-        if policy_generation is None:
-            policy_generation = policy  # type: ignore[assignment]
+        if self.policy_generation is None:
+            self.policy_generation = self.policy  # type: ignore[assignment]
             need_refit = False
         policy_generation_stale = True
-        assert policy_generation is not None
+        assert self.policy_generation is not None
 
-        self.policy = policy
-        self.policy_generation = policy_generation
-        self.dataloader = dataloader
-        self.val_dataloader = val_dataloader
-        self.loss_fn = loss_fn
-        self.logger = logger
-        self.checkpointer = checkpointer
-        self.grpo_save_state = grpo_save_state
-
-        step = grpo_save_state["step"]
-        consumed_samples = grpo_save_state["consumed_samples"]
+        step = self.grpo_save_state["step"]
+        consumed_samples = self.grpo_save_state["consumed_samples"]
         val_period = self.master_config["grpo"]["val_period"]
         val_at_start = self.master_config["grpo"]["val_at_start"]
         colocated_inference = self.master_config["policy"]["generation"]["colocated"][
@@ -546,76 +479,74 @@ class GRPOTrainer:
 
         if val_at_start and step == 0:
             policy_generation_stale = self._run_initial_validation(
-                policy,
-                policy_generation,
-                val_dataloader,
-                val_task_to_env,
-                logger,
+                self.policy,
+                self.policy_generation,
+                self.val_dataloader,
+                self.logger,
                 need_refit,
                 policy_generation_stale,
                 colocated_inference,
             )
 
-        max_steps = min(len(dataloader), self.master_config["grpo"]["max_num_steps"])
+        max_steps = min(len(self.dataloader), self.master_config["grpo"]["max_num_steps"])
 
-        for batch in dataloader:
+        for raw_batch in self.dataloader:
+            batch = BatchedDataDict[DatumSpec](raw_batch)
+            batch["idx"] = list(range(batch.size))
+            
             self._prepare_step_banner(step, max_steps)
-            maybe_gpu_profile_step(policy, step + 1)
-            if policy != policy_generation:
-                maybe_gpu_profile_step(policy_generation, step + 1)
+            maybe_gpu_profile_step(self.policy, step + 1)
+            if self.policy != self.policy_generation:
+                maybe_gpu_profile_step(self.policy_generation, step + 1)
 
             val_metrics: Optional[dict[str, Any]] = None
             validation_timings: Optional[dict[str, Any]] = None
 
             with timer.time("total_step_time"):
-                print("▶ Preparing batch...")
-                repeated_batch, input_ids = self._prepare_batch(batch, timer)
-
-                print(
-                    f"▶ Generating responses for batch of size {repeated_batch.size}..."
+                repeated_batch = batch.repeat_interleave(
+                    self.master_config["grpo"]["num_generations_per_prompt"]
                 )
+
+                logging.info(f"Generating responses for batch of size {repeated_batch.size}...")
+                
                 (
                     repeated_batch,
                     rollout_metrics,
                     policy_generation_stale,
                 ) = self._run_rollouts(
-                    policy,
-                    policy_generation,
                     repeated_batch,
                     timer,
-                    task_to_env,
                     need_refit,
                     policy_generation_stale,
                     colocated_inference,
                     max_rollout_turns,
                 )
+                
+                repeated_batch = self._process_rollouts(repeated_batch)
+                
+                assert repeated_batch["input_ids"].dtype == torch.int64, "(after processing) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
                 print("▶ Processing rewards...")
-                rewards, advantages = self._compute_rewards_and_advantages(
-                    repeated_batch, input_ids, timer
+                repeated_batch = self._compute_advantages(
+                    repeated_batch, timer
                 )
-
-                (
-                    flat_messages,
-                    input_lengths,
-                ) = self._annotate_message_logs(repeated_batch, advantages, timer)
-
-                train_data = self._build_train_data(
-                    flat_messages, input_lengths, repeated_batch
-                )
+                
+                assert repeated_batch["input_ids"].dtype == torch.int64, "(after advantage) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
                 print("▶ Preparing for logprob inference...")
-                self._prepare_for_logprob_inference(policy, timer)
+                self._prepare_for_logprob_inference(timer)
 
                 print("▶ Computing logprobs...")
-                self._compute_logprobs(policy, train_data, timer)
+                self._compute_logprobs(repeated_batch, timer)
+                
+                assert repeated_batch["input_ids"].dtype == torch.int64, "(after logprobs) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
                 print("▶ Preparing for training...")
                 policy_generation_stale = True
-                self._prepare_for_training(policy, timer)
+                self._prepare_for_training(timer)
 
                 print("▶ Training policy...")
-                train_results = self._train_policy(policy, train_data, loss_fn, timer)
+                train_results = self._train_policy(repeated_batch, timer)
 
                 is_last_step = step + 1 == max_steps
 
@@ -624,16 +555,12 @@ class GRPOTrainer:
                     validation_timings,
                     policy_generation_stale,
                 ) = self._run_validation_step(
-                    policy,
-                    policy_generation,
-                    val_dataloader,
-                    val_task_to_env,
                     step,
                     val_period,
                     need_refit,
                     policy_generation_stale,
                     colocated_inference,
-                    logger,
+                    self.logger,
                 )
 
                 consumed_samples += self.master_config["grpo"]["num_prompts_per_step"]
@@ -648,10 +575,6 @@ class GRPOTrainer:
                 should_save_by_timeout = timeout.check_save()
 
                 self._save_checkpoint(
-                    policy,
-                    dataloader,
-                    checkpointer,
-                    grpo_save_state,
                     step,
                     val_metrics,
                     consumed_samples,
@@ -661,16 +584,11 @@ class GRPOTrainer:
                 )
 
             self._log_training_step(
-                step,
-                repeated_batch,
-                flat_messages,
-                rewards,
-                train_data,
-                input_lengths,
-                train_results,
-                rollout_metrics,
-                timer,
-                logger,
+                step=step,
+                repeated_batch=repeated_batch,
+                train_results=train_results,
+                rollout_metrics=rollout_metrics,
+                timer=timer
             )
 
             timer.reset()
@@ -680,10 +598,8 @@ class GRPOTrainer:
 
     def _run_initial_validation(
         self,
-        policy: ColocatablePolicyInterface,
         policy_generation: GenerationInterface,
         val_dataloader: Optional[StatefulDataLoader],
-        val_task_to_env: Optional[dict[str, EnvironmentInterface]],
         logger: Logger,
         need_refit: bool,
         policy_generation_stale: bool,
@@ -691,14 +607,13 @@ class GRPOTrainer:
     ) -> bool:
         print("\n🔍 Running initial validation...")
         if need_refit and policy_generation_stale:
-            self._refit_policy_generation(policy, policy_generation, colocated_inference)
+            self._refit_policy_generation(colocated_inference)
             policy_generation_stale = False
         else:
             policy_generation.prepare_for_generation()
         val_metrics, validation_timings = self._validate(
             policy_generation,
             val_dataloader,
-            val_task_to_env,
             step=0,
         )
         policy_generation.finish_generation()
@@ -709,28 +624,10 @@ class GRPOTrainer:
     def _prepare_step_banner(self, step: int, max_steps: int) -> None:
         print(f"\n{'=' * 25} Step {step + 1}/{max_steps} {'=' * 25}")
 
-    def _prepare_batch(
-        self,
-        batch: BatchedDataDict[DatumSpec],
-        timer: Timer,
-    ) -> tuple[BatchedDataDict[DatumSpec], torch.Tensor]:
-        with timer.time("data_processing"):
-            repeated_batch = batch.repeat_interleave(
-                self.master_config["grpo"]["num_generations_per_prompt"]
-            )
-            batched_flat, _ = batched_message_log_to_flat_message(
-                repeated_batch["message_log"],
-                pad_value_dict={"token_ids": self.tokenizer.pad_token_id},
-            )
-        return repeated_batch, batched_flat["token_ids"]
-
     def _run_rollouts(
         self,
-        policy: ColocatablePolicyInterface,
-        policy_generation: GenerationInterface,
         repeated_batch: BatchedDataDict[DatumSpec],
         timer: Timer,
-        task_to_env: dict[str, EnvironmentInterface],
         need_refit: bool,
         policy_generation_stale: bool,
         colocated_inference: bool,
@@ -742,12 +639,10 @@ class GRPOTrainer:
     ]:
         with timer.time("prepare_for_generation"):
             if need_refit and policy_generation_stale:
-                self._refit_policy_generation(
-                    policy, policy_generation, colocated_inference, timer=timer
-                )
+                self._refit_policy_generation(colocated_inference, timer=timer)
                 policy_generation_stale = False
             else:
-                policy_generation.prepare_for_generation()
+                self.policy_generation.prepare_for_generation()
 
         with timer.time("generation"):
             if "vf" not in self.master_config.get("env", {}):
@@ -759,45 +654,101 @@ class GRPOTrainer:
             generation_cfg = self.master_config["policy"]["generation"]
 
             repeated_batch, rollout_metrics = run_vf_rollouts(
-                policy_generation=policy_generation,
+                policy_generation=self.policy_generation,
                 input_batch=repeated_batch,
                 vf_semaphore=env_cfg.get("generation_semaphore"),
                 max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
                 max_new_tokens=generation_cfg.get("max_new_tokens"),
-                task_to_env=task_to_env,
+                env=self.env,
                 grpo_gids=repeated_batch["idx"],
                 greedy=False,
             )
-            policy_generation.finish_generation()
+            self.policy_generation.finish_generation()
 
         return repeated_batch, rollout_metrics, policy_generation_stale
 
-    def _compute_rewards_and_advantages(
+    def _process_rollouts(self, repeated_batch: BatchedDataDict[DatumSpec]) -> BatchedDataDict[DatumSpec]:
+        # Tokenize entire conversation
+        assert "completion" in repeated_batch, "After-rollout tokenization method called before rollouts completed"
+        prompts = repeated_batch["prompt"]
+        completions = repeated_batch["completion"]
+        
+        repeated_batch["input_ids"] = [None for _ in prompts]
+        repeated_batch["generation_logprobs"] = [None for _ in prompts]
+        repeated_batch["token_mask"] = [None for _ in prompts]
+        repeated_batch["input_lengths"] = torch.zeros(len(prompts), dtype=torch.int32)
+        repeated_batch["sample_mask"] = torch.ones(len(prompts), dtype=torch.float32)
+        
+        for i, (prompt, completion) in enumerate(zip(prompts, completions)):
+            token_ids, generation_logprobs, input_length = self._process_rollout(prompt, completion)
+            
+            repeated_batch["input_ids"][i] = token_ids
+            repeated_batch["generation_logprobs"][i] = generation_logprobs
+            repeated_batch["token_mask"][i] = generation_logprobs != -9999
+            repeated_batch["input_lengths"][i] = input_length
+        
+        # Pad and stack tensors where necessary
+        max_len = max([input_ids.shape[0] for input_ids in repeated_batch["input_ids"]])
+        for key in ["input_ids", "generation_logprobs", "token_mask"]:
+            padded = [
+                _pad_tensor(
+                    repeated_batch[key][i],
+                    max_len,
+                    "right",
+                    self.tokenizer.pad_token_id if key == "input_ids" else 0,
+                ) for i in range(len(repeated_batch[key]))
+            ]
+            repeated_batch[key] = torch.stack(padded)
+        
+        return repeated_batch
+    
+    def _process_rollout(
+        self,
+        prompt: list[APIMessage],
+        completion: list[APIMessage]
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        convo = prompt + completion
+        
+        # Extract prompt+completion token IDs and logprobs from the vLLM patch.
+        assert convo[-1]["role"] == "assistant", "Last message in conversation must be an assistant message."
+        token_ids = convo[-1]["token_ids"]
+        generation_logprobs = convo[-1]["generation_logprobs"]
+        
+        # Get logprobs from previous assistant turns
+        for msg in reversed(completion):
+            if msg["role"] == "assistant":
+                msg_gen_logprobs = msg["generation_logprobs"]
+                generation_logprobs[:len(msg_gen_logprobs)] = msg_gen_logprobs
+        
+        # Calculate length of original prompt - that is, no response tokens from the environment itself.
+        assert completion[0]["role"] == "assistant", "First message in completion must be an assistant message."
+        input_length = len([x for i, x in enumerate(completion[0]["token_ids"]) if generation_logprobs[i] != -9999])
+        
+        return torch.tensor(token_ids, dtype=torch.int64), torch.tensor(generation_logprobs), input_length
+
+    def _compute_advantages(
         self,
         repeated_batch: BatchedDataDict[DatumSpec],
-        input_ids: torch.Tensor,
         timer: Timer,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> BatchedDataDict[DatumSpec]:
         with timer.time("reward_calculation"):
-            rewards = repeated_batch["total_reward"]
+            rewards = repeated_batch["reward"]
             print("▶ Computing advantages...")
-            baseline, std = calculate_baseline_and_std_per_prompt(
-                input_ids,
-                rewards,
-                torch.ones_like(rewards),
-                leave_one_out_baseline=self.master_config["grpo"][
-                    "use_leave_one_out_baseline"
-                ],
+            baseline, std = self._calculate_baseline_and_std_per_prompt(
+                torch.tensor(repeated_batch["idx"]),
+                repeated_batch["reward"],
+                self.master_config["grpo"].get("use_leave_one_out_baseline", False),
+                torch.ones(len(repeated_batch["idx"]))
             )
             # Simple group baseline: A_i = R_i - R̄ (no std normalization)
-            advantages = (rewards - baseline).unsqueeze(-1)
+            advantages = (rewards - baseline).unsqueeze(-1).repeat(1, max([len(x) for x in repeated_batch["input_ids"]]))
 
             # Filter zero-advantage groups (all generations have identical rewards)
             zero_variance_mask = std == 0
             if zero_variance_mask.any():
                 num_filtered = zero_variance_mask.sum().item()
                 print(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // self.master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
-                repeated_batch["loss_multiplier"] = repeated_batch["loss_multiplier"] * (~zero_variance_mask).float()
+                repeated_batch["token_mask"] = repeated_batch["token_mask"] * (~zero_variance_mask).float()[:, None]
 
             # Optional: z-score advantages within the mini-batch for stability
             if self.master_config["grpo"].get("minibatch_advantage_renorm", False):
@@ -808,78 +759,82 @@ class GRPOTrainer:
                     if adv_std > 0:
                         advantages = (advantages - adv_mean) / adv_std
 
-        return rewards, advantages
+        repeated_batch["advantages"] = advantages
 
-    def _annotate_message_logs(
+        return repeated_batch
+    
+    def _calculate_baseline_and_std_per_prompt(
         self,
-        repeated_batch: BatchedDataDict[DatumSpec],
-        advantages: torch.Tensor,
-        timer: Timer,
-    ) -> tuple[dict[str, Any], torch.Tensor]:
-        with timer.time("data_processing"):
-            for i, message_log in enumerate(repeated_batch["message_log"]):
-                for message in message_log:
-                    if message["role"] == "assistant":
-                        message["token_loss_mask"] = torch.ones_like(
-                            message["token_ids"]
-                        )
-                    else:
-                        message["token_loss_mask"] = torch.zeros_like(
-                            message["token_ids"]
-                        )
-                    if "generation_logprobs" not in message:
-                        message["generation_logprobs"] = torch.zeros_like(
-                            message["token_ids"], dtype=torch.float32
-                        )
-                    message["advantages"] = advantages[i].expand(
-                        message["token_ids"].shape
+        indices: torch.Tensor,
+        rewards: torch.Tensor,
+        leave_one_out_baseline: bool,
+        valid_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        unique_indices = torch.unique(indices)
+
+        baseline = torch.zeros_like(rewards)
+        sq_baseline = torch.zeros_like(rewards)
+        device_ordinal = rewards.get_device()
+        if device_ordinal == -1:
+            reward_device = torch.device("cpu")
+        else:
+            reward_device = torch.device(reward_device)
+
+        for i in range(len(unique_indices)):
+            is_matching_prompt = (indices == unique_indices[i])
+            prompt_idx = torch.arange(len(indices), device=reward_device)[
+                is_matching_prompt
+            ]
+
+            if leave_one_out_baseline:
+                baseline_mask_matrix = (1 - torch.eye(len(prompt_idx))).to(reward_device)
+            else:
+                baseline_mask_matrix = torch.ones((len(prompt_idx), len(prompt_idx))).to(
+                    reward_device
+                )
+
+            if not valid_mask[prompt_idx].any():
+                # Ignore sample: there are no valid responses, so set baseline equal to reward
+                # to ignore it in the loss computation
+                baseline[prompt_idx] = rewards[prompt_idx]
+            else:
+                num_valid = valid_mask[prompt_idx].float().sum() - int(
+                    leave_one_out_baseline
+                )
+                prompt_baseline = (
+                    torch.matmul(
+                        baseline_mask_matrix, rewards[prompt_idx] * valid_mask[prompt_idx]
                     )
+                    / num_valid
+                )
+                prompt_baseline_square = (
+                    torch.matmul(
+                        baseline_mask_matrix,
+                        torch.pow(rewards[prompt_idx], 2) * valid_mask[prompt_idx],
+                    )
+                    / num_valid
+                )
 
-            flat_messages, input_lengths = batched_message_log_to_flat_message(
-                repeated_batch["message_log"],
-                pad_value_dict={"token_ids": self.tokenizer.pad_token_id},
-                make_sequence_length_divisible_by=self.master_config["policy"][
-                    "make_sequence_length_divisible_by"
-                ],
-            )
-        return flat_messages, input_lengths
+                baseline[prompt_idx] = prompt_baseline
+                sq_baseline[prompt_idx] = prompt_baseline_square
 
-    def _build_train_data(
-        self,
-        flat_messages: dict[str, Any],
-        input_lengths: torch.Tensor,
-        repeated_batch: BatchedDataDict[DatumSpec],
-    ) -> BatchedDataDict[ClippedPGLossDataDict]:
-        train_data = BatchedDataDict[ClippedPGLossDataDict](
-            {
-                "input_ids": flat_messages["token_ids"],
-                "input_lengths": input_lengths,
-                "advantages": flat_messages["advantages"],
-                "generation_logprobs": flat_messages["generation_logprobs"],
-                "token_mask": flat_messages["token_loss_mask"],
-                "sample_mask": repeated_batch["loss_multiplier"],
-            }
-        )
-        train_data.to("cpu")
-        return train_data
+        std = (sq_baseline - baseline.square()).sqrt().nan_to_num(0)
+        return baseline, std
 
-    def _prepare_for_logprob_inference(
-        self, policy: ColocatablePolicyInterface, timer: Timer
-    ) -> None:
+    def _prepare_for_logprob_inference(self, timer: Timer) -> None:
         with timer.time("logprob_inference_prep"):
-            policy.prepare_for_lp_inference()
+            self.policy.prepare_for_lp_inference()
 
     def _compute_logprobs(
         self,
-        policy: ColocatablePolicyInterface,
-        train_data: BatchedDataDict[ClippedPGLossDataDict],
+        train_data: BatchedDataDict[DatumSpec],
         timer: Timer,
     ) -> None:
         with timer.time("policy_and_reference_logprobs"):
-            fprop_logprobs = policy.get_logprobs(train_data)["logprobs"]
+            fprop_logprobs = self.policy.get_logprobs(train_data)["logprobs"]
             
             if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
-                reference_logprobs = policy.get_reference_policy_logprobs(train_data)[
+                reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
                 ]
             else:
@@ -887,29 +842,25 @@ class GRPOTrainer:
             
             train_data["prev_logprobs"] = fprop_logprobs
             train_data["reference_policy_logprobs"] = reference_logprobs
+        
+        return train_data
 
     def _prepare_for_training(
-        self, policy: ColocatablePolicyInterface, timer: Timer
+        self, timer: Timer
     ) -> None:
         with timer.time("training_prep"):
-            policy.prepare_for_training()
+            self.policy.prepare_for_training()
 
     def _train_policy(
         self,
-        policy: ColocatablePolicyInterface,
         train_data: BatchedDataDict[ClippedPGLossDataDict],
-        loss_fn: LossFunction,
         timer: Timer,
     ) -> dict[str, Any]:
         with timer.time("policy_training"):
-            return policy.train(train_data, loss_fn)
+            return self.policy.train(train_data, self.loss_fn)
 
     def _run_validation_step(
         self,
-        policy: ColocatablePolicyInterface,
-        policy_generation: GenerationInterface,
-        val_dataloader: Optional[StatefulDataLoader],
-        val_task_to_env: Optional[dict[str, EnvironmentInterface]],
         step: int,
         val_period: int,
         need_refit: bool,
@@ -926,20 +877,16 @@ class GRPOTrainer:
 
         if val_period > 0 and (step + 1) % val_period == 0:
             if need_refit and policy_generation_stale:
-                self._refit_policy_generation(
-                    policy, policy_generation, colocated_inference
-                )
+                self._refit_policy_generation(colocated_inference)
                 policy_generation_stale = False
             else:
-                policy_generation.prepare_for_generation()
+                self.policy_generation.prepare_for_generation()
 
             val_metrics, validation_timings = self._validate(
-                policy_generation,
-                val_dataloader,
-                val_task_to_env,
+                self.policy_generation,
                 step=step + 1,
             )
-            policy_generation.finish_generation()
+            self.policy_generation.finish_generation()
             logger.log_metrics(validation_timings, step + 1, prefix="timing/validation")
             logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
@@ -947,10 +894,6 @@ class GRPOTrainer:
 
     def _save_checkpoint(
         self,
-        policy: ColocatablePolicyInterface,
-        dataloader: StatefulDataLoader,
-        checkpointer: CheckpointManager,
-        grpo_save_state: GRPOSaveState,
         step: int,
         val_metrics: Optional[dict[str, Any]],
         consumed_samples: int,
@@ -963,18 +906,18 @@ class GRPOTrainer:
         if not (should_save_by_step or should_save_by_timeout):
             return
 
-        policy.prepare_for_training()
+        self.policy.prepare_for_training()
 
-        grpo_save_state["step"] = step + 1
+        self.grpo_save_state["step"] = step + 1
         if val_metrics is not None:
-            grpo_save_state["val_reward"] = val_metrics["accuracy"]
-        elif "val_reward" in grpo_save_state:
-            del grpo_save_state["val_reward"]
-        grpo_save_state["consumed_samples"] = consumed_samples
+            self.grpo_save_state["val_reward"] = val_metrics["accuracy"]
+        elif "val_reward" in self.grpo_save_state:
+            del self.grpo_save_state["val_reward"]
+        self.grpo_save_state["consumed_samples"] = consumed_samples
 
         if self.master_config["checkpointing"]["metric_name"] is not None:
             metric_name = self.master_config["checkpointing"]["metric_name"]
-            if metric_name not in grpo_save_state:
+            if metric_name not in self.grpo_save_state:
                 warnings.warn(
                     f"You asked to save checkpoints based on {metric_name} but the metric is not found in the save state. "
                     "Saving most recent k checkpoints instead."
@@ -983,10 +926,10 @@ class GRPOTrainer:
 
         with timer.time("checkpointing"):
             print(f"Saving checkpoint for step {step + 1}...")
-            checkpoint_path = checkpointer.init_tmp_checkpoint(
-                step + 1, grpo_save_state, self.master_config
+            checkpoint_path = self.checkpointer.init_tmp_checkpoint(
+                step + 1, self.grpo_save_state, self.master_config
             )
-            policy.save_checkpoint(
+            self.policy.save_checkpoint(
                 weights_path=os.path.join(
                     checkpoint_path, "policy", "weights"
                 ),
@@ -998,37 +941,34 @@ class GRPOTrainer:
                 ),
             )
             torch.save(
-                dataloader.state_dict(),
+                self.dataloader.state_dict(),
                 os.path.join(checkpoint_path, "train_dataloader.pt"),
             )
-            checkpointer.finalize_checkpoint(checkpoint_path)
+            self.checkpointer.finalize_checkpoint(checkpoint_path)
 
     def _log_training_step(
         self,
         step: int,
         repeated_batch: BatchedDataDict[DatumSpec],
-        flat_messages: dict[str, Any],
-        rewards: torch.Tensor,
-        train_data: BatchedDataDict[ClippedPGLossDataDict],
-        input_lengths: torch.Tensor,
         train_results: dict[str, Any],
         rollout_metrics: dict[str, Any],
         timer: Timer,
-        logger: Logger,
     ) -> None:
-        log_data = {"content": flat_messages["content"]}
-        log_data["rewards"] = rewards.tolist()
-        log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
-        log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
-        log_data["input_lengths"] = input_lengths.tolist()
-        logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
+        log_data = {"content": repeated_batch["prompt"] + repeated_batch["completion"]}
+        log_data["rewards"] = repeated_batch["reward"].tolist()
+        log_data["generation_logprobs"] = repeated_batch["generation_logprobs"].tolist()
+        log_data["prev_logprobs"] = repeated_batch["prev_logprobs"].tolist()
+        log_data["input_lengths"] = sum(len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"])
+        
+        # Logger chokes on integers, drop it
+        self.logger.log_batched_dict_as_jsonl({k: v for k, v in log_data.items() if k != "input_lengths"}, f"train_data_step{step}.jsonl")
 
         metrics = {
             "loss": train_results["loss"].numpy(),
-            "reward": rewards.numpy(),
+            "reward": repeated_batch["reward"].numpy(),
             "grad_norm": train_results["grad_norm"].numpy(),
-            "mean_prompt_length": repeated_batch["length"].numpy(),
-            "total_num_tokens": input_lengths.numpy(),
+            "prompt_tokens": [input_length for input_length in repeated_batch["input_lengths"]],
+            "total_num_tokens": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
         }
         metrics.update(train_results["all_mb_metrics"])
         for key, value in list(metrics.items()):
@@ -1047,14 +987,14 @@ class GRPOTrainer:
 
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore[assignment]
         if metrics.get("token_mult_prob_error", 0) > 1.05:
-            logger.log_plot_token_mult_prob_error(
+            self.logger.log_plot_token_mult_prob_error(
                 {
-                    "prompt_lengths": repeated_batch["length"],
-                    "full_lengths": input_lengths,
-                    "generation_logprobs": train_data["generation_logprobs"],
-                    "prev_logprobs": train_data["prev_logprobs"],
-                    "token_mask": train_data["token_mask"],
-                    "sample_mask": train_data["sample_mask"],
+                    "full_lengths": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
+                    "generation_logprobs": repeated_batch["generation_logprobs"],
+                    "prev_logprobs": repeated_batch["prev_logprobs"],
+                    "token_mask": repeated_batch["token_mask"],
+                    "sample_mask": repeated_batch["sample_mask"],
+                    "prompt_lengths": repeated_batch["input_lengths"]
                 },
                 step + 1,
                 name="train/token_mult_prob_error_plot_sample",
@@ -1062,7 +1002,7 @@ class GRPOTrainer:
 
         print("\n📊 Training Results:")
         print(f"  • Loss: {metrics['loss']:.4f}")
-        print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
+        print(f"  • Avg Reward: {np.mean(repeated_batch['reward'].numpy()):.4f}")
         print(
             f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
         )
@@ -1105,20 +1045,18 @@ class GRPOTrainer:
             percent = (value / total_time * 100) if total_time > 0 else 0
             print(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
 
-        logger.log_metrics(metrics, step + 1, prefix="train")
-        logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
+        self.logger.log_metrics(metrics, step + 1, prefix="train")
+        self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
     def _refit_policy_generation(
         self,
-        policy: ColocatablePolicyInterface,
-        policy_generation: GenerationInterface,
         colocated_inference: bool,
         _refit_buffer_size_gb: Optional[int] = None,
         timer: Optional[Timer] = None,
     ) -> None:
         if colocated_inference:
-            policy.offload_before_refit()
-            policy_generation.prepare_for_generation(tags=["weights"])
+            self.policy.offload_before_refit()
+            self.policy_generation.prepare_for_generation(tags=["weights"])
 
         timer_context = (
             timer.time("prepare_for_generation/transfer_and_update_weights")
@@ -1128,7 +1066,7 @@ class GRPOTrainer:
         with timer_context:
             update_success = False
             if colocated_inference:
-                grouped_param_keys = policy.prepare_weights_for_ipc(
+                grouped_param_keys = self.policy.prepare_weights_for_ipc(
                     _refit_buffer_size_gb=_refit_buffer_size_gb
                 )
                 total_num_keys = sum(len(keys) for keys in grouped_param_keys)
@@ -1136,18 +1074,18 @@ class GRPOTrainer:
                     f"[Refit] Split {total_num_keys} keys into {len(grouped_param_keys)} groups"
                 )
                 for keys in grouped_param_keys:
-                    ipc_handles = policy.get_weights_ipc_handles(keys)
+                    ipc_handles = self.policy.get_weights_ipc_handles(keys)
                     update_success = (
-                        policy_generation.update_weights_from_ipc_handles(
+                        self.policy_generation.update_weights_from_ipc_handles(
                             ipc_handles
                         )
                     )
                     if not update_success:
                         break
             else:
-                futures_train = policy.broadcast_weights_for_collective()
+                futures_train = self.policy.broadcast_weights_for_collective()
                 futures_inference = (
-                    policy_generation.update_weights_from_collective()
+                    self.policy_generation.update_weights_from_collective()
                 )
                 self._wait_on_futures(futures_train)
                 results = self._wait_on_futures(futures_inference)
@@ -1165,17 +1103,11 @@ class GRPOTrainer:
                 raise RuntimeError(error_message)
 
         if colocated_inference:
-            policy.offload_after_refit()
-            policy_generation.prepare_for_generation(tags=["kv_cache"])
+            self.policy.offload_after_refit()
+            self.policy_generation.prepare_for_generation(tags=["kv_cache"])
 
-    def _validate(
-        self,
-        policy_generation: GenerationInterface,
-        val_dataloader: Optional[StatefulDataLoader],
-        val_task_to_env: Optional[dict[str, EnvironmentInterface]],
-        step: int,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if val_dataloader is None:
+    def _validate(self, step: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        if self.val_dataloader is None:
             print("  ⚠️ No validation dataloader provided, skipping validation")
             return {}, {}
 
@@ -1187,52 +1119,32 @@ class GRPOTrainer:
         timer = Timer()
         with timer.time("total_validation_time"):
             print(f"▶ Starting validation at step {step}...")
-
-            total_rewards: list[float] = []
-            total_lengths: list[float] = []
-            all_message_logs: list[list[dict[str, Any]]] = []
-
-            max_batches = (
-                self.master_config["grpo"]["max_val_samples"]
-                // self.master_config["grpo"]["val_batch_size"]
-            )
-            for batch_idx, val_batch in enumerate(val_dataloader):
-                if batch_idx >= max_batches:
-                    break
-
-                if val_task_to_env is None:
-                    raise RuntimeError(
-                        "Validation requires a verifiers environment mapping."
-                    )
-
-                env_cfg = self.master_config["env"]["vf"]
-                generation_cfg = self.master_config["policy"]["generation"]
-
-                val_batch, gen_metrics = run_vf_rollouts(
-                    policy_generation=policy_generation,
-                    input_batch=val_batch,
-                    vf_semaphore=env_cfg.get("generation_semaphore"),
-                    max_seq_len=self.master_config["policy"][
-                        "max_total_sequence_length"
-                    ],
-                    max_new_tokens=generation_cfg.get("max_new_tokens"),
-                    task_to_env=val_task_to_env,
-                    grpo_gids=val_batch["idx"],
-                    greedy=False,
+            
+            total_rewards = []
+            total_lengths = []
+            all_message_logs = []
+            
+            for val_batch in self.val_dataloader:
+                repeated_batch = val_batch.repeat_interleave(
+                    self.master_config["grpo"]["num_generations_per_prompt"]
                 )
-                rewards = val_batch["total_reward"]
+                
+                (
+                    repeated_batch,
+                    rollout_metrics,
+                    _,
+                ) = self._run_rollouts(
+                    repeated_batch,
+                    timer,
+                    False,
+                    False,
+                    self.colocated_inference,
+                    self.master_config["grpo"]["max_rollout_turns"],
+                )
 
-                total_rewards.extend(rewards.tolist())
-                total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
-
-                to_env = [
-                    get_keys_from_message_log(
-                        val_batch["message_log"][i],
-                        ["role", "content", "tool_calls", "tool_call_id"],
-                    )
-                    for i in range(len(val_batch["message_log"]))
-                ]
-                all_message_logs.extend(to_env)
+                total_rewards.extend(repeated_batch["rewards"])
+                total_lengths.extend([len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]])
+                all_message_logs.extend([prompt + completion for prompt, completion in zip(repeated_batch["prompt"], repeated_batch["completion"])])
 
             accuracy = sum(total_rewards) / len(total_rewards)
             avg_length = sum(total_lengths) / len(total_lengths)
@@ -1294,62 +1206,3 @@ class GRPOTrainer:
             results.append(ray.get(fut))
 
         return results
-
-
-# ===============================================================================
-# Backwards-compatible module-level API
-# ===============================================================================
-
-
-def setup(
-    master_config: MasterConfig,
-    tokenizer: TokenizerType,
-    dataset: AllTaskProcessedDataset,
-    val_dataset: Optional[AllTaskProcessedDataset],
-) -> tuple[
-    ColocatablePolicyInterface,
-    Optional[GenerationInterface],
-    tuple[RayVirtualCluster, RayVirtualCluster],
-    StatefulDataLoader,
-    Optional[StatefulDataLoader],
-    ClippedPGLossFn,
-    Logger,
-    CheckpointManager,
-    GRPOSaveState,
-    MasterConfig,
-]:
-    """Retained for backward compatibility; use ``GRPOTrainer.setup`` instead."""
-
-    trainer = GRPOTrainer(master_config, tokenizer)
-    return trainer.setup(dataset, val_dataset)
-
-
-def grpo_train(
-    policy: ColocatablePolicyInterface,
-    policy_generation: Optional[GenerationInterface],
-    dataloader: StatefulDataLoader,
-    val_dataloader: Optional[StatefulDataLoader],
-    tokenizer: TokenizerType,
-    loss_fn: LossFunction,
-    task_to_env: dict[str, EnvironmentInterface],
-    val_task_to_env: Optional[dict[str, EnvironmentInterface]],
-    logger: Logger,
-    checkpointer: CheckpointManager,
-    grpo_save_state: GRPOSaveState,
-    master_config: MasterConfig,
-) -> None:
-    """Retained for backward compatibility; use ``GRPOTrainer.train`` instead."""
-
-    trainer = GRPOTrainer(master_config, tokenizer)
-    trainer.train(
-        policy=policy,
-        policy_generation=policy_generation,
-        dataloader=dataloader,
-        val_dataloader=val_dataloader,
-        loss_fn=loss_fn,
-        task_to_env=task_to_env,
-        val_task_to_env=val_task_to_env,
-        logger=logger,
-        checkpointer=checkpointer,
-        grpo_save_state=grpo_save_state,
-    )

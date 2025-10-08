@@ -2,12 +2,140 @@
 import asyncio
 import logging
 from typing import Any, Optional
-from ray import serve
+from weakref import WeakValueDictionary
+
 from fastapi import FastAPI, Request
+from ray import serve
 import torch
 
 # Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
 _serve_app = FastAPI()
+
+
+_TOKEN_ID_LOGPROB_PATCH_APPLIED = False
+_REQUEST_OUTPUT_REGISTRY: dict[str, Any] | None = None
+
+
+def _ensure_full_sequence_logprob_patch() -> None:
+    global _TOKEN_ID_LOGPROB_PATCH_APPLIED, _REQUEST_OUTPUT_REGISTRY
+    if _TOKEN_ID_LOGPROB_PATCH_APPLIED:
+        return
+
+    try:
+        from vllm.entrypoints.openai.protocol import (
+            ChatCompletionLogProbs,
+            ChatCompletionLogProbsContent,
+            ChatCompletionResponse,
+        )
+        from vllm.entrypoints.openai.serving_chat import (
+            OpenAIServingChat,
+        )
+        from vllm.entrypoints.openai.protocol import OpenAIBaseModel
+        from vllm.outputs import RequestOutput
+    except Exception:
+        # If vLLM is not available yet, skip patching until it is.
+        return
+
+    if _REQUEST_OUTPUT_REGISTRY is None:
+        _REQUEST_OUTPUT_REGISTRY = {}
+
+    registry = _REQUEST_OUTPUT_REGISTRY
+
+    # Patch to RequestOutput initializer to log it for later access
+    if not getattr(RequestOutput, "_rlkit_full_sequence_logprob_patch", False):
+        logging.info("Patching vLLM's RequestOutput.__init__ to register request outputs")
+        original_request_output_init = RequestOutput.__init__
+
+        def patched_request_output_init(self, *args, **kwargs):
+            original_request_output_init(self, *args, **kwargs)
+            registry[self.request_id] = self
+
+        RequestOutput.__init__ = patched_request_output_init  # type: ignore[assignment]
+        RequestOutput._rlkit_full_sequence_logprob_patch = True  # type: ignore[attr-defined]
+
+    # Patch to OpenAIServingChat.chat_completion_full_generator to return full sequences
+    if not getattr(OpenAIServingChat, "_rlkit_full_sequence_logprob_patch_chat", False):
+        logging.info("Patching vLLM's OpenAIServingChat.chat_completion_full_generator to return full sequences")
+        original_chat_completion_full_generator = (
+            OpenAIServingChat.chat_completion_full_generator
+        )
+
+        async def patched_chat_completion_full_generator(
+            self,
+            request,
+            result_generator,
+            request_id,
+            model_name,
+            conversation,
+            tokenizer,
+            request_metadata,
+        ):
+            response = await original_chat_completion_full_generator(
+                self,
+                request,
+                result_generator,
+                request_id,
+                model_name,
+                conversation,
+                tokenizer,
+                request_metadata,
+            )
+
+            should_patch = (
+                isinstance(response, ChatCompletionResponse)
+                and request.return_tokens_as_token_ids
+                and request.logprobs is not None
+                and not request.echo
+            )
+            if not should_patch:
+                if registry is not None:
+                    registry.pop(request_id, None)
+                return response
+
+            final_res = registry.get(request_id) if registry is not None else None
+            prompt_token_ids = None
+            if final_res is not None:
+                prompt_ids_attr = getattr(final_res, "prompt_token_ids", None)
+                if prompt_ids_attr:
+                    prompt_token_ids = list(prompt_ids_attr)
+            if not prompt_token_ids:
+                raise Exception(
+                    "Full-sequence logprob monkey-patch failed: no prompt token ids"
+                )
+
+            for choice in response.choices:
+                logprobs_payload = choice.logprobs
+                if logprobs_payload is None:
+                    continue
+                
+                existing_content = list(logprobs_payload.content or [])
+                prompt_content = []
+                for token_id in prompt_token_ids:
+                    token_str = f"token_id:{token_id}"
+                    token_bytes = list(token_str.encode("utf-8", errors="replace"))
+                    content = ChatCompletionLogProbsContent(
+                        token=token_str,
+                        logprob=-9999.0,
+                        bytes=token_bytes,
+                        top_logprobs=[],
+                    )
+                    prompt_content.append(content)
+
+                choice.logprobs = ChatCompletionLogProbs(
+                    content=prompt_content + existing_content,
+                )
+
+            if registry is not None:
+                registry.pop(request_id, None)
+
+            return response
+
+        OpenAIServingChat.chat_completion_full_generator = (  # type: ignore[assignment]
+            patched_chat_completion_full_generator
+        )
+        OpenAIServingChat._rlkit_full_sequence_logprob_patch_chat = True  # type: ignore[attr-defined]
+
+    _TOKEN_ID_LOGPROB_PATCH_APPLIED = True
 
 
 @serve.deployment(max_ongoing_requests=10000)
@@ -83,6 +211,8 @@ class VLLMOpenAIServe:
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
+
+        _ensure_full_sequence_logprob_patch()
 
         self._engine_client_ctx = build_async_engine_client_from_engine_args(
             engine_args, disable_frontend_multiprocessing=self._args.disable_frontend_multiprocessing
