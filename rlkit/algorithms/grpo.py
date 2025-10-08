@@ -196,6 +196,9 @@ class GRPOTrainer:
 
         loss_fn = ClippedPGLossFn(loss_config)
 
+        self.colocated_inference = colocated_inference
+        self.inference_nodes = inference_nodes
+        self.inference_gpus_per_node = inference_gpus_per_node
         self.train_cluster = train_cluster
         self.inference_cluster = inference_cluster
         self.clusters = (train_cluster, inference_cluster)
