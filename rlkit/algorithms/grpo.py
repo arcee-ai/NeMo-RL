@@ -142,7 +142,7 @@ class GRPOTrainer:
             last_checkpoint_path,
         )
 
-        print("\n▶ Setting up compute cluster...")
+        logging.info("\n▶ Setting up compute cluster...")
         (
             train_cluster,
             inference_cluster,
@@ -170,7 +170,7 @@ class GRPOTrainer:
         
         init_reference_model = loss_config["reference_policy_kl_penalty"] != 0
         if not init_reference_model:
-            print("KL coefficient is 0, skipping reference model loading")
+            logging.info("KL coefficient is 0, skipping reference model loading")
 
         self.policy = self._initialize_policy(
             train_cluster,
@@ -250,7 +250,7 @@ class GRPOTrainer:
             )
             dataloader.load_state_dict(dataloader_state_dict)
 
-        print(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
+        logging.info(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
 
         val_dataloader: Optional[StatefulDataLoader] = None
         if grpo_config["val_period"] > 0 or grpo_config["val_at_start"]:
@@ -263,7 +263,7 @@ class GRPOTrainer:
                 shuffle=False,
                 collate_fn=rl_collate_fn,
             )
-            print(
+            logging.info(
                 f"  ✓ Validation dataloader loaded with {len(val_dataset)} samples"
             )
 
@@ -291,7 +291,7 @@ class GRPOTrainer:
                 num_gpus_per_node=cluster_config["gpus_per_node"],
                 max_colocated_worker_groups=2,
             )
-            print(
+            logging.info(
                 f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes"
             )
             return (
@@ -346,7 +346,7 @@ class GRPOTrainer:
             num_gpus_per_node=train_gpus_per_node,
             max_colocated_worker_groups=1,
         )
-        print(
+        logging.info(
             f"  ✓ Ray train cluster initialized with {train_nodes} nodes with {train_gpus_per_node} GPUs per node"
         )
 
@@ -357,7 +357,7 @@ class GRPOTrainer:
             num_gpus_per_node=inference_gpus_per_node,
             max_colocated_worker_groups=1,
         )
-        print(
+        logging.info(
             f"  ✓ Ray inference cluster initialized with {inference_nodes} nodes with {inference_gpus_per_node} GPUs per node"
         )
 
@@ -382,7 +382,7 @@ class GRPOTrainer:
                 cluster=inference_cluster, config=generation_config
             )
             policy_generation.finish_generation()
-            print(
+            logging.info(
                 f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
             )
             return policy_generation
@@ -392,7 +392,7 @@ class GRPOTrainer:
                 cluster=inference_cluster, config=generation_config
             )
             policy_generation.finish_generation()
-            print(
+            logging.info(
                 f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
             )
             return policy_generation
@@ -437,21 +437,21 @@ class GRPOTrainer:
                 * self.policy_generation.pp_size
                 + 1
             )
-        print(
+        logging.info(
             f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})"
         )
         futures_train = self.policy.init_collective(ip, port, world_size)
         futures_inference = self.policy_generation.init_collective(ip, port, world_size)
 
-        print(
+        logging.info(
             f"Waiting for {len(futures_train)} training workers to init communication..."
         )
         self._wait_on_futures(futures_train)
-        print(
+        logging.info(
             f"Waiting for {len(futures_inference)} inference workers to init communication..."
         )
         self._wait_on_futures(futures_inference)
-        print("All workers initialized collective communication!")
+        logging.info("All workers initialized collective communication!")
 
     # ------------------------------------------------------------------
     # Training
@@ -529,26 +529,26 @@ class GRPOTrainer:
                 
                 assert repeated_batch["input_ids"].dtype == torch.int64, "(after processing) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
-                print("▶ Processing rewards...")
+                logging.info("▶ Processing rewards...")
                 repeated_batch = self._compute_advantages(
                     repeated_batch, timer
                 )
                 
                 assert repeated_batch["input_ids"].dtype == torch.int64, "(after advantage) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
-                print("▶ Preparing for logprob inference...")
+                logging.info("▶ Preparing for logprob inference...")
                 self._prepare_for_logprob_inference(timer)
 
-                print("▶ Computing logprobs...")
+                logging.info("▶ Computing logprobs...")
                 self._compute_logprobs(repeated_batch, timer)
                 
                 assert repeated_batch["input_ids"].dtype == torch.int64, "(after logprobs) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
-                print("▶ Preparing for training...")
+                logging.info("▶ Preparing for training...")
                 policy_generation_stale = True
                 self._prepare_for_training(timer)
 
-                print("▶ Training policy...")
+                logging.info("▶ Training policy...")
                 train_results = self._train_policy(repeated_batch, timer)
 
                 is_last_step = step + 1 == max_steps
@@ -608,7 +608,7 @@ class GRPOTrainer:
         policy_generation_stale: bool,
         colocated_inference: bool,
     ) -> bool:
-        print("\n🔍 Running initial validation...")
+        logging.info("\n🔍 Running initial validation...")
         if need_refit and policy_generation_stale:
             self._refit_policy_generation(colocated_inference)
             policy_generation_stale = False
@@ -621,7 +621,7 @@ class GRPOTrainer:
         return policy_generation_stale
 
     def _prepare_step_banner(self, step: int, max_steps: int) -> None:
-        print(f"\n{'=' * 25} Step {step + 1}/{max_steps} {'=' * 25}")
+        logging.info(f"\n{'=' * 25} Step {step + 1}/{max_steps} {'=' * 25}")
 
     def _run_rollouts(
         self,
@@ -730,7 +730,7 @@ class GRPOTrainer:
     ) -> BatchedDataDict[DatumSpec]:
         with timer.time("reward_calculation"):
             rewards = repeated_batch["reward"]
-            print("▶ Computing advantages...")
+            logging.info("▶ Computing advantages...")
             baseline, std = self._calculate_baseline_and_std_per_prompt(
                 torch.tensor(repeated_batch["idx"]),
                 repeated_batch["reward"],
@@ -744,7 +744,7 @@ class GRPOTrainer:
             zero_variance_mask = std == 0
             if zero_variance_mask.any():
                 num_filtered = zero_variance_mask.sum().item()
-                print(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // self.master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
+                logging.info(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // self.master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
                 repeated_batch["token_mask"] = repeated_batch["token_mask"] * (~zero_variance_mask).float()[:, None]
                 repeated_batch["sample_mask"][zero_variance_mask] = 0
 
@@ -920,7 +920,7 @@ class GRPOTrainer:
                 self.master_config["checkpointing"]["metric_name"] = None
 
         with timer.time("checkpointing"):
-            print(f"Saving checkpoint for step {step + 1}...")
+            logging.info(f"Saving checkpoint for step {step + 1}...")
             checkpoint_path = self.checkpointer.init_tmp_checkpoint(
                 step + 1, self.grpo_save_state, self.master_config
             )
@@ -994,13 +994,12 @@ class GRPOTrainer:
                 step + 1,
                 name="train/token_mult_prob_error_plot_sample",
             )
-
-        print("\n📊 Training Results:")
-        print(f"  • Loss: {metrics['loss']:.4f}")
-        print(f"  • Avg Reward: {np.mean(repeated_batch['reward'].numpy()):.4f}")
-        print(
-            f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
-        )
+        
+        logging.info("\n📊 Training Results:\n")
+        logging.info(f"  • Loss: {metrics['loss']:.4f}\n")
+        logging.info(f"  • Avg Reward: {np.mean(repeated_batch['reward'].numpy()):.4f}\n")
+        logging.info(f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}\n")
+        
         if "total_flops" in train_results:
             total_tflops = (
                 train_results["total_flops"]
@@ -1008,19 +1007,19 @@ class GRPOTrainer:
                 / 1e12
             )
             num_ranks = train_results["num_ranks"]
-            print(
+            logging.info(
                 f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)"
             )
             if "theoretical_tflops" in train_results:
                 theoretical_tflops = train_results["theoretical_tflops"]
-                print(
+                logging.info(
                     f"  • Training Model Floating Point Utilization: {100 * total_tflops / theoretical_tflops:.2f}%"
                 )
                 metrics["train_fp_utilization"] = (
                     total_tflops / theoretical_tflops
                 )
 
-        print("\n⏱️  Timing:")
+        logging.info("\n⏱️  Timing:")
         total_time = timing_metrics.get("total_step_time", 0)
         total_num_gpus = (
             self.master_config["cluster"]["num_nodes"]
@@ -1031,14 +1030,14 @@ class GRPOTrainer:
             if total_time > 0
             else 0.0
         )
-        print(f"  • Total step time: {total_time:.2f}s")
+        logging.info(f"  • Total step time: {total_time:.2f}s")
         for key, value in sorted(
             timing_metrics.items(), key=lambda item: item[1], reverse=True
         ):
             if key == "total_step_time":
                 continue
             percent = (value / total_time * 100) if total_time > 0 else 0
-            print(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
+            logging.info(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
 
         self.logger.log_metrics(metrics, step + 1, prefix="train")
         self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
@@ -1065,7 +1064,7 @@ class GRPOTrainer:
                     _refit_buffer_size_gb=_refit_buffer_size_gb
                 )
                 total_num_keys = sum(len(keys) for keys in grouped_param_keys)
-                print(
+                logging.info(
                     f"[Refit] Split {total_num_keys} keys into {len(grouped_param_keys)} groups"
                 )
                 for keys in grouped_param_keys:
@@ -1103,7 +1102,7 @@ class GRPOTrainer:
 
     def _validate(self, step: int) -> tuple[dict[str, Any], dict[str, Any]]:
         if self.val_dataloader is None:
-            print("  ⚠️ No validation dataloader provided, skipping validation")
+            logging.info("  ⚠️ No validation dataloader provided, skipping validation")
             return {}, {}
 
         if "vf" not in self.master_config.get("env", {}):
@@ -1113,7 +1112,7 @@ class GRPOTrainer:
 
         timer = Timer()
         with timer.time("total_validation_time"):
-            print(f"▶ Starting validation at step {step}...")
+            logging.info(f"▶ Starting validation at step {step}...")
             
             total_rewards = []
             total_lengths = []
@@ -1164,19 +1163,19 @@ class GRPOTrainer:
                     step=step,
                 )
             except Exception as exc:  # pylint: disable=broad-except
-                print(f"\n  ⚠️ Error displaying message samples: {exc}")
-                print("  ⚠️ Continuing validation without displaying samples...")
+                logging.info(f"\n  ⚠️ Error displaying message samples: {exc}")
+                logging.info("  ⚠️ Continuing validation without displaying samples...")
 
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
         validation_time = timing_metrics.get("total_validation_time", 0)
 
-        print("\n📊 Validation Results:")
-        print(f"    • Accuracy: {accuracy:.4f}")
-        print(f"    • Average response length: {avg_length:.1f} tokens")
-        print(f"    • Samples processed: {len(total_rewards)}")
+        logging.info("\n📊 Validation Results:")
+        logging.info(f"    • Accuracy: {accuracy:.4f}")
+        logging.info(f"    • Average response length: {avg_length:.1f} tokens")
+        logging.info(f"    • Samples processed: {len(total_rewards)}")
 
-        print("\n  ⏱️  Validation Timing:")
-        print(f"    • Total validation time: {validation_time:.2f}s")
+        logging.info("\n  ⏱️  Validation Timing:")
+        logging.info(f"    • Total validation time: {validation_time:.2f}s")
 
         timer.reset()
 
