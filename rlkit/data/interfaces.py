@@ -23,6 +23,13 @@ from rlkit.data.messages import APIMessage
 PathLike = Union[str, "os.PathLike[Any]"]
 TokenizerType = PreTrainedTokenizerBase
 
+# Legacy OpenAI-API-like message log, but every messsage may contain associated tensors (i.e. tokenized strings and logprobs) in addition to the original "content" string
+LLMMessageLogType = list[dict[str, Union[str, torch.Tensor]]]
+
+# Legacy Flattened message log where all tensors and data are concatenated together for a conversation
+# Converts a conversation from list-of-turns format to key-value format with concatenated tensors
+FlatMessagesType = dict[str, Union[list[str], torch.Tensor]]
+
 class DatumSpec(TypedDict):
     # GRPO group ID
     idx: int

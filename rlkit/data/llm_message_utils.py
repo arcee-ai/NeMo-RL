@@ -24,6 +24,7 @@ from rlkit.data.interfaces import (
     TaskDataSpec,
 )
 from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.algorithms.utils import _pad_tensor
 
 Tensor = torch.Tensor
 TokenizerType = PreTrainedTokenizerBase
