@@ -1120,6 +1120,8 @@ class GRPOTrainer:
             all_message_logs = []
             
             for val_batch in self.val_dataloader:
+                val_batch = BatchedDataDict(val_batch)
+                val_batch["idx"] = list(range(val_batch.size))
                 repeated_batch = val_batch.repeat_interleave(
                     self.master_config["grpo"]["num_generations_per_prompt"]
                 )
