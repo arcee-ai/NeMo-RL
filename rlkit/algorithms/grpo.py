@@ -1140,6 +1140,8 @@ class GRPOTrainer:
                     self.colocated_inference,
                     self.master_config["grpo"]["max_rollout_turns"],
                 )
+                
+                repeated_batch = self._process_rollouts(repeated_batch)
 
                 total_rewards.extend(repeated_batch["reward"])
                 total_lengths.extend([len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]])
