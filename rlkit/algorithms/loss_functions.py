@@ -318,8 +318,6 @@ class NLLLoss(LossFunction):
         vocab_parallel_rank: Optional[int] = None,
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
         context_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
-        dpo_loss: bool = False,
-        dpo_average_log_probs: bool = False,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
@@ -359,21 +357,13 @@ class NLLLoss(LossFunction):
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
 
-        if dpo_loss:
-            ## shape: [batch_size]
-            num_unmasked_tokens = torch.sum(mask, -1)
-            ## multiply by sample_mask to zero out invalid samples
-            loss = -torch.sum(token_logprobs * mask, dim=-1)
-            if dpo_average_log_probs:
-                loss = loss / num_unmasked_tokens.clamp(min=1)
-        else:
-            ## single scalar loss
-            ## scale by the total number of tokens in the batch
-            loss = -masked_mean(
-                token_logprobs,
-                mask,
-                global_normalization_factor=global_valid_toks,
-            )
+        ## single scalar loss
+        ## scale by the total number of tokens in the batch
+        loss = -masked_mean(
+            token_logprobs,
+            mask,
+            global_normalization_factor=global_valid_toks,
+        )
 
         return loss, {
             "loss": loss.item() if loss.ndim == 0 else loss,
@@ -400,7 +390,7 @@ class PreferenceLoss(LossFunction):
 
     where:
     - σ is the sigmoid function
-    - β is a scaling factor (ex: `reference_policy_kl_penalty` in DPO)
+    - β is a scaling factor (for example, a reference policy KL penalty term)
     - r_chosen and r_rejected are the rewards for chosen and rejected responses
 
     Returns:
@@ -479,212 +469,6 @@ class PreferenceLoss(LossFunction):
 
         return preference_loss, {
             "loss": preference_loss.item(),
-            "accuracy": accuracy.item(),
-            "rewards_chosen_mean": rewards_chosen_mean.item(),
-            "rewards_rejected_mean": rewards_rejected_mean.item(),
-            "num_valid_samples": num_valid_samples.item(),
-        }
-
-
-class DPOLossConfig(TypedDict):
-    reference_policy_kl_penalty: float
-    preference_loss_weight: float
-    sft_loss_weight: float
-    preference_average_log_probs: bool
-    sft_average_log_probs: bool
-
-
-class DPOLossDataDict(TypedDict):
-    """Required keys for the DPO loss function."""
-
-    input_ids: torch.Tensor
-    reference_policy_logprobs: torch.Tensor
-    token_mask: torch.Tensor
-    sample_mask: torch.Tensor
-
-
-class DPOLossFn(PreferenceLoss):
-    """Direct Preference Optimization (DPO) loss function.
-
-    This loss function implements the DPO algorithm as described in:
-    "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
-    (https://arxiv.org/abs/2305.18290)
-
-    The loss combines two main components:
-    1. Preference Loss: Optimizes the model to prefer chosen responses over rejected ones
-    2. SFT Loss (optional): Auxiliary supervised fine-tuning loss on chosen responses
-
-    The total loss is computed as:
-    L(θ) = w_p * L_pref(θ) + w_s * L_sft(θ)
-
-    where:
-    - w_p is the preference_loss_weight
-    - w_s is the sft_loss_weight
-    - L_pref(θ) is the preference loss term
-    - L_sft(θ) is the supervised fine-tuning loss term
-
-    The preference loss term is computed as:
-    L_pref(θ) = -E[log(σ(β * (r_chosen - r_rejected)))]
-
-    where:
-    - σ is the sigmoid function
-    - β is the reference_policy_kl_penalty
-    - r_chosen and r_rejected are the rewards for chosen and rejected responses
-    - The rewards are computed as the sum of log probability differences between
-      the current policy and reference policy
-
-    If preference_average_log_probs is True, the rewards are averaged over tokens:
-    r = (1/n) * Σ_t (log π_θ(a_t|s_t) - log π_ref(a_t|s_t))
-
-    Otherwise, the rewards are summed over tokens.
-
-    The SFT loss term is a standard negative log likelihood loss on the chosen responses.
-    If sft_average_log_probs is True, the loss is averaged over tokens.
-
-    Args:
-        cfg (DPOLossConfig): Configuration dictionary containing:
-            - reference_policy_kl_penalty (float): Strength of the KL penalty term (β)
-            - preference_loss_weight (float): Weight for the preference loss term (w_p)
-            - sft_loss_weight (float): Weight for the SFT loss term (w_s)
-            - preference_average_log_probs (bool): Whether to average log probs across tokens in preference loss
-            - sft_average_log_probs (bool): Whether to average log probs across tokens in SFT loss
-
-    Returns:
-        tuple[torch.Tensor, dict]: A tuple containing:
-            - The total loss value
-            - A dictionary with metrics including:
-                - loss: Total loss value
-                - sft_loss: SFT loss component
-                - preference_loss: Preference loss component
-                - accuracy: Fraction of examples where chosen response has higher reward
-    """
-
-    def __init__(self, cfg: DPOLossConfig):
-        self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
-        self.preference_loss_weight = cfg["preference_loss_weight"]
-        self.sft_loss_weight = cfg["sft_loss_weight"]
-        self.preference_average_log_probs = cfg["preference_average_log_probs"]
-        self.sft_average_log_probs = cfg["sft_average_log_probs"]
-        self.sft_loss = NLLLoss()
-
-        self.loss_type = LossType.SEQUENCE_LEVEL
-
-    def _dpo_loss(
-        self,
-        next_token_logits: Tensor,
-        data: BatchedDataDict[DPOLossDataDict],
-        global_valid_seqs: Tensor,
-        vocab_parallel_rank: Optional[int] = None,
-        vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
-        context_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        ## TODO(@ashors): there's some duplicate code here with the NLLLoss function. We should refactor
-        token_mask = data["token_mask"][:, 1:]
-        sample_mask = data["sample_mask"]
-        seq_index = data.get("seq_index", None)
-
-        if vocab_parallel_group is not None:
-            assert vocab_parallel_rank is not None, (
-                "vocab_parallel_rank must be provided when vocab_parallel_group is provided"
-            )
-            token_logprobs = from_parallel_logits_to_logprobs(
-                next_token_logits,
-                data["input_ids"],
-                vocab_start_index=vocab_parallel_rank * next_token_logits.shape[-1],
-                vocab_end_index=(vocab_parallel_rank + 1) * next_token_logits.shape[-1],
-                tp_group=vocab_parallel_group,
-                inference_only=False,
-                cp_group=context_parallel_group,
-            )
-            # slice off to the correct length to remove potential CP padding
-            token_logprobs = token_logprobs[:, : data["input_ids"].shape[1] - 1]
-        elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
-            token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"], seq_index=seq_index
-            )
-        else:
-            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
-            next_token_logits = next_token_logits.to(torch.float32)
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits, dim=-1
-            )
-            logprobs = next_token_logprobs[:, :-1]  # Remove last position's logits
-            token_logprobs = logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
-
-        ref_logprobs = data["reference_policy_logprobs"][:, :-1]
-
-        diff = (token_logprobs - ref_logprobs) * token_mask
-
-        rewards = diff.sum(-1)
-        if self.preference_average_log_probs:
-            rewards = rewards / token_mask.sum(-1).clamp(min=1)
-
-        return self._preference_loss(
-            rewards, sample_mask, global_valid_seqs, self.reference_policy_kl_penalty
-        )
-
-    # TODO a cleaner typing fix would be required (probably that DPOLossFn should not inherit from PreferenceLoss)
-    def __call__(  # type: ignore
-        self,
-        next_token_logits: Tensor,
-        data: BatchedDataDict[DPOLossDataDict],
-        global_valid_seqs: Tensor,
-        global_valid_toks: Tensor | None,
-        vocab_parallel_rank: Optional[int] = None,
-        vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
-        context_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        sft_loss_chosen = torch.tensor(0.0)
-        if self.sft_loss_weight > 0:
-            assert global_valid_toks is not None, (
-                "global_valid_toks must be provided for SFT loss"
-            )
-            sft_loss, _ = self.sft_loss(
-                next_token_logits,
-                data,
-                global_valid_seqs=global_valid_seqs,
-                global_valid_toks=global_valid_toks,  ## unused because sft loss returned is at the sample level
-                vocab_parallel_rank=vocab_parallel_rank,
-                vocab_parallel_group=vocab_parallel_group,
-                context_parallel_group=context_parallel_group,
-                dpo_loss=True,
-                dpo_average_log_probs=self.sft_average_log_probs,
-            )
-            sft_loss_chosen, sft_loss_rejected = self.split_output_tensor(sft_loss)
-            sft_loss_chosen = masked_mean(
-                sft_loss_chosen,
-                data["sample_mask"][::2],
-                global_normalization_factor=global_valid_seqs / 2,
-            )
-
-        (
-            preference_loss,
-            accuracy,
-            rewards_chosen_mean,
-            rewards_rejected_mean,
-        ) = self._dpo_loss(
-            next_token_logits,
-            data,
-            global_valid_seqs,
-            vocab_parallel_rank=vocab_parallel_rank,
-            vocab_parallel_group=vocab_parallel_group,
-            context_parallel_group=context_parallel_group,
-        )
-
-        dpo_loss = (
-            self.sft_loss_weight * sft_loss_chosen
-            + self.preference_loss_weight * preference_loss
-        )
-
-        ## divide by 2 because we're summing over (chosen, rejected) pairs
-        num_valid_samples = data["sample_mask"].sum() / 2
-
-        return dpo_loss, {
-            "loss": dpo_loss.item(),
-            "sft_loss": sft_loss_chosen.item(),
-            "preference_loss": preference_loss.item(),
             "accuracy": accuracy.item(),
             "rewards_chosen_mean": rewards_chosen_mean.item(),
             "rewards_rejected_mean": rewards_rejected_mean.item(),

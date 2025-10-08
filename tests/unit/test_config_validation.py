@@ -26,7 +26,6 @@ from rlkit.config import (
     CheckpointingConfig,
     ClusterConfig,
     DataConfig,
-    DPOConfig,
     GRPOConfig,
     GRPOLoggerConfig,
     LoggerConfig,
@@ -179,11 +178,7 @@ def test_all_config_files_have_required_keys():
             ]
 
             # Add algorithm-specific validation
-            if "dpo" in config_dict:
-                section_validations.extend(
-                    [("dpo", DPOConfig), ("logger", LoggerConfig)]
-                )
-            elif "sft" in config_dict:
+            if "sft" in config_dict:
                 section_validations.extend(
                     [("sft", SFTConfig), ("logger", LoggerConfig)]
                 )

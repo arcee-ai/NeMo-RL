@@ -20,7 +20,6 @@ time uv run --no-sync bash ./tests/functional/sft.sh
 time uv run --no-sync bash ./tests/functional/grpo.sh
 time uv run --no-sync bash ./tests/functional/grpo_multiturn.sh
 time uv run --no-sync bash ./tests/functional/grpo_non_colocated.sh
-time uv run --no-sync bash ./tests/functional/dpo.sh
 time uv run --no-sync bash ./tests/functional/rm.sh
 time uv run --no-sync bash ./tests/functional/eval.sh
 time uv run --no-sync bash ./tests/functional/eval_async.sh

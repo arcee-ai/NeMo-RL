@@ -35,7 +35,6 @@ release_performance_test_suite_path = os.path.join(
 # Relative to project root
 ALGO_MAPPING_TO_BASE_YAML = {
     "sft": "examples/configs/sft.yaml",
-    "dpo": "examples/configs/dpo.yaml",
     "grpo": "examples/configs/grpo_math_1B.yaml",
 }
 
