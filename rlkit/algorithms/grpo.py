@@ -953,7 +953,7 @@ class GRPOTrainer:
         rollout_metrics: dict[str, Any],
         timer: Timer,
     ) -> None:
-        log_data = {"content": repeated_batch["prompt"] + repeated_batch["completion"]}
+        log_data = {"content": [prompt + completion for prompt, completion in zip(repeated_batch["prompt"], repeated_batch["completion"])]}
         log_data["rewards"] = repeated_batch["reward"].tolist()
         log_data["generation_logprobs"] = repeated_batch["generation_logprobs"].tolist()
         log_data["prev_logprobs"] = repeated_batch["prev_logprobs"].tolist()
@@ -1141,7 +1141,7 @@ class GRPOTrainer:
                     self.master_config["grpo"]["max_rollout_turns"],
                 )
 
-                total_rewards.extend(repeated_batch["rewards"])
+                total_rewards.extend(repeated_batch["reward"])
                 total_lengths.extend([len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]])
                 all_message_logs.extend([prompt + completion for prompt, completion in zip(repeated_batch["prompt"], repeated_batch["completion"])])
 

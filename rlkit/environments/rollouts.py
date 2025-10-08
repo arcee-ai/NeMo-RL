@@ -212,7 +212,7 @@ def run_vf_rollouts(
 
     for completion in current_batch["completion"]:
         assistant_tokens = 0
-        for msg in log:
+        for msg in completion:
             if msg.get("role") == "assistant":
                 token_ids = msg["token_ids"].tolist()
                 
