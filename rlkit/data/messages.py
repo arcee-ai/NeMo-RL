@@ -11,7 +11,7 @@ class AssistantMessage(TypedDict):
     role: Literal["assistant"]
     content: str
     token_ids: NotRequired[torch.Tensor] = None
-    logprobs: NotRequired[torch.Tensor] = None
+    generation_logprobs: NotRequired[torch.Tensor] = None
     tool_calls: Optional[list[ChatCompletionMessageToolCallUnion]] = None
 
 class ToolMessage(TypedDict):
