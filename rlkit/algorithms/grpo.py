@@ -720,9 +720,7 @@ class GRPOTrainer:
                 msg_gen_logprobs = msg["generation_logprobs"]
                 generation_logprobs[:len(msg_gen_logprobs)] = msg_gen_logprobs
         
-        # Calculate length of original prompt - that is, no response tokens from the environment itself.
-        assert completion[0]["role"] == "assistant", "First message in completion must be an assistant message."
-        input_length = len([x for i, x in enumerate(completion[0]["token_ids"]) if generation_logprobs[i] != -9999])
+        input_length = len(completion[-1]["token_ids"])
         
         return torch.tensor(token_ids, dtype=torch.int64), torch.tensor(generation_logprobs), input_length
 
@@ -749,10 +747,11 @@ class GRPOTrainer:
                 num_filtered = zero_variance_mask.sum().item()
                 print(f"Filtering {num_filtered} samples from {zero_variance_mask.sum().item() // self.master_config['grpo']['num_generations_per_prompt']} zero-advantage groups")
                 repeated_batch["token_mask"] = repeated_batch["token_mask"] * (~zero_variance_mask).float()[:, None]
+                repeated_batch["sample_mask"][zero_variance_mask] = 0
 
             # Optional: z-score advantages within the mini-batch for stability
             if self.master_config["grpo"].get("minibatch_advantage_renorm", False):
-                valid_advantages = advantages[repeated_batch["loss_multiplier"] > 0]
+                valid_advantages = advantages[repeated_batch["sample_mask"] > 0]
                 if len(valid_advantages) > 1:
                     adv_mean = valid_advantages.mean()
                     adv_std = valid_advantages.std()
