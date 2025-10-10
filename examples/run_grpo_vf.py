@@ -124,9 +124,7 @@ def main() -> None:
     args, overrides = parse_args()
 
     if not args.config:
-        args.config = os.path.join(
-            os.path.dirname(__file__), "configs", "grpo_vf_reverser_600M.yaml"
-        )
+        raise ValueError("A config file is required. Please specify a config file using the --config argument.")
 
     config = load_config(args.config)
     print(f"Loaded configuration from: {args.config}")

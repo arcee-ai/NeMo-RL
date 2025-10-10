@@ -390,6 +390,7 @@ class DTensorV2PolicyWorker:
                     device_map="cpu",
                     trust_remote_code=True,
                     config=model_config,
+                    dtype=self.dtype,
                 )
                 full_state_dict = model.state_dict()
                 del model

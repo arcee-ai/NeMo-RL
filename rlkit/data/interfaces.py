@@ -65,7 +65,11 @@ class DPODatumSpec(TypedDict):
     length_rejected: int
     loss_multiplier: float
     idx: int
-
+    
+class SFTDatumSpec(TypedDict):
+    input_ids: torch.Tensor    # Integer token IDs
+    token_mask: torch.Tensor   # Tensor allowing you to mask off individual tokens
+    sample_mask: torch.Tensor  # Scalar allowing you to mask off or multiply a whole sample's loss
 
 @dataclass
 class TaskDataSpec:
