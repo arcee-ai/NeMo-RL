@@ -153,23 +153,23 @@ def save_checkpoint(
         scheduler: Optional scheduler to save
         optimizer_path: Path to save optimizer state (required if optimizer provided)
     """
-    model_state = {k: v.to_local().cpu() if isinstance(v, torch.distributed.tensor.DTensor) else v for k, v in get_model_state_dict(model).items()}
-    dcp.save({"model": model_state}, checkpoint_id=weights_path)
+    model_state = {"model": ModelState(model)}
+    dcp.save(model_state, checkpoint_id=weights_path)
 
-    # if optimizer is not None:
-    #     if optimizer_path is None:
-    #         raise ValueError(
-    #             "optimizer_path must be provided when saving optimizer state"
-    #         )
-    #     optimizer_state = {"optim": OptimizerState(model, optimizer, scheduler)}
-    #     dcp.save(optimizer_state, checkpoint_id=optimizer_path)
+    if optimizer is not None:
+        if optimizer_path is None:
+            raise ValueError(
+                "optimizer_path must be provided when saving optimizer state"
+            )
+        optimizer_state = {"optim": OptimizerState(model, optimizer, scheduler)}
+        dcp.save(optimizer_state, checkpoint_id=optimizer_path)
 
-    # if tokenizer is not None:
-    #     if tokenizer_path is None:
-    #         raise ValueError(
-    #             "tokenizer_path must be provided when saving tokenizer state"
-    #         )
-    #     tokenizer.save_pretrained(tokenizer_path)
+    if tokenizer is not None:
+        if tokenizer_path is None:
+            raise ValueError(
+                "tokenizer_path must be provided when saving tokenizer state"
+            )
+        tokenizer.save_pretrained(tokenizer_path)
 
 
 def load_checkpoint(

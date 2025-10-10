@@ -96,9 +96,9 @@ def main():
     config: MasterConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
     
-    # if not torch.cuda.can_device_access_peer(0, 1):
-    #     os.environ["NCCL_SHM_DISABLE"] = "1"
-    #     logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
+    if not torch.cuda.can_device_access_peer(0, 1):
+        os.environ["NCCL_SHM_DISABLE"] = "1"
+        logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
 
     # Print config
     print("Final config:")
