@@ -527,32 +527,27 @@ class GRPOTrainer:
                 
                 repeated_batch = self._process_rollouts(repeated_batch)
                 
-                assert repeated_batch["input_ids"].dtype == torch.int64, "(after processing) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
-
                 logging.info("Processing rewards...")
                 repeated_batch = self._compute_advantages(
                     repeated_batch, timer
                 )
                 
-                assert repeated_batch["input_ids"].dtype == torch.int64, "(after advantage) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
-
                 logging.info("Preparing for logprob inference...")
                 self._prepare_for_logprob_inference(timer)
 
                 logging.info("Computing logprobs...")
                 self._compute_logprobs(repeated_batch, timer)
                 
-                assert repeated_batch["input_ids"].dtype == torch.int64, "(after logprobs) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
-
                 logging.info("Preparing for training...")
                 policy_generation_stale = True
                 self._prepare_for_training(timer)
 
                 logging.info("Training policy...")
-                train_results = self._train_policy(repeated_batch, timer)
+                with timer.time("policy_training"):
+                    train_results = self.policy.train(repeated_batch, self.loss_fn)
 
                 is_last_step = step + 1 == max_steps
-
+                
                 (
                     val_metrics,
                     validation_timings,
@@ -845,14 +840,6 @@ class GRPOTrainer:
     ) -> None:
         with timer.time("training_prep"):
             self.policy.prepare_for_training()
-
-    def _train_policy(
-        self,
-        train_data: BatchedDataDict[ClippedPGLossDataDict],
-        timer: Timer,
-    ) -> dict[str, Any]:
-        with timer.time("policy_training"):
-            return self.policy.train(train_data, self.loss_fn)
 
     def _run_validation_step(
         self,
