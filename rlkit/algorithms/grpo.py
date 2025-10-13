@@ -497,7 +497,7 @@ class GRPOTrainer:
             batch = BatchedDataDict[DatumSpec](raw_batch)
             batch["idx"] = list(range(batch.size))
             
-            self._prepare_step_banner(step, max_steps)
+            print(f"\n{'=' * 25} Step {step + 1}/{max_steps} {'=' * 25}")
             maybe_gpu_profile_step(self.policy, step + 1)
             if self.policy != self.policy_generation:
                 maybe_gpu_profile_step(self.policy_generation, step + 1)
@@ -529,26 +529,26 @@ class GRPOTrainer:
                 
                 assert repeated_batch["input_ids"].dtype == torch.int64, "(after processing) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
-                logging.info("▶ Processing rewards...")
+                logging.info("Processing rewards...")
                 repeated_batch = self._compute_advantages(
                     repeated_batch, timer
                 )
                 
                 assert repeated_batch["input_ids"].dtype == torch.int64, "(after advantage) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
-                logging.info("▶ Preparing for logprob inference...")
+                logging.info("Preparing for logprob inference...")
                 self._prepare_for_logprob_inference(timer)
 
-                logging.info("▶ Computing logprobs...")
+                logging.info("Computing logprobs...")
                 self._compute_logprobs(repeated_batch, timer)
                 
                 assert repeated_batch["input_ids"].dtype == torch.int64, "(after logprobs) input_ids must be of type int64, got " + str(repeated_batch["input_ids"].dtype) + " with shape " + str(repeated_batch["input_ids"].shape) + " and " + str(repeated_batch["input_ids"])
 
-                logging.info("▶ Preparing for training...")
+                logging.info("Preparing for training...")
                 policy_generation_stale = True
                 self._prepare_for_training(timer)
 
-                logging.info("▶ Training policy...")
+                logging.info("Training policy...")
                 train_results = self._train_policy(repeated_batch, timer)
 
                 is_last_step = step + 1 == max_steps
@@ -619,9 +619,6 @@ class GRPOTrainer:
         logger.log_metrics(val_metrics, 0, prefix="validation")
         logger.log_metrics(validation_timings, 0, prefix="timing/validation")
         return policy_generation_stale
-
-    def _prepare_step_banner(self, step: int, max_steps: int) -> None:
-        logging.info(f"\n{'=' * 25} Step {step + 1}/{max_steps} {'=' * 25}")
 
     def _run_rollouts(
         self,
@@ -730,7 +727,7 @@ class GRPOTrainer:
     ) -> BatchedDataDict[DatumSpec]:
         with timer.time("reward_calculation"):
             rewards = repeated_batch["reward"]
-            logging.info("▶ Computing advantages...")
+            logging.info("Computing advantages...")
             baseline, std = self._calculate_baseline_and_std_per_prompt(
                 torch.tensor(repeated_batch["idx"]),
                 repeated_batch["reward"],
@@ -995,10 +992,10 @@ class GRPOTrainer:
                 name="train/token_mult_prob_error_plot_sample",
             )
         
-        logging.info("\n📊 Training Results:\n")
-        logging.info(f"  • Loss: {metrics['loss']:.4f}\n")
-        logging.info(f"  • Avg Reward: {np.mean(repeated_batch['reward'].numpy()):.4f}\n")
-        logging.info(f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}\n")
+        print("\n📊 Training Results:\n")
+        print(f"  • Loss: {metrics['loss']:.4f}\n")
+        print(f"  • Avg Reward: {np.mean(repeated_batch['reward'].numpy()):.4f}\n")
+        print(f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}\n")
         
         if "total_flops" in train_results:
             total_tflops = (
@@ -1007,19 +1004,19 @@ class GRPOTrainer:
                 / 1e12
             )
             num_ranks = train_results["num_ranks"]
-            logging.info(
+            print(
                 f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)"
             )
             if "theoretical_tflops" in train_results:
                 theoretical_tflops = train_results["theoretical_tflops"]
-                logging.info(
+                print(
                     f"  • Training Model Floating Point Utilization: {100 * total_tflops / theoretical_tflops:.2f}%"
                 )
                 metrics["train_fp_utilization"] = (
                     total_tflops / theoretical_tflops
                 )
 
-        logging.info("\n⏱️  Timing:")
+        print("\n⏱️  Timing:")
         total_time = timing_metrics.get("total_step_time", 0)
         total_num_gpus = (
             self.master_config["cluster"]["num_nodes"]
@@ -1030,14 +1027,14 @@ class GRPOTrainer:
             if total_time > 0
             else 0.0
         )
-        logging.info(f"  • Total step time: {total_time:.2f}s")
+        print(f"  • Total step time: {total_time:.2f}s")
         for key, value in sorted(
             timing_metrics.items(), key=lambda item: item[1], reverse=True
         ):
             if key == "total_step_time":
                 continue
             percent = (value / total_time * 100) if total_time > 0 else 0
-            logging.info(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
+            print(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
 
         self.logger.log_metrics(metrics, step + 1, prefix="train")
         self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
