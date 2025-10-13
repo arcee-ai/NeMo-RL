@@ -3,7 +3,7 @@ sft:
   ## total number of steps to train will equal
   ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
   max_num_epochs: 1
-  max_num_steps: 60
+  max_num_steps: 9999999
 
   val_period: 20
   val_batches: 8
@@ -20,13 +20,14 @@ checkpointing:
   keep_top_k: 3
   save_period: 10
   checkpoint_must_save_by: null
+  hf_checkpoint: true
 
 policy:
-  model_name: "Qwen/Qwen3-0.6B"
+  model_name: "Qwen/Qwen3-4B-Base"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 32
-  train_micro_batch_size: 1
+  train_global_batch_size: 256
+  train_micro_batch_size: 16
   max_total_sequence_length: 1024
   precision: "bfloat16"
 
@@ -35,19 +36,22 @@ policy:
 
   dtensor_v2_cfg:
     enabled: true
-    # allow_custom_modeling_code: false
+    use_liger: false
     cpu_offload: false
     sequence_parallel: false
-    activation_checkpointing: false
+    activation_checkpointing: true
     tensor_parallel_size: 1
     context_parallel_size: 1
     custom_parallel_plan: null
 
   dynamic_batching:
-    enabled: false
+    enabled: true
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    algorithm: "modified_first_fit_decreasing"
+    sequence_length_round: 64
 
   sequence_packing:
-    enabled: False
+    enabled: false
     train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
     algorithm: "modified_first_fit_decreasing"
     sequence_length_round: 64
@@ -60,15 +64,15 @@ policy:
   optimizer:
     name: "torchao.optim.AdamW8bit"
     kwargs:
-      lr: 5.0e-6
+      lr: 5.0e-5
       weight_decay: 0.1
       betas: [0.9, 0.98]
       eps: 1e-5
     
 data:
-  dataset_name: "_datasets/AFM-SFT-v0.1.6-32k-Qwen3-rlkit"
+  dataset_name: "arcee-train/AFM-SFT-v0.1.7-32k-Qwen3-RLKit"
   dataset_type: "native"
-  on_disk: true
+  on_disk: false
   shuffle: false
 
 logger:
