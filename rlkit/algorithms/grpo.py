@@ -11,8 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import asyncio
 import logging
 import os
+from types import CoroutineType
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
@@ -195,7 +197,9 @@ class GRPOTrainer:
             self.policy_generation.prepare_refit_info(state_dict_info)
 
         loss_fn = ClippedPGLossFn(loss_config)
-
+        
+        self.interleave_rollouts = self.master_config["grpo"].get("interleave_rollouts", False)
+        
         self.colocated_inference = colocated_inference
         self.inference_nodes = inference_nodes
         self.inference_gpus_per_node = inference_gpus_per_node
@@ -415,6 +419,7 @@ class GRPOTrainer:
             optimizer_path=optimizer_path,
             init_optimizer=True,
             init_reference_model=init_reference_model,
+            use_hf_checkpoint=self.master_config["checkpointing"].get("hf_checkpoint", False),
         )
 
     def _initialize_collective_communication(
@@ -446,17 +451,17 @@ class GRPOTrainer:
         logging.info(
             f"Waiting for {len(futures_train)} training workers to init communication..."
         )
-        self._wait_on_futures(futures_train)
+        self._wait_on_futures_sync(futures_train)
         logging.info(
             f"Waiting for {len(futures_inference)} inference workers to init communication..."
         )
-        self._wait_on_futures(futures_inference)
+        self._wait_on_futures_sync(futures_inference)
         logging.info("All workers initialized collective communication!")
 
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
-    def train(self) -> None:
+    async def train(self) -> None:
         timer = Timer()
         timeout = TimeoutChecker(
             timeout=self.master_config["checkpointing"]["checkpoint_must_save_by"],
@@ -464,35 +469,27 @@ class GRPOTrainer:
         )
         timeout.start_iterations()
 
-        need_refit = True
         if self.policy_generation is None:
             self.policy_generation = self.policy  # type: ignore[assignment]
-            need_refit = False
-        policy_generation_stale = True
         assert self.policy_generation is not None
 
         step = self.grpo_save_state["step"]
         consumed_samples = self.grpo_save_state["consumed_samples"]
         val_period = self.master_config["grpo"]["val_period"]
         val_at_start = self.master_config["grpo"]["val_at_start"]
-        colocated_inference = self.master_config["policy"]["generation"]["colocated"][
-            "enabled"
-        ]
-        max_rollout_turns = self.master_config["grpo"].get("max_rollout_turns", 999999)
+        colocated_inference = self.master_config["policy"]["generation"]["colocated"]["enabled"]
 
         if val_at_start and step == 0:
-            policy_generation_stale = self._run_initial_validation(
-                self.policy,
-                self.policy_generation,
-                self.val_dataloader,
-                self.logger,
-                need_refit,
-                policy_generation_stale,
-                colocated_inference,
-            )
+            logging.info("\n🔍 Running initial validation...")
+            val_metrics, validation_timings = self._validate(0)
+            self.policy_generation.finish_generation()
+            self.logger.log_metrics(val_metrics, 0, prefix="validation")
+            self.logger.log_metrics(validation_timings, 0, prefix="timing/validation")
 
         max_steps = min(len(self.dataloader), self.master_config["grpo"]["max_num_steps"])
-
+        
+        prev_rollout_task: asyncio.Task[tuple[BatchedDataDict[DatumSpec], dict[str, Any]]] | None = None
+        
         for raw_batch in self.dataloader:
             batch = BatchedDataDict[DatumSpec](raw_batch)
             batch["idx"] = list(range(batch.size))
@@ -506,59 +503,56 @@ class GRPOTrainer:
             validation_timings: Optional[dict[str, Any]] = None
 
             with timer.time("total_step_time"):
-                repeated_batch = batch.repeat_interleave(
+                rollout_batch = batch.repeat_interleave(
                     self.master_config["grpo"]["num_generations_per_prompt"]
                 )
-
-                logging.info(f"Generating responses for batch of size {repeated_batch.size}...")
                 
-                (
-                    repeated_batch,
-                    rollout_metrics,
-                    policy_generation_stale,
-                ) = self._run_rollouts(
-                    repeated_batch,
-                    timer,
-                    need_refit,
-                    policy_generation_stale,
-                    colocated_inference,
-                    max_rollout_turns,
-                )
-                
-                repeated_batch = self._process_rollouts(repeated_batch)
-                
-                logging.info("Processing rewards...")
-                repeated_batch = self._compute_advantages(
-                    repeated_batch, timer
-                )
+                # Interleaving works by making the training code always train on the previous datapoint while
+                # rollouts generate against the current one.
+                if self.interleave_rollouts:
+                    if prev_rollout_task is not None:
+                        logging.info("Waiting for interleaved rollout to complete...")
+                        with timer.time("generation"):
+                            repeated_batch, rollout_metrics = await prev_rollout_task
+                        
+                        # Refit policy after we have awaited the previous rollout, for accurate timing
+                        logging.info("Refitting policy...")
+                        with timer.time("refit_policy"):
+                            await self._refit_policy_generation(colocated_inference)
+                        
+                        prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
+                    else:
+                        # Queue up rollout with current datapoint and move to the next. Should only happen on the first step.
+                        prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
+                        continue
+                else:
+                    logging.info("Refitting policy...")
+                    with timer.time("refit_policy"):
+                        await self._refit_policy_generation(colocated_inference)
+                    logging.info("Generating rollouts...")
+                    repeated_batch, rollout_metrics = await self._rollout_step(rollout_batch, timer)
                 
                 logging.info("Preparing for logprob inference...")
                 self._prepare_for_logprob_inference(timer)
 
                 logging.info("Computing logprobs...")
-                self._compute_logprobs(repeated_batch, timer)
+                await self._compute_logprobs(repeated_batch, timer)
                 
                 logging.info("Preparing for training...")
-                policy_generation_stale = True
                 self._prepare_for_training(timer)
 
                 logging.info("Training policy...")
                 with timer.time("policy_training"):
-                    train_results = self.policy.train(repeated_batch, self.loss_fn)
+                    train_results = await self.policy.train(repeated_batch, self.loss_fn)
 
                 is_last_step = step + 1 == max_steps
                 
                 (
                     val_metrics,
-                    validation_timings,
-                    policy_generation_stale,
+                    validation_timings
                 ) = self._run_validation_step(
                     step,
                     val_period,
-                    need_refit,
-                    policy_generation_stale,
-                    colocated_inference,
-                    self.logger,
                 )
 
                 consumed_samples += self.master_config["grpo"]["num_prompts_per_step"]
@@ -594,69 +588,59 @@ class GRPOTrainer:
             if step >= self.master_config["grpo"]["max_num_steps"]:
                 break
 
-    def _run_initial_validation(
-        self,
-        policy_generation: GenerationInterface,
-        val_dataloader: Optional[StatefulDataLoader],
-        logger: Logger,
-        need_refit: bool,
-        policy_generation_stale: bool,
-        colocated_inference: bool,
-    ) -> bool:
-        logging.info("\n🔍 Running initial validation...")
-        if need_refit and policy_generation_stale:
-            self._refit_policy_generation(colocated_inference)
-            policy_generation_stale = False
-        else:
-            policy_generation.prepare_for_generation()
-        val_metrics, validation_timings = self._validate(0)
-        policy_generation.finish_generation()
-        logger.log_metrics(val_metrics, 0, prefix="validation")
-        logger.log_metrics(validation_timings, 0, prefix="timing/validation")
-        return policy_generation_stale
-
-    def _run_rollouts(
+    async def _rollout_step(
         self,
         repeated_batch: BatchedDataDict[DatumSpec],
         timer: Timer,
-        need_refit: bool,
-        policy_generation_stale: bool,
-        colocated_inference: bool,
-        max_rollout_turns: int,
+    ) -> None:
+        repeated_batch, rollout_metrics = await self._run_rollouts(
+            repeated_batch,
+            timer,
+        )
+        
+        repeated_batch = self._process_rollouts(repeated_batch)
+        
+        repeated_batch = self._compute_advantages(
+            repeated_batch, timer
+        )
+        
+        return repeated_batch, rollout_metrics
+
+    async def _run_rollouts(
+        self,
+        repeated_batch: BatchedDataDict[DatumSpec],
+        timer: Timer,
     ) -> tuple[
         BatchedDataDict[DatumSpec],
         dict[str, Any],
-        bool,
     ]:
         with timer.time("prepare_for_generation"):
-            if need_refit and policy_generation_stale:
-                self._refit_policy_generation(colocated_inference, timer=timer)
-                policy_generation_stale = False
-            else:
-                self.policy_generation.prepare_for_generation()
+            self.policy_generation.prepare_for_generation()
 
-        with timer.time("generation"):
-            if "vf" not in self.master_config.get("env", {}):
-                raise RuntimeError(
-                    "GRPOTrainer currently only supports verifiers environments."
-                )
-
-            env_cfg = self.master_config["env"]["vf"]
-            generation_cfg = self.master_config["policy"]["generation"]
-
-            repeated_batch, rollout_metrics = run_vf_rollouts(
-                policy_generation=self.policy_generation,
-                input_batch=repeated_batch,
-                vf_semaphore=env_cfg.get("generation_semaphore"),
-                max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
-                max_new_tokens=generation_cfg.get("max_new_tokens"),
-                env=self.env,
-                grpo_gids=repeated_batch["idx"],
-                greedy=False,
+        if "vf" not in self.master_config.get("env", {}):
+            raise RuntimeError(
+                "GRPOTrainer currently only supports verifiers environments."
             )
-            self.policy_generation.finish_generation()
 
-        return repeated_batch, rollout_metrics, policy_generation_stale
+        env_cfg = self.master_config["env"]["vf"]
+        generation_cfg = self.master_config["policy"]["generation"]
+
+        repeated_batch, rollout_metrics = run_vf_rollouts(
+            policy_generation=self.policy_generation,
+            input_batch=repeated_batch,
+            vf_semaphore=env_cfg.get("generation_semaphore"),
+            max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
+            max_new_tokens=generation_cfg.get("max_new_tokens"),
+            env=self.env,
+            grpo_gids=repeated_batch["idx"],
+            greedy=False,
+        )
+        
+        result = self.policy_generation.finish_generation()
+        if isinstance(result, CoroutineType):
+            await result
+
+        return repeated_batch, rollout_metrics
 
     def _process_rollouts(self, repeated_batch: BatchedDataDict[DatumSpec]) -> BatchedDataDict[DatumSpec]:
         # Tokenize entire conversation
@@ -713,7 +697,7 @@ class GRPOTrainer:
         
         input_length = len(completion[-1]["token_ids"])
         
-        return torch.tensor(token_ids, dtype=torch.int64), torch.tensor(generation_logprobs), input_length
+        return token_ids, generation_logprobs, input_length
 
     def _compute_advantages(
         self,
@@ -815,13 +799,13 @@ class GRPOTrainer:
         with timer.time("logprob_inference_prep"):
             self.policy.prepare_for_lp_inference()
 
-    def _compute_logprobs(
+    async def _compute_logprobs(
         self,
         train_data: BatchedDataDict[DatumSpec],
         timer: Timer,
     ) -> None:
         with timer.time("policy_and_reference_logprobs"):
-            fprop_logprobs = self.policy.get_logprobs(train_data)["logprobs"]
+            fprop_logprobs = (await self.policy.get_logprobs(train_data))["logprobs"]
             
             if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
                 reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
@@ -845,31 +829,22 @@ class GRPOTrainer:
         self,
         step: int,
         val_period: int,
-        need_refit: bool,
-        policy_generation_stale: bool,
-        colocated_inference: bool,
-        logger: Logger,
     ) -> tuple[
         Optional[dict[str, Any]],
         Optional[dict[str, Any]],
-        bool,
     ]:
         val_metrics: Optional[dict[str, Any]] = None
         validation_timings: Optional[dict[str, Any]] = None
 
         if val_period > 0 and (step + 1) % val_period == 0:
-            if need_refit and policy_generation_stale:
-                self._refit_policy_generation(colocated_inference)
-                policy_generation_stale = False
-            else:
-                self.policy_generation.prepare_for_generation()
+            self.policy_generation.prepare_for_generation()
 
             val_metrics, validation_timings = self._validate(step+1)
             self.policy_generation.finish_generation()
-            logger.log_metrics(validation_timings, step + 1, prefix="timing/validation")
-            logger.log_metrics(val_metrics, step + 1, prefix="validation")
+            self.logger.log_metrics(validation_timings, step + 1, prefix="timing/validation")
+            self.logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
-        return val_metrics, validation_timings, policy_generation_stale
+        return val_metrics, validation_timings
 
     def _save_checkpoint(
         self,
@@ -1026,7 +1001,7 @@ class GRPOTrainer:
         self.logger.log_metrics(metrics, step + 1, prefix="train")
         self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
-    def _refit_policy_generation(
+    async def _refit_policy_generation(
         self,
         colocated_inference: bool,
         _refit_buffer_size_gb: Optional[int] = None,
@@ -1065,8 +1040,8 @@ class GRPOTrainer:
                 futures_inference = (
                     self.policy_generation.update_weights_from_collective()
                 )
-                self._wait_on_futures(futures_train)
-                results = self._wait_on_futures(futures_inference)
+                await self._wait_on_futures(futures_train)
+                results = await self._wait_on_futures(futures_inference)
                 update_success = all(
                     result for result in results if result is not None
                 )
@@ -1118,8 +1093,7 @@ class GRPOTrainer:
                     timer,
                     False,
                     False,
-                    self.colocated_inference,
-                    self.master_config["grpo"]["max_rollout_turns"],
+                    self.colocated_inference
                 )
                 
                 repeated_batch = self._process_rollouts(repeated_batch)
@@ -1166,7 +1140,7 @@ class GRPOTrainer:
         return val_metrics, timing_metrics
 
     @staticmethod
-    def _wait_on_futures(futures: list[Any]) -> list[Any]:
+    async def _wait_on_futures_sync(futures: list[Any]) -> list[Any]:
         results: list[Any] = []
         for fut in futures:
             try:
@@ -1182,9 +1156,13 @@ class GRPOTrainer:
 
             result_method = getattr(fut, "result", None)
             if callable(result_method):
-                results.append(result_method())
+                results.append(ray.get(result_method()))
                 continue
 
             results.append(ray.get(fut))
 
         return results
+
+    @staticmethod
+    async def _wait_on_futures(futures: list[Any]) -> list[Any]:
+        return await asyncio.gather(*futures)

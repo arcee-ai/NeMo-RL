@@ -26,6 +26,7 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
+import asyncio
 from typing import Any, Callable, Optional
 
 from omegaconf import OmegaConf
@@ -189,7 +190,7 @@ def main() -> None:
     print(" " * 18 + "SETUP COMPLETE")
     print("=" * 60 + "\n")
 
-    trainer.train()
+    asyncio.run(trainer.train())
 
 
 if __name__ == "__main__":
