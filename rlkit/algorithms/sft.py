@@ -121,6 +121,8 @@ class SFTTrainer:
             weights_path = None
             optimizer_path = None
         
+        self.use_hf_checkpoint = self.master_config["checkpointing"].get("hf_checkpoint", False)
+        
         self.policy = self._initialize_policy(
             self.cluster,
             policy_config,
@@ -215,6 +217,7 @@ class SFTTrainer:
             optimizer_path=optimizer_path,
             init_optimizer=True,
             init_reference_model=False,
+            use_hf_checkpoint=self.use_hf_checkpoint,
         )
 
     def _process_batch(self, batch: BatchedDataDict) -> BatchedDataDict:
@@ -320,30 +323,6 @@ class SFTTrainer:
         return val_metrics, timing_metrics
 
     def train(self) -> None:
-        self.policy.prepare_for_training()
-        self.policy.prepare_refit_info()
-        
-        checkpoint_path = self.checkpointer.init_tmp_checkpoint(
-            0, self.sft_save_state, self.master_config
-        )
-
-        self.policy.save_checkpoint(
-            weights_path=os.path.join(
-                checkpoint_path, "policy", "weights"
-            ),
-            optimizer_path=None,
-            tokenizer_path=None,
-        )
-        torch.save(
-            self.train_dataloader.state_dict(),
-            os.path.join(
-                checkpoint_path, "train_dataloader.pt"
-            ),
-        )
-        self.checkpointer.finalize_checkpoint(checkpoint_path)
-        
-        raise ValueError("successful checkpoint")
-        
         timer = Timer()
         timeout = TimeoutChecker(
             timeout=self.master_config["checkpointing"]["checkpoint_must_save_by"],
@@ -462,7 +441,7 @@ class SFTTrainer:
                                 )
 
                         with timer.time("checkpointing"):
-                            print(f"Saving checkpoint for step {total_steps + 1}...")
+                            logging.info(f"Saving checkpoint for step {total_steps + 1}...")
                             checkpoint_path = self.checkpointer.init_tmp_checkpoint(
                                 total_steps + 1, self.sft_save_state, self.master_config
                             )
@@ -520,6 +499,10 @@ class SFTTrainer:
                         metrics["train_fp_utilization"] = (
                             total_tflops / theoretical_tflops
                         )
+                    total_valid_toks = sum(train_results["all_mb_metrics"]["global_valid_toks"])
+                    print(f"  • Total valid tokens: {total_valid_toks}")
+                    print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks'])}")
+                    
                 print("\n⏱️  Timing:")
                 total_time = timing_metrics.get("total_step_time", 0)
                 print(f"  • Total step time: {total_time:.2f}s")
@@ -549,22 +532,3 @@ class SFTTrainer:
     def _to_scalar_array(self, tensor: torch.Tensor) -> np.ndarray:
         """Convert a tensor to numpy array for logging purposes."""
         return tensor.detach().cpu().numpy()
-    
-# Dataset transformation utility
-SFTDataTransformFn = Callable[[AutoTokenizer, dict], dict]
-
-transformations: dict[str, SFTDataTransformFn] = {
-    "axolotl": lambda _, x: {
-        "input_ids": torch.tensor(x["input_ids"]),
-        "token_mask": torch.tensor([a == b for a, b in zip(x["input_ids"], x["labels"])]),
-        "sample_mask": torch.tensor(1.0)
-    }
-}
-
-def transform_dataset(dataset: Dataset, dataset_type: str, tokenizer: AutoTokenizer, num_proc: int = 8) -> Dataset:
-    if dataset_type != "native":
-        if dataset_type not in transformations:
-            raise ValueError(f"Unsupported dataset type: {dataset_type}")
-        transform_fn = transformations[dataset_type]
-        dataset = dataset.map(lambda x: transform_fn(tokenizer, x), num_proc=num_proc)
-    return dataset
