@@ -36,7 +36,6 @@ policy:
 
   dtensor_v2_cfg:
     enabled: true
-    use_liger: false
     cpu_offload: false
     sequence_parallel: false
     activation_checkpointing: true
