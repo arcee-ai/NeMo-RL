@@ -16,7 +16,6 @@ import argparse
 import logging
 import os
 import pprint
-from typing import Callable, Optional
 
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
@@ -27,7 +26,8 @@ import torch
 from transformers import AutoTokenizer
 
 from rlkit.config import SFTMasterConfig as MasterConfig
-from rlkit.algorithms.sft import SFTTrainer, transform_dataset
+from rlkit.algorithms.sft import SFTTrainer
+from rlkit.data.datasets import transform_dataset
 from rlkit.algorithms.utils import get_tokenizer
 from rlkit.config import DataConfig
 from rlkit.distributed.virtual_cluster import init_ray
@@ -99,6 +99,8 @@ def main():
     if not torch.cuda.can_device_access_peer(0, 1):
         os.environ["NCCL_SHM_DISABLE"] = "1"
         logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
+        if not config["checkpointing"].get("hf_checkpoint", False):
+            raise ValueError("Running on a system configuration with bugged DCP checkpointing. Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints.")
 
     # Print config
     print("Final config:")
