@@ -124,9 +124,7 @@ def main() -> None:
     args, overrides = parse_args()
 
     if not args.config:
-        args.config = os.path.join(
-            os.path.dirname(__file__), "configs", "grpo_vf_reverser_600M.yaml"
-        )
+        raise ValueError("A config file is required. Please specify a config file using the --config argument.")
 
     config = load_config(args.config)
     print(f"Loaded configuration from: {args.config}")
@@ -145,6 +143,8 @@ def main() -> None:
     if not torch.cuda.can_device_access_peer(0, 1):
         os.environ["NCCL_SHM_DISABLE"] = "1"
         logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
+        if not config["checkpointing"].get("hf_checkpoint", False):
+            raise ValueError("Running on a system configuration with bugged DCP checkpointing. Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints.")
 
     assert config["policy"]["generation"]["backend"] == "vllm_http", "Verifiers environments only support the \"vllm_http\" generation backend."
 

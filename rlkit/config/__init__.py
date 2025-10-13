@@ -15,7 +15,6 @@ from .rl.policy import SequencePackingConfig
 from .rl.policy import RewardModelConfig
 from .rl.policy.dtv2 import DTensorV2Config
 from .sft import SFTConfig, SFTMasterConfig
-from .dpo import DPOConfig, DPOMasterConfig
 from .rm import RMConfig, RMMasterConfig
 
 __all__ = [
@@ -40,8 +39,6 @@ __all__ = [
     "DTensorV2Config",
     "SFTConfig",
     "SFTMasterConfig",
-    "DPOConfig",
-    "DPOMasterConfig",
     "RMConfig",
     "RMMasterConfig",
 ]

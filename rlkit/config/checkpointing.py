@@ -16,6 +16,7 @@ class CheckpointingConfig(TypedDict):
 
     enabled: bool
     checkpoint_dir: PathLike
+    hf_checkpoint: NotRequired[bool]
     metric_name: str | None
     higher_is_better: bool
     save_period: int

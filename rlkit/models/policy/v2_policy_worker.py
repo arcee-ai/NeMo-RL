@@ -28,6 +28,8 @@ from accelerate import init_empty_weights
 from torch import nn
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
+    get_model_state_dict,
+    get_optimizer_state_dict,
     set_model_state_dict,
 )
 from torch.distributed.fsdp import (
@@ -129,6 +131,47 @@ def get_cpu_state_dict(
 
     torch.cuda.synchronize()
     return new_state_dict
+
+
+def _materialize_state_to_cpu(obj: Any) -> Any:
+    """Recursively convert DTensors/Tensors to CPU tensors for serialization."""
+    if isinstance(obj, DTensor):
+        obj = to_local_if_dtensor(obj)
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().cpu()
+    if isinstance(obj, dict):
+        return {k: _materialize_state_to_cpu(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_materialize_state_to_cpu(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_materialize_state_to_cpu(v) for v in obj)
+    return obj
+
+
+def _resolve_checkpoint_file_path(path: str, default_filename: str) -> str:
+    """Return a filesystem path suitable for torch.save/torch.load.
+
+    If `path` already looks like a file (non-empty suffix), ensure its parent exists and return it.
+    Otherwise, treat `path` as a directory, create it, and return `path/default_filename`.
+    """
+    path = os.path.abspath(path)
+    suffix = os.path.splitext(path)[1]
+    if suffix:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
+    os.makedirs(path, exist_ok=True)
+    return os.path.join(path, default_filename)
+
+
+def _infer_checkpoint_file_path(path: str, default_filename: str) -> str:
+    """Infer the file path that was produced by `_resolve_checkpoint_file_path`."""
+    path = os.path.abspath(path)
+    suffix = os.path.splitext(path)[1]
+    if suffix:
+        return path
+    if os.path.isdir(path):
+        return os.path.join(path, default_filename)
+    return os.path.join(path, default_filename)
 
 def get_device_mesh_info(
     world_size: int,
@@ -248,8 +291,10 @@ class DTensorV2PolicyWorker:
         optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,
         init_reference_model: bool = True,
+        use_hf_checkpoint: bool = False,
         **kwargs: Any,
     ):
+        self.use_hf_checkpoint = use_hf_checkpoint
         self.is_generation_colocated = None
         if "generation" in config and config["generation"] is not None:
             self.is_generation_colocated = config["generation"]["colocated"]["enabled"]
@@ -293,7 +338,7 @@ class DTensorV2PolicyWorker:
             )
             print(f"[Rank {self.rank}] Using FlashAttention2 for sequence packing")
 
-        model_config = AutoConfig.from_pretrained(
+        self.model_config = AutoConfig.from_pretrained(
             model_name,
             # Always load the model in float32 to keep master weights in float32.
             # Keeping the master weights in lower precision has shown to cause issues with convergence.
@@ -324,11 +369,11 @@ class DTensorV2PolicyWorker:
         ] = None
         if self.allow_custom_modeling_code and not self._is_reward_model:
             try:
-                custom_model_setup = get_model_config(model_config)
+                custom_model_setup = get_model_config(self.model_config)
             except ValueError as exc:
                 logging.info(
                     "Falling back to Hugging Face implementation for %s: %s",
-                    model_config.model_type,
+                    self.model_config.model_type,
                     exc,
                 )
 
@@ -336,6 +381,14 @@ class DTensorV2PolicyWorker:
         self.adapter: Optional[BaseStateDictAdapter]
         self.adapter = None
         self._custom_parallelize_function: Optional[Callable] = None
+        
+        self.model_name = model_name
+        
+        # If we are checkpointing to HF format, we can just load a checkpoint directly from the weights path
+        if self.use_hf_checkpoint:
+            hf_model_name = model_name if weights_path is None else weights_path
+        else:
+            hf_model_name = model_name
 
         full_state_dict = None
         if self.uses_custom_model:
@@ -351,11 +404,14 @@ class DTensorV2PolicyWorker:
             if self.rank == 0:
                 print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
+                    # Either load from the original model name or from the weights path if available
+                    hf_model_name,
                     device_map="cpu",  # load weights onto CPU initially
                     trust_remote_code=True,
-                    config=model_config,
+                    config=self.model_config,
+                    dtype=self.dtype,
                 )
+                
                 hf_state_dict = model.state_dict()
                 full_state_dict = self.adapter.from_hf(hf_state_dict)
                 assert (
@@ -373,11 +429,11 @@ class DTensorV2PolicyWorker:
                 rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
                 if rm_type == "bradley_terry":
                     model_class = AutoModelForSequenceClassification
-                    if model_config.num_labels != 1:
+                    if self.model_config.num_labels != 1:
                         print(
                             "model_config.num_labels is not 1. Setting it to 1 for Bradley-Terry reward models."
                         )
-                        model_config.num_labels = 1
+                        self.model_config.num_labels = 1
                 else:
                     raise ValueError(f"Unknown reward model type: {rm_type}")
             else:
@@ -386,10 +442,12 @@ class DTensorV2PolicyWorker:
             if self.rank == 0:
                 print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
                 model = model_class.from_pretrained(
-                    model_name,
+                    # Either load from the original model name or from the weights path if available
+                    hf_model_name,
                     device_map="cpu",
                     trust_remote_code=True,
-                    config=model_config,
+                    config=self.model_config,
+                    dtype=self.dtype,
                 )
                 full_state_dict = model.state_dict()
                 del model
@@ -397,9 +455,12 @@ class DTensorV2PolicyWorker:
             print("Initializing Hugging Face model on meta device...")
             with init_empty_weights():
                 self.model = model_class.from_config(
-                    model_config,
+                    self.model_config,
                     trust_remote_code=True,
                 )
+            
+            self.model_class = model_class
+            self.model_config = self.model_config
 
             if getattr(getattr(self.model, "config", None), "pad_token_id", None) is None:
                 self.model.config.pad_token_id = tokenizer.pad_token_id
@@ -640,14 +701,13 @@ class DTensorV2PolicyWorker:
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(
                 self.optimizer, lr_lambda=lambda epoch: 1
             )
-
-        # restore
-        if weights_path:
-            self.load_checkpoint(weights_path, optimizer_path)
-        else:
-            print(
-                "No weights path provided. Starting from scratch (default policy init)"
-            )
+        
+        if weights_path and optimizer_path:
+            if self.use_hf_checkpoint:
+                self._load_optim_checkpoint(optimizer_path)
+            else:
+                logging.info(f"Loading DCP checkpoint from {weights_path}")
+                self.load_dcp_checkpoint(weights_path, optimizer_path)
 
         # vars used for refit
         ## will be initialized in prepare_refit_info
@@ -1121,7 +1181,7 @@ class DTensorV2PolicyWorker:
                 "rank": torch.distributed.get_rank(),
                 "gpu_name": torch.cuda.get_device_name(),
                 "model_dtype": self.dtype,
-                "all_mb_metrics": dict(mb_metrics),
+                "all_mb_metrics": dict(mb_metrics)
             }
 
             return metrics
@@ -1679,24 +1739,104 @@ class DTensorV2PolicyWorker:
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
-        tokenizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None
     ) -> None:
         """Save a checkpoint of the model.
 
         the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
         """
-        save_checkpoint(
-            model=self.model,
-            weights_path=weights_path,
-            optimizer=self.optimizer if optimizer_path else None,
-            scheduler=self.scheduler if optimizer_path else None,
-            optimizer_path=optimizer_path,
-            tokenizer=self.tokenizer if tokenizer_path else None,
-            tokenizer_path=tokenizer_path,
-        )
+        if self.use_hf_checkpoint:
+            # Materialize a replicated model state dict that we can serialize centrally.
+            model_state = get_model_state_dict(
+                self.model,
+                options=StateDictOptions(
+                    full_state_dict=True,
+                    cpu_offload=True,
+                ),
+            )
+            model_state = cast(dict[str, Any], _materialize_state_to_cpu(model_state))
 
-    def load_checkpoint(
-        self, weights_path: str, optimizer_path: Optional[str] = None
+            optimizer_state: Optional[dict[str, Any]] = None
+            scheduler_state: Optional[dict[str, Any]] = None
+            if optimizer_path is not None and self.optimizer is not None:
+                optimizer_state = get_optimizer_state_dict(
+                    self.model,
+                    self.optimizer,
+                    options=StateDictOptions(
+                        full_state_dict=True,
+                        cpu_offload=True,
+                    ),
+                )
+                optimizer_state = cast(
+                    dict[str, Any], _materialize_state_to_cpu(optimizer_state)
+                )
+                if self.scheduler is not None:
+                    scheduler_state = self.scheduler.state_dict()
+
+            if self.rank != 0:
+                # Only rank 0 serializes to disk, other ranks participate in the gathers above.
+                return
+
+            os.makedirs(weights_path, exist_ok=True)
+            optimizer_file_path: Optional[str] = None
+            if optimizer_path is not None:
+                optimizer_file_path = _resolve_checkpoint_file_path(
+                    optimizer_path,
+                    "optimizer.pt",
+                )
+            tokenizer_save_path: Optional[str] = None
+            if tokenizer_path is not None:
+                tokenizer_save_path = os.path.abspath(tokenizer_path)
+                os.makedirs(tokenizer_save_path, exist_ok=True)
+
+            if self.uses_custom_model:
+                # Create empty version of the HF model
+                with init_empty_weights():
+                    model_hf = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        trust_remote_code=True,
+                        config=self.model_config,
+                    )
+                
+                assert self.adapter is not None
+                state_dict_hf = self.adapter.to_hf(model_state)
+                model_hf.load_state_dict(state_dict_hf, strict=True, assign=True)
+            else:
+                # Rebuild a HF model on CPU and load the gathered weights.
+                with init_empty_weights():
+                    model_hf = self.model_class.from_config(  # type: ignore[attr-defined]
+                        self.model_config,
+                        trust_remote_code=True,
+                    )
+                model_hf.load_state_dict(model_state, strict=True, assign=True)
+
+            # Save model in expected path
+            model_hf.save_pretrained(weights_path)
+            
+            if self.tokenizer and tokenizer_save_path is not None:
+                self.tokenizer.save_pretrained(tokenizer_save_path)
+            
+            # Save optimizer state
+            if optimizer_file_path is not None and optimizer_state is not None:
+                optimizer_payload: dict[str, Any] = {"optimizer": optimizer_state}
+                if scheduler_state is not None:
+                    optimizer_payload["scheduler"] = scheduler_state
+                torch.save(optimizer_payload, optimizer_file_path)
+        else:
+            save_checkpoint(
+                model=self.model,
+                weights_path=weights_path,
+                optimizer=self.optimizer if optimizer_path else None,
+                scheduler=self.scheduler if optimizer_path else None,
+                optimizer_path=optimizer_path,
+                tokenizer=self.tokenizer if tokenizer_path else None,
+                tokenizer_path=tokenizer_path,
+            )
+
+    def load_dcp_checkpoint(
+        self,
+        weights_path: Optional[str] = None,
+        optimizer_path: Optional[str] = None,
     ) -> None:
         """Load a checkpoint into the model."""
         load_checkpoint(
@@ -1706,6 +1846,30 @@ class DTensorV2PolicyWorker:
             scheduler=self.scheduler if optimizer_path else None,
             optimizer_path=optimizer_path,
         )
+    
+    def _load_optim_checkpoint(self, optimizer_path: str) -> None:
+        """Manually loads a non-sharded optimizer checkpoint. Used for HF checkpoints."""
+        optimizer_file_path = _infer_checkpoint_file_path(
+            optimizer_path,
+            "optimizer.pt",
+        )
+        
+        if self.rank == 0:
+            optimizer_payload = torch.load(optimizer_file_path, map_location="cpu")
+        else:
+            optimizer_payload = None
+        
+        obj = [optimizer_payload]
+        torch.distributed.broadcast_object_list(obj, src=0)
+        
+        optimizer_payload = obj[0]
+        optimizer_state = optimizer_payload.get("optimizer", optimizer_payload)
+        
+        self.optimizer.load_state_dict(optimizer_state)
+        
+        if self.scheduler is not None:
+            scheduler_state = optimizer_payload.get("scheduler", optimizer_payload)
+            self.scheduler.load_state_dict(scheduler_state)
 
     def shutdown(self) -> None:
         """Shutdown the policy."""

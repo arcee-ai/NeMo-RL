@@ -47,7 +47,7 @@ def format_helpsteer3(data: dict[str, Any]) -> dict[str, str | dict[str, str]]:
 
 
 class HelpSteer3Dataset:
-    """HelpSteer3 preference dataset for DPO training."""
+    """HelpSteer3 preference dataset for preference-based training."""
 
     def __init__(self) -> None:
         ds = load_dataset("nvidia/HelpSteer3", "preference")

@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from datasets import Dataset
@@ -76,3 +76,28 @@ def preference_collate_fn(
     )
 
     return batch
+
+# Dataset transformation utility
+SFTDataTransformFn = Callable[[PreTrainedTokenizerBase | None, dict], dict]
+
+transformations: dict[str, SFTDataTransformFn] = {
+    "axolotl": lambda _, x: {
+        "input_ids": torch.tensor(x["input_ids"]),
+        "token_mask": torch.tensor([a == b for a, b in zip(x["input_ids"], x["labels"])]),
+        "sample_mask": torch.tensor(1.0)
+    }
+}
+
+def transform_dataset(dataset: Dataset, dataset_type: str, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
+    if dataset_type != "native":
+        if dataset_type not in transformations:
+            raise ValueError(f"Unsupported dataset type: {dataset_type}")
+
+        # get names of new columns to drop old ones
+        new_cols = list(transformations[dataset_type](tokenizer, dataset[0]).keys())
+        old_cols = list(dataset.column_names)
+        drop_cols = [col for col in old_cols if col not in new_cols]
+        
+        transform_fn = transformations[dataset_type]
+        dataset = dataset.map(lambda x: transform_fn(tokenizer, x), num_proc=num_proc, remove_columns=drop_cols)
+    return dataset

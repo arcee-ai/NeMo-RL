@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from rlkit.data.hf_datasets.chat_templates import COMMON_CHAT_TEMPLATES
-from rlkit.data.hf_datasets.dpo import DPODataset
 from rlkit.data.hf_datasets.helpsteer3 import HelpSteer3Dataset
 from rlkit.data.hf_datasets.oai_format_dataset import OpenAIFormatDataset
 from rlkit.data.hf_datasets.oasst import OasstDataset
@@ -24,7 +23,6 @@ from rlkit.data.hf_datasets.prompt_response_dataset import (
 from rlkit.data.hf_datasets.squad import SquadDataset
 
 __all__ = [
-    "DPODataset",
     "HelpSteer3Dataset",
     "OasstDataset",
     "OpenAIFormatDataset",

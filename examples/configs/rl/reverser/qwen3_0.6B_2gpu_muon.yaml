@@ -24,6 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
+  hf_checkpoint: true
   checkpoint_dir: "results/grpo_vf_reverser_600M"
   metric_name: "step"
   higher_is_better: true
