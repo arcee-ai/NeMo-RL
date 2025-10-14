@@ -17,11 +17,11 @@ from copy import deepcopy
 import pytest
 import torch
 
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.models.generation import configure_generation_config
-from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.distributed.virtual_cluster import RayVirtualCluster
+from rlkit.models.generation import configure_generation_config
+from rlkit.models.generation.vllm import VllmConfig, VllmGeneration
 
 # Large model configuration
 model_name = "meta-llama/Llama-3.1-70B"

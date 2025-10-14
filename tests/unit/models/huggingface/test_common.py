@@ -14,7 +14,7 @@
 
 import pytest
 
-from nemo_rl.models.huggingface.common import ModelFlag, is_gemma_model
+from rlkit.models.huggingface.common import ModelFlag, is_gemma_model
 
 
 @pytest.mark.hf_gated

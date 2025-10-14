@@ -11,7 +11,7 @@ echo2() {
 }
 
 if [[ ! -e "$PROJECT_ROOT/.git" ]]; then
-  echo2 "[Error]: This script was not run from the root of NeMo RL git repo. Please clone it first."
+  echo2 "[Error]: This script was not run from the root of RLKit git repo. Please clone it first."
   exit 1
 elif [[ $# -lt 1 ]]; then
   echo2 "[Error]: This script requires one argument: the name of the experiment to be used as the snapshot directory name"

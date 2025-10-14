@@ -16,21 +16,23 @@ import glob
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type, Union, get_type_hints
+from typing import Any, Dict, List, Optional, Set, Type, TypedDict, Union, get_type_hints
 
 import pytest
 from omegaconf import OmegaConf
 from typing_extensions import NotRequired
 
-from nemo_rl.algorithms.dpo import DPOConfig
-from nemo_rl.algorithms.grpo import GRPOConfig, GRPOLoggerConfig
-from nemo_rl.algorithms.sft import SFTConfig
-from nemo_rl.data import DataConfig
-from nemo_rl.distributed.virtual_cluster import ClusterConfig
-from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.utils.checkpoint import CheckpointingConfig
-from nemo_rl.utils.config import load_config_with_inheritance
-from nemo_rl.utils.logger import LoggerConfig
+from rlkit.config import (
+    CheckpointingConfig,
+    ClusterConfig,
+    DataConfig,
+    GRPOConfig,
+    GRPOLoggerConfig,
+    LoggerConfig,
+    PolicyConfig,
+    SFTConfig,
+)
+from rlkit.utils.config import load_config_with_inheritance
 
 
 def get_keys_from_typeddict(typed_dict_class: dict) -> Set[str]:
@@ -176,11 +178,7 @@ def test_all_config_files_have_required_keys():
             ]
 
             # Add algorithm-specific validation
-            if "dpo" in config_dict:
-                section_validations.extend(
-                    [("dpo", DPOConfig), ("logger", LoggerConfig)]
-                )
-            elif "sft" in config_dict:
+            if "sft" in config_dict:
                 section_validations.extend(
                     [("sft", SFTConfig), ("logger", LoggerConfig)]
                 )
@@ -190,7 +188,7 @@ def test_all_config_files_have_required_keys():
                 )
                 # GRPO also has a loss_fn section
                 if "loss_fn" in config_dict:
-                    from nemo_rl.algorithms.loss_functions import ClippedPGLossConfig
+                    from rlkit.algorithms.loss_functions import ClippedPGLossConfig
 
                     section_validations.append(("loss_fn", ClippedPGLossConfig))
             else:

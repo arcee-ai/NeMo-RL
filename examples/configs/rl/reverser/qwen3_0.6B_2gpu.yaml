@@ -24,6 +24,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
+  hf_checkpoint: true
   checkpoint_dir: "results/grpo_vf_reverser_600M"
   metric_name: "step"
   higher_is_better: true
@@ -55,10 +56,6 @@ policy:
     pipeline_parallel_size: 1
     expert_parallel_size: 1
     custom_parallel_plan: null
-  
-  megatron_cfg:
-    enabled: false
-
   # See docs/design-docs/sequence-packing-and-dynamic-batching.md 
   # for more details on dynamic batching and sequence packing.
   dynamic_batching:

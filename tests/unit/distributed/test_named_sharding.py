@@ -14,7 +14,7 @@
 import numpy as np
 import pytest
 
-from nemo_rl.distributed.named_sharding import NamedSharding
+from rlkit.distributed.named_sharding import NamedSharding
 
 
 @pytest.fixture

@@ -19,7 +19,7 @@ from typing import Dict, List
 
 import pytest
 
-from nemo_rl.data.packing.algorithms import (
+from rlkit.data.packing.algorithms import (
     PackingAlgorithm,
     SequencePacker,
     get_packer,

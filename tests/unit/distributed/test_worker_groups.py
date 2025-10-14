@@ -18,14 +18,14 @@ import sys
 import pytest
 import ray
 
-from nemo_rl.distributed.batched_data_dict import SlicedDataDict
-from nemo_rl.distributed.named_sharding import NamedSharding
-from nemo_rl.distributed.ray_actor_environment_registry import (
+from rlkit.distributed.batched_data_dict import SlicedDataDict
+from rlkit.distributed.named_sharding import NamedSharding
+from rlkit.distributed.ray_actor_environment_registry import (
     ACTOR_ENVIRONMENT_REGISTRY,
     PY_EXECUTABLES,
 )
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
+from rlkit.distributed.virtual_cluster import RayVirtualCluster
+from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 
 
 @ray.remote
@@ -214,7 +214,7 @@ def virtual_cluster():
     # 1 node, 2 CPU bundles. use_gpus=False means num_gpus passed to workers will be 0.
     # bundle_ct_per_node_list=[2] means 1 node with 2 bundles.
     # Since use_gpus=False, these are CPU bundles.
-    # master_port_retries is not an explicit arg, it's handled by env var NRL_VIRTUAL_CLUSTER_MAX_RETRIES internally for pg retries.
+    # master_port_retries is not an explicit arg, it's handled by env var RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES internally for pg retries.
     # The test's master_port_retries=3 was an assumption, RayVirtualCluster doesn't take it.
     cluster = RayVirtualCluster(bundle_ct_per_node_list=[2], use_gpus=False)
     yield cluster
@@ -367,7 +367,7 @@ def test_custom_environment_variables(register_test_actor, virtual_cluster):
     custom_env_vars = {
         "CUSTOM_VAR_1": "test_value_1",
         "CUSTOM_VAR_2": "test_value_2",
-        "NEMO_TEST_ENV": "nemo_test_value",
+        "RLKIT_TEST_ENV": "rlkit_test_value",
         "DUMMY_TEST_VAR": "/custom/test/path",
     }
 
@@ -970,14 +970,14 @@ def test_get_nsight_config_if_pattern_matches():
     """Test the get_nsight_config_if_pattern_matches utility function."""
     from unittest.mock import patch
 
-    from nemo_rl.distributed.worker_group_utils import (
+    from rlkit.distributed.worker_group_utils import (
         get_nsight_config_if_pattern_matches,
     )
 
     # Test 1: No environment variable set
     with (
-        patch("nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS", ""),
-        patch("nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", ""),
+        patch("rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS", ""),
+        patch("rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", ""),
     ):
         result = get_nsight_config_if_pattern_matches("test_worker")
         assert result == {}
@@ -985,11 +985,11 @@ def test_get_nsight_config_if_pattern_matches():
     # Test 2: Environment variable set but no pattern matches
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS",
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS",
             "*critic*,*inference*",
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "1:5"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "1:5"
         ),
     ):
         result = get_nsight_config_if_pattern_matches("dtensor_policy_worker")
@@ -998,11 +998,11 @@ def test_get_nsight_config_if_pattern_matches():
     # Test 3: Pattern matches with wildcard
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS",
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS",
             "*policy*,*critic*",
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "1:5"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "1:5"
         ),
     ):
         result = get_nsight_config_if_pattern_matches("dtensor_policy_worker")
@@ -1014,11 +1014,11 @@ def test_get_nsight_config_if_pattern_matches():
     # Test 4: Exact name match
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS",
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS",
             "exact-worker,another-worker",
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "3:8"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "3:8"
         ),
     ):
         result = get_nsight_config_if_pattern_matches("exact-worker")
@@ -1028,11 +1028,11 @@ def test_get_nsight_config_if_pattern_matches():
     # Test 5: Multiple patterns, first one matches
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS",
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS",
             "*vllm*,*policy*,*critic*",
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "2:10"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "2:10"
         ),
     ):
         result = get_nsight_config_if_pattern_matches("vllm_inference_worker")
@@ -1042,11 +1042,11 @@ def test_get_nsight_config_if_pattern_matches():
     # Test 6: CSV parsing with whitespace
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS",
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS",
             "  *train*  ,  exact-name  ,  *test*  ",
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "5:15"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "5:15"
         ),
     ):
         result = get_nsight_config_if_pattern_matches("training_worker")
@@ -1064,11 +1064,11 @@ def test_get_nsight_config_if_pattern_matches():
     # Test 7: Empty patterns in CSV
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS",
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS",
             "*policy*,,*critic*,",
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "1:3"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "1:3"
         ),
     ):
         result = get_nsight_config_if_pattern_matches("policy_worker")
@@ -1085,16 +1085,16 @@ def test_get_nsight_config_output_format():
     """Test that the nsight config output can be directly unpacked into runtime_env."""
     from unittest.mock import patch
 
-    from nemo_rl.distributed.worker_group_utils import (
+    from rlkit.distributed.worker_group_utils import (
         get_nsight_config_if_pattern_matches,
     )
 
     with (
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_WORKER_PATTERNS", "*test*"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_WORKER_PATTERNS", "*test*"
         ),
         patch(
-            "nemo_rl.distributed.worker_group_utils.NRL_NSYS_PROFILE_STEP_RANGE", "1:5"
+            "rlkit.distributed.worker_group_utils.RLKIT_NSYS_PROFILE_STEP_RANGE", "1:5"
         ),
     ):
         # Test the unpacking behavior

@@ -53,10 +53,6 @@ policy:
   
   dtensor_v2_cfg:
     enabled: false
-  
-  megatron_cfg:
-    enabled: false
-
   # See docs/design-docs/sequence-packing-and-dynamic-batching.md 
   # for more details on dynamic batching and sequence packing.
   dynamic_batching:

@@ -21,15 +21,16 @@ from typing import Any
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
-from nemo_rl.algorithms.rm import MasterConfig, rm_train, setup
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.data import DataConfig, hf_datasets
-from nemo_rl.data.datasets import AllTaskProcessedDataset
-from nemo_rl.data.interfaces import DatumSpec, TaskDataSpec
-from nemo_rl.data.llm_message_utils import get_formatted_message_log
-from nemo_rl.distributed.virtual_cluster import init_ray
-from nemo_rl.utils.config import load_config, parse_hydra_overrides
-from nemo_rl.utils.logger import get_next_experiment_dir
+from rlkit.algorithms.rm import MasterConfig, rm_train, setup
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.config import DataConfig
+from rlkit.data import hf_datasets
+from rlkit.data.datasets import AllTaskProcessedDataset
+from rlkit.data.interfaces import DatumSpec, TaskDataSpec
+from rlkit.data.llm_message_utils import get_formatted_message_log
+from rlkit.distributed.virtual_cluster import init_ray
+from rlkit.utils.config import load_config, parse_hydra_overrides
+from rlkit.utils.logger import get_next_experiment_dir
 
 
 def parse_args():

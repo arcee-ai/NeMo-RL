@@ -18,8 +18,8 @@ import pytest
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from nemo_rl.algorithms.loss_functions import PreferenceLoss
-from nemo_rl.algorithms.rm import _default_rm_save_state, rm_train
+from rlkit.algorithms.loss_functions import PreferenceLoss
+from rlkit.algorithms.rm import _default_rm_save_state, rm_train
 
 
 @pytest.fixture

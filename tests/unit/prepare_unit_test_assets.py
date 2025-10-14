@@ -26,8 +26,8 @@ import os
 
 import ray
 
-from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES
-from nemo_rl.utils.venvs import create_local_venv
+from rlkit.distributed.virtual_cluster import PY_EXECUTABLES
+from rlkit.utils.venvs import create_local_venv
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_ASSETS_DIR = os.path.join(TESTS_DIR, "test_assets")

@@ -10,7 +10,7 @@ import torch
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 
 # Local imports
-from nemo_rl.models.custom.convert import get_model_config
+from rlkit.models.custom.convert import get_model_config
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 
 

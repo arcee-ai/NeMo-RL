@@ -15,17 +15,14 @@
 #!/bin/bash
 set -xeuo pipefail # Exit immediately if a command exits with a non-zero status
 
-cd /opt/nemo-rl
+cd /opt/rlkit
 time uv run --no-sync bash ./tests/functional/sft.sh
 time uv run --no-sync bash ./tests/functional/grpo.sh
-time uv run --no-sync bash ./tests/functional/grpo_megatron.sh
 time uv run --no-sync bash ./tests/functional/grpo_multiturn.sh
 time uv run --no-sync bash ./tests/functional/grpo_non_colocated.sh
-time uv run --no-sync bash ./tests/functional/dpo.sh
 time uv run --no-sync bash ./tests/functional/rm.sh
 time uv run --no-sync bash ./tests/functional/eval.sh
 time uv run --no-sync bash ./tests/functional/eval_async.sh
-time uv run --no-sync bash ./tests/functional/test_mcore_extra_installed_correctly.sh
 
-cd /opt/nemo-rl/tests
+cd /opt/rlkit/tests
 coverage combine .coverage*

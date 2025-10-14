@@ -36,7 +36,7 @@ inputs:
   image:
     description: "Image to use for test"
     required: false
-    default: "nemo_rl_container"
+    default: "rlkit_container"
   cpu-only:
     description: "Run tests on CPU only"
     required: false
@@ -149,7 +149,7 @@ runs:
         DIR: ${{ github.run_id }}
       with:
         submodules: 'recursive'
-        path: ${{ github.run_id }}/${{steps.uuid.outputs.id }}/nemo-rl
+        path: ${{ github.run_id }}/${{steps.uuid.outputs.id }}/rlkit
 
     - name: Run tests
       id: test
@@ -163,18 +163,18 @@ runs:
           --env TRANSFORMERS_OFFLINE=0 \
           --env HYDRA_FULL_ERROR=1 \
           --env HF_HUB_OFFLINE=1 \
-          --env HF_HOME=/home/TestData/nemo-rl/hf_home \
-          --env HF_DATASETS_CACHE=/home/TestData/nemo-rl/hf_datasets_cache \
-          --env NEMO_RL_REPO_DIR=/opt/nemo-rl \
+          --env HF_HOME=/home/TestData/rlkit/hf_home \
+          --env HF_DATASETS_CACHE=/home/TestData/rlkit/hf_datasets_cache \
+          --env RLKIT_REPO_DIR=/opt/rlkit \
           --env HF_TOKEN \
-          --volume $(pwd)/${{ github.run_id }}/${{steps.uuid.outputs.id }}/nemo-rl:/opt/nemo-rl \
+          --volume $(pwd)/${{ github.run_id }}/${{steps.uuid.outputs.id }}/rlkit:/opt/rlkit \
           --volume $GITHUB_ACTION_DIR:$GITHUB_ACTION_DIR \
-          --volume /mnt/datadrive/TestData/nemo-rl/datasets:/opt/nemo-rl/datasets:ro \
-          --volume /mnt/datadrive/TestData/nemo-rl/checkpoints:/home/TestData/nemo-rl/checkpoints:ro \
-          --volume /mnt/datadrive/TestData/nemo-rl/hf_home/hub:/home/TestData/nemo-rl/hf_home/hub \
-          --volume /mnt/datadrive/TestData/nemo-rl/hf_datasets_cache:/home/TestData/nemo-rl/hf_datasets_cache \
-          nemoci.azurecr.io/nemo_rl_container:${{ github.run_id }} bash -eux -o pipefail -c '\
-            git config --global --add safe.directory /opt/nemo-rl
+          --volume /mnt/datadrive/TestData/rlkit/datasets:/opt/rlkit/datasets:ro \
+          --volume /mnt/datadrive/TestData/rlkit/checkpoints:/home/TestData/rlkit/checkpoints:ro \
+          --volume /mnt/datadrive/TestData/rlkit/hf_home/hub:/home/TestData/rlkit/hf_home/hub \
+          --volume /mnt/datadrive/TestData/rlkit/hf_datasets_cache:/home/TestData/rlkit/hf_datasets_cache \
+          nemoci.azurecr.io/rlkit_container:${{ github.run_id }} bash -eux -o pipefail -c '\
+            git config --global --add safe.directory /opt/rlkit
             # This is needed since we create virtualenvs in the workspace, so this allows it to be cleaned up if necessary
             umask 000
             bash tests/${{ inputs.is_doc_test == 'true' && 'docs' || (inputs.is_unit_test == 'true' && 'unit' || 'functional') }}/${{ inputs.script }}.sh && \
@@ -207,7 +207,7 @@ runs:
       with:
         name: ${{ steps.check.outputs.coverage_report }}
         path: |
-          ${{ github.workspace }}/${{ github.run_id }}/${{steps.uuid.outputs.id }}/nemo-rl/tests/.coverage
+          ${{ github.workspace }}/${{ github.run_id }}/${{steps.uuid.outputs.id }}/rlkit/tests/.coverage
         include-hidden-files: true
 
     - name: Container shutdown

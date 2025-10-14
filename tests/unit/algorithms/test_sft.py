@@ -18,8 +18,8 @@ import pytest
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from nemo_rl.algorithms.loss_functions import NLLLoss
-from nemo_rl.algorithms.sft import _default_sft_save_state, sft_train
+from rlkit.algorithms.loss_functions import NLLLoss
+from rlkit.algorithms.sft import _default_sft_save_state, sft_train
 
 
 @pytest.fixture

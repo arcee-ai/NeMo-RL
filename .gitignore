@@ -4,6 +4,7 @@
 
 *.pickle
 uv.lock
+_datasets/
 
 .git
 *.out

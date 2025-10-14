@@ -3,19 +3,19 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["nemo_rl"]
+packages = ["rlkit"]
 
 [tool.setuptools.dynamic]
-version = {attr = "nemo_rl.__version__"}  # any module attribute compatible with ast.literal_eval
+version = {attr = "rlkit.__version__"}  # any module attribute compatible with ast.literal_eval
 readme = {file = "README.md", content-type = "text/markdown"}
 
 [project]
-name = "nemo-rl"
+name = "rlkit"
 dynamic = [
     "version",
     "readme",
 ]
-description = "NeMo RL: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
+description = "RLKit: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
 requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
@@ -49,7 +49,8 @@ dependencies = [
     "verifiers==0.1.3",
     "vf-exts",
     "flash-attn==2.7.4.post1",
-    "vllm>=0.10.0"
+    "vllm>=0.10.0",
+    "dion @ https://github.com/microsoft/dion.git"
 ]
 
 [project.optional-dependencies]
@@ -77,23 +78,6 @@ vllm-http = [
     "hf-transfer",
     "flash-attn==2.7.4.post1"
 ]
-mcore = [
-    # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
-    # wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
-    # sudo dpkg -i cuda-keyring_1.1-1_all.deb
-    # sudo apt-get update
-    # sudo apt-get install cudnn-cuda-12
-    "transformer-engine[pytorch]==2.3.0",
-    "megatron-core",
-    "nemo-tron",
-    # Remove this once https://github.com/NVIDIA-NeMo/RL/issues/501 resolved
-    "vllm==0.10.0",
-    # Flash-attn version should be selected to satisfy both TE + vLLM requirements (xformers in particular)
-    # https://github.com/NVIDIA/TransformerEngine/blob/v2.3/transformer_engine/pytorch/attention/dot_product_attention/utils.py#L108
-    # https://github.com/facebookresearch/xformers/blob/8354497deb2c04c67fbb2e2ad911e86530da0e90/xformers/ops/fmha/flash.py#L76
-    "flash-attn==2.7.4.post1",
-]
-
 [dependency-groups]
 
 # This is a default group so that we install these even with bare `uv sync`
@@ -106,7 +90,6 @@ build = [
     "einops",
     # Build requirement for nemo_run
     "hatchling",
-    # Build requirement for mcore
     "pybind11",
     # Build requirement for flash-attn
     "psutil",
@@ -134,10 +117,6 @@ test = [
 ]
 
 [tool.uv.sources]
-megatron-core = { workspace = true }
-nemo-tron = { workspace = true }
-# The NeMo Run source to be used by nemo-tron
-nemo_run = { git = "https://github.com/NVIDIA-NeMo/Run", rev = "414f0077c648fde2c71bb1186e97ccbf96d6844c" }
 # torch/torchvision/triton all come from the torch index in order to pick up aarch64 wheels
 torch = [
   { index = "pytorch-cu128" },
@@ -154,8 +133,6 @@ vf-exts = { workspace = true }
 
 [tool.uv.workspace]
 members = [
-    "3rdparty/Megatron-LM-workspace",
-    "3rdparty/NeMo-workspace",
     "env_api/vf_exts",
 ]
 
@@ -166,7 +143,7 @@ explicit = true
 
 [tool.uv]
 no-build-isolation-package = ["transformer-engine-torch", "transformer-engine", "flash-attn", "mamba-ssm", "causal-conv1d"]
-# Always apply the build group since dependencies like TE/mcore/nemo-run require build dependencies
+# Always apply the build group since dependencies like TE require build dependencies
 # and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
 # avoid including these in the default dependency set, but for now it's required.
 default-groups = ["dev", "build"]
@@ -181,10 +158,6 @@ conflicts = [
     { extra = "vllm" },
     { extra = "vllm_http" },
   ],
-  [
-    { extra = "vllm_http" },
-    { extra = "mcore" },
-  ]
 ]
 
 # Needed when building from source
@@ -208,7 +181,6 @@ addopts = "--durations=15 -s -rA -x"
 testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [
-    "mcore: marks tests that require the mcore extra",
     "hf_gated: marks tests that require HuggingFace token access for gated models",
 ]
 
@@ -221,7 +193,7 @@ concurrency = ["thread", "multiprocessing"]
 omit = ["/tmp/*"]
 
 [tool.coverage.paths]
-source = ["nemo_rl/", "/opt/nemo-rl/nemo_rl/"]
+source = ["rlkit/", "/opt/rlkit/rlkit/"]
 
 [tool.ruff.lint]
 # Enable all `pydocstyle` rules, limiting to those that adhere to the
@@ -245,4 +217,3 @@ convention = "google"
 "*_test.py" = ["D"]
 # Ignore F401 (import but unused) in __init__.py
 "__init__.py" = ["F401"]
-

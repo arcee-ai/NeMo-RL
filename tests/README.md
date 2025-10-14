@@ -3,7 +3,7 @@
 ## Launching Release Tests
 
 ```sh
-# Assuming in NeMo RL project root
+# Assuming in RLKit project root
 
 cd tools/
 
