@@ -13,26 +13,32 @@
 # limitations under the License.
 
 import argparse
+import asyncio
+import logging
 import os
 import pprint
-from functools import partial
-from typing import Any
 
+# Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
+os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
+
+from datasets import Dataset, load_dataset, load_from_disk
 from omegaconf import OmegaConf
+import torch
 from transformers import AutoTokenizer
 
-from nemo_rl.algorithms.sft import MasterConfig, setup, sft_train
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.data import DataConfig, hf_datasets
-from nemo_rl.data.datasets import AllTaskProcessedDataset
-from nemo_rl.data.interfaces import DatumSpec, TaskDataSpec
-from nemo_rl.data.llm_message_utils import get_formatted_message_log
-from nemo_rl.distributed.virtual_cluster import init_ray
-from nemo_rl.utils.config import load_config, parse_hydra_overrides
-from nemo_rl.utils.logger import get_next_experiment_dir
+from rlkit.config import SFTMasterConfig as MasterConfig
+from rlkit.algorithms.sft import SFTTrainer
+from rlkit.data.datasets import transform_dataset
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.config import DataConfig
+from rlkit.distributed.virtual_cluster import init_ray
+from rlkit.utils.config import load_config, parse_hydra_overrides
+from rlkit.utils.logger import get_next_experiment_dir
 
 OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
 
+# Avoid asyncio spamming console on crash
+logging.getLogger("asyncio").setLevel(logging.ERROR)
 
 def parse_args():
     """Parse command line arguments."""
@@ -47,118 +53,30 @@ def parse_args():
     return args, overrides
 
 
-# =======================================================
-# Data Processing
-# =======================================================
-def sft_preprocessor(
-    datum_dict: dict[str, Any],
-    task_data_spec: TaskDataSpec,
-    tokenizer,
-    max_seq_length: int,
-    idx: int,
-    add_bos: bool = True,
-    add_eos: bool = True,
-    add_generation_prompt: bool = False,
-) -> DatumSpec:
-    """Process a datum dictionary for SFT training."""
-    message_log = get_formatted_message_log(
-        datum_dict["messages"],
-        tokenizer,
-        task_data_spec,
-        add_bos_token=add_bos,
-        add_eos_token=add_eos,
-        add_generation_prompt=add_generation_prompt,
-    )
-
-    length = sum(len(m["token_ids"]) for m in message_log)
-
-    loss_multiplier = 1.0
-    if length > max_seq_length:
-        # make smaller and mask out
-        for message in message_log:
-            message["token_ids"] = message["token_ids"][
-                : min(4, max_seq_length // len(message_log))
-            ]
-        loss_multiplier = 0.0
-
-    output = {
-        "message_log": message_log,
-        "length": length,
-        "extra_env_info": None,
-        "loss_multiplier": loss_multiplier,
-        "idx": idx,
-    }
-    return output
-
-
 def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
-    print("\n▶ Setting up data...")
-    data_cls = data_config["dataset_name"]
-    if data_cls == "open_assistant":
-        data = hf_datasets.OasstDataset(
-            output_dir="/tmp/open_assistant", seed=data_config["seed"]
-        )
-    elif data_cls == "squad":
-        data = hf_datasets.SquadDataset()
-    elif data_cls == "prompt_response_dataset":
-        data = hf_datasets.PromptResponseDataset(
-            data_config["train_data_path"],
-            data_config["val_data_path"],
-            data_config["input_key"],
-            data_config["output_key"],
-        )
-    elif data_cls == "openmathinstruct2":
-        data = hf_datasets.OpenMathInstruct2Dataset(
-            split=data_config["split"],
-            output_key=data_config["output_key"],
-            prompt_file=data_config["prompt_file"],
-            seed=data_config["seed"],
-        )
-    elif data_cls == "openai_format":
-        data = hf_datasets.OpenAIFormatDataset(
-            data_config["train_data_path"],
-            data_config["val_data_path"],
-            data_config["chat_key"],
-            data_config["system_key"],
-            data_config["system_prompt"],
-        )
+    logging.info("Setting up data...")
+    
+    dataset_name = data_config["dataset_name"]
+    dataset_type = data_config.get("dataset_type", "pretokenized")
+    on_disk = data_config.get("on_disk", False)
+    
+    if on_disk:
+        dataset = load_from_disk(dataset_name)
     else:
-        raise ValueError(f"Unknown dataset class: {data_cls}")
-    print(
-        f"  ✓ Training and validation datasets loaded with {len(data.formatted_ds['train'])} and {len(data.formatted_ds['validation'])} samples, respectively."
-    )
+        dataset = load_dataset(dataset_name)
+    
+    assert "train" in dataset.keys(), "Dataset must contain a train split"
+    train_dataset = dataset["train"]
+    val_dataset = dataset.get("validation", None)
 
-    train_dataset = data.formatted_ds["train"]
-    val_dataset = data.formatted_ds["validation"]
-    sft_task_spec = data.task_spec
+    if dataset_type != "native":
+        logging.info(f"Using non-native '{dataset_type}' dataset type, applying transformation (this may take a while)")
+    
+    train_dataset = transform_dataset(train_dataset, dataset_type, tokenizer)
+    if val_dataset is not None:
+        val_dataset = transform_dataset(val_dataset, dataset_type, tokenizer)
 
-    train_dataset = AllTaskProcessedDataset(
-        train_dataset,
-        tokenizer,
-        sft_task_spec,
-        partial(
-            sft_preprocessor,
-            add_bos=data_config["add_bos"],
-            add_eos=data_config["add_eos"],
-            add_generation_prompt=data_config["add_generation_prompt"],
-        ),
-        max_seq_length=data_config["max_input_seq_length"],
-    )
-
-    val_dataset = AllTaskProcessedDataset(
-        val_dataset,
-        tokenizer,
-        sft_task_spec,
-        partial(
-            sft_preprocessor,
-            add_bos=data_config.get("add_bos", True),
-            add_eos=data_config.get("add_eos", True),
-            add_generation_prompt=data_config["add_generation_prompt"],
-        ),
-        max_seq_length=data_config["max_input_seq_length"],
-    )
-
-    return train_dataset, val_dataset, sft_task_spec
+    return train_dataset, val_dataset
 
 
 def main():
@@ -167,7 +85,7 @@ def main():
     args, overrides = parse_args()
 
     if not args.config:
-        args.config = os.path.join(os.path.dirname(__file__), "configs", "sft.yaml")
+        raise ValueError("A config file is required. Please specify a config file using the --config argument.")
 
     config = load_config(args.config)
     print(f"Loaded configuration from: {args.config}")
@@ -178,6 +96,12 @@ def main():
 
     config: MasterConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
+    
+    if not torch.cuda.can_device_access_peer(0, 1):
+        os.environ["NCCL_SHM_DISABLE"] = "1"
+        logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
+        if not config["checkpointing"].get("hf_checkpoint", False):
+            raise ValueError("Running on a system configuration with bugged DCP checkpointing. Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints.")
 
     # Print config
     print("Final config:")
@@ -198,33 +122,12 @@ def main():
     # setup data
     (
         dataset,
-        val_dataset,
-        sft_task_spec,
+        val_dataset
     ) = setup_data(tokenizer, config["data"])
 
-    (
-        policy,
-        cluster,
-        train_dataloader,
-        val_dataloader,
-        loss_fn,
-        logger,
-        checkpointer,
-        sft_save_state,
-        master_config,
-    ) = setup(config, tokenizer, dataset, val_dataset)
-    sft_train(
-        policy,
-        train_dataloader,
-        val_dataloader,
-        tokenizer,
-        loss_fn,
-        master_config,
-        logger,
-        sft_task_spec,
-        checkpointer,
-        sft_save_state,
-    )
+    trainer = SFTTrainer(config, tokenizer, dataset, val_dataset)
+    
+    asyncio.run(trainer.train())
 
 
 if __name__ == "__main__":

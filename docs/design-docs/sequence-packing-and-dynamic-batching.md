@@ -356,7 +356,7 @@ class SequencePackingArgs(TypedDict):
 ### Loss Function Integration
 A key design consideration was that we wanted to avoid the loss function writer needing to be aware of if there is sequence packing or not. To do this, we created a `SequencePackingLossWrapper` which takes the packed next_token_logits and the unpacked auxiliary loss function data and runs the loss function on each sequence individually. Since the loss function's computation time is typically trivial, we don't see a slowdown from this approach. With this, the loss function can be written as though it just deals with typical, unpacked batched data (as long as it is capable of processing one sequence at a time).
 
-If your loss function cannot assume batch-independence, however, then both Dynamic Batching and Sequence Packing won't work. (I.e. DPO [issue #719](https://github.com/NVIDIA-NeMo/RL/issues/719)).
+If your loss function cannot assume batch-independence, however, then both Dynamic Batching and Sequence Packing won't work. (This limitation previously surfaced in our retired DPO implementation; see [issue #719](https://github.com/NVIDIA-NeMo/RL/issues/719)). 
 
 ## Metrics and Monitoring
 

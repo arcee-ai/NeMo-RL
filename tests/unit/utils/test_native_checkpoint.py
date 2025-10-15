@@ -18,11 +18,11 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM
 
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.models.policy.lm_policy import Policy
-from nemo_rl.utils.native_checkpoint import (
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.distributed.virtual_cluster import RayVirtualCluster
+from rlkit.models.policy.lm_policy import Policy
+from rlkit.utils.native_checkpoint import (
     ModelState,
     OptimizerState,
     convert_dcp_to_hf,
@@ -323,7 +323,7 @@ def test_convert_dcp_to_hf(policy, num_gpus):
             # https://github.com/NVIDIA-NeMo/RL/pull/148/files
             # tokenizer should be copied from policy/tokenizer/* instead of relying on the model name
             # We can expose a arg at the top level --tokenizer_path to plumb that through.
-            # This is more stable than relying on the current NeMo-RL get_tokenizer() which can
+            # This is more stable than relying on the current RLKit get_tokenizer() which can
             # change release to release.
             simple_policy_config["model_name"],
         )

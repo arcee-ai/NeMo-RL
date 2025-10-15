@@ -22,14 +22,14 @@ pytestmark = pytest.mark.modelconfig
 
 from transformers import AutoModelForCausalLM
 
-from nemo_rl.algorithms.interfaces import LossFunction
-from nemo_rl.algorithms.loss_functions import ClippedPGLossFn, NLLLoss
-from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.models.generation import configure_generation_config
-from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.models.policy.lm_policy import Policy
+from rlkit.algorithms.interfaces import LossFunction
+from rlkit.algorithms.loss_functions import ClippedPGLossFn, NLLLoss
+from rlkit.algorithms.utils import get_tokenizer
+from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.distributed.virtual_cluster import RayVirtualCluster
+from rlkit.models.generation import configure_generation_config
+from rlkit.config import PolicyConfig
+from rlkit.models.policy.lm_policy import Policy
 from tests.unit.test_utils import SimpleLoss
 
 

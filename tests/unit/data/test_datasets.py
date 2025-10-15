@@ -12,22 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from unittest.mock import MagicMock
-
 import torch
 
-from nemo_rl.data.datasets import dpo_collate_fn
-from nemo_rl.data.interfaces import DatumSpec
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from rlkit.data.datasets import preference_collate_fn
+from rlkit.data.interfaces import DatumSpec
+from rlkit.distributed.batched_data_dict import BatchedDataDict
 
 
-def test_dpo_collate_fn():
-    """Test that dpo_collate_fn correctly processes DPO training data."""
-    # Create mock tokenizer
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.pad_token_id = 0
-
-    # Create test data with varying sequence lengths
+def test_preference_collate_fn():
+    """Test that preference_collate_fn correctly processes preference training data."""
     data_batch = [
         DatumSpec(
             message_log_chosen=[
@@ -93,56 +86,41 @@ def test_dpo_collate_fn():
         ),
     ]
 
-    # Call dpo_collate_fn
-    train_data = dpo_collate_fn(
-        data_batch, mock_tokenizer, make_sequence_length_divisible_by=16
-    )
+    train_data = preference_collate_fn(data_batch)
 
     # Verify the output structure
     assert isinstance(train_data, BatchedDataDict)
-    assert "input_ids" in train_data
-    assert "input_lengths" in train_data
-    assert "token_mask" in train_data
-    assert "sample_mask" in train_data
+    assert "message_log" in train_data
+    assert "length" in train_data
+    assert "loss_multiplier" in train_data
+    assert "task_name" in train_data
+    assert "idx" in train_data
+    assert "batch_max_length" in train_data
 
     # Verify batch size is doubled (chosen + rejected for each example)
-    assert train_data["input_ids"].shape[0] == 4  # 2 examples * 2 (chosen + rejected)
+    assert len(train_data["message_log"]) == 4  # 2 examples * 2 (chosen + rejected)
 
-    # Verify input_ids shape and padding
-    max_length = 16  # max of all sequence lengths, padded to be divisible by 16
-    assert train_data["input_ids"].shape == (4, max_length)
+    # Verify lengths are interleaved chosen/rejected
+    expected_lengths = torch.tensor([7, 5, 6, 7])
+    assert torch.equal(train_data["length"], expected_lengths)
 
-    # Verify input_lengths
-    expected_lengths = [7, 5, 6, 7]  # chosen1, rejected1, chosen2, rejected2
-    assert torch.equal(train_data["input_lengths"], torch.tensor(expected_lengths))
+    # Verify loss multipliers duplicated for chosen/rejected
+    expected_loss_multipliers = torch.tensor([1.0, 1.0, 0.0, 0.0])
+    assert torch.equal(train_data["loss_multiplier"], expected_loss_multipliers)
 
-    # Verify token_mask
-    assert train_data["token_mask"].shape == (4, max_length)
-    # First example chosen (length 7)
-    assert torch.all(train_data["token_mask"][0][0:3] == 0)
-    assert torch.all(train_data["token_mask"][0][3:7] == 1)
-    # First example rejected (length 5)
-    assert torch.all(train_data["token_mask"][1][0:3] == 0)
-    assert torch.all(train_data["token_mask"][1][3:5] == 1)
-    assert torch.all(train_data["token_mask"][1][5:] == 0)
+    # Verify idx values duplicated for chosen/rejected samples
+    assert train_data["idx"] == [0, 0, 1, 1]
 
-    # Verify sample_mask
-    expected_sample_mask = [
-        1.0,
-        1.0,
-        0.0,
-        0.0,
-    ]  # loss_multiplier repeated for chosen/rejected
-    assert torch.equal(train_data["sample_mask"], torch.tensor(expected_sample_mask))
+    # Verify task names duplicated for chosen/rejected samples
+    assert train_data["task_name"] == ["test_task"] * 4
 
-    # Verify message content is preserved
-    # First example chosen
-    assert torch.equal(train_data["input_ids"][0][0:3], torch.tensor([1, 2, 3]))  # user
-    assert torch.equal(
-        train_data["input_ids"][0][3:7], torch.tensor([4, 5, 6, 7])
-    )  # assistant
-    # First example rejected
-    assert torch.equal(train_data["input_ids"][1][0:3], torch.tensor([1, 2, 3]))  # user
-    assert torch.equal(
-        train_data["input_ids"][1][3:5], torch.tensor([8, 9])
-    )  # assistant
+    # Verify batch_max_length matches the maximum sequence length across the batch
+    assert torch.equal(train_data["batch_max_length"], torch.tensor([7, 7, 7, 7]))
+
+    # Verify message logs for first example are preserved
+    first_chosen = train_data["message_log"][0]
+    first_rejected = train_data["message_log"][1]
+    assert torch.equal(first_chosen[0]["token_ids"], torch.tensor([1, 2, 3]))
+    assert torch.equal(first_chosen[1]["token_ids"], torch.tensor([4, 5, 6, 7]))
+    assert torch.equal(first_rejected[0]["token_ids"], torch.tensor([1, 2, 3]))
+    assert torch.equal(first_rejected[1]["token_ids"], torch.tensor([8, 9]))

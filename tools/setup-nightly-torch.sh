@@ -2,7 +2,7 @@
 
 set -eoux pipefail
 
-VENV_DIR=venvs/nemo_rl.models.generation.vllm_http.vllm_http.VLLMOpenAIServe
+VENV_DIR=venvs/rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe
 
 rm -rf 3rdparty/vllm
 

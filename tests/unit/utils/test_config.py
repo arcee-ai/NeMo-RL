@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from nemo_rl.utils.config import load_config
+from rlkit.utils.config import load_config
 
 
 @pytest.fixture
@@ -202,7 +202,7 @@ def test_parse_hydra_overrides():
     """Test parsing and applying Hydra overrides."""
     from omegaconf import OmegaConf
 
-    from nemo_rl.utils.config import OverridesError, parse_hydra_overrides
+    from rlkit.utils.config import OverridesError, parse_hydra_overrides
 
     # Create initial config
     cfg = OmegaConf.create(

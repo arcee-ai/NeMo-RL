@@ -17,9 +17,9 @@ import pytest
 import torch
 from transformers import AutoTokenizer
 
-from nemo_rl.data.hf_datasets import COMMON_CHAT_TEMPLATES
-from nemo_rl.data.interfaces import LLMMessageLogType, TaskDataSpec
-from nemo_rl.data.llm_message_utils import (
+from rlkit.data.hf_datasets import COMMON_CHAT_TEMPLATES
+from rlkit.data.interfaces import LLMMessageLogType, TaskDataSpec
+from rlkit.data.llm_message_utils import (
     _validate_tensor_consistency,
     add_loss_mask_to_message_log,
     batched_message_log_to_flat_message,

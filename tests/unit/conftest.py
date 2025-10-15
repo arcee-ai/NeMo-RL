@@ -26,7 +26,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from nemo_rl.distributed.virtual_cluster import init_ray
+from rlkit.distributed.virtual_cluster import init_ray
 
 dir_path = os.path.dirname(os.path.abspath(__file__))
 
@@ -39,18 +39,11 @@ def pytest_addoption(parser):
         default=False,
         help="Include tests that require HuggingFace token access",
     )
-    parser.addoption(
-        "--mcore-only",
-        action="store_true",
-        default=False,
-        help="Run ONLY mcore tests (combine with --hf-gated to include mcore+hf_gated tests)",
-    )
 
 
 def pytest_collection_modifyitems(config, items):
     """Modify test collection to skip tests based on markers unless explicitly requested."""
     run_hf_gated = config.getoption("--hf-gated")
-    run_mcore_only = config.getoption("--mcore-only")
     marker_expr = config.getoption("-m", default="")
 
     # If user specified -m marker expressions, let pytest handle everything normally
@@ -60,27 +53,11 @@ def pytest_collection_modifyitems(config, items):
     # Filter tests based on the desired configurations
     new_items = []
 
-    if run_mcore_only and run_hf_gated:
-        # Configuration 4: Only mcore tests, including ones with hf_gated
-        new_items = [item for item in items if item.get_closest_marker("mcore")]
-    elif run_mcore_only:
-        # Configuration 3: Only mcore tests, excluding ones with hf_gated
-        new_items = [
-            item
-            for item in items
-            if item.get_closest_marker("mcore")
-            and not item.get_closest_marker("hf_gated")
-        ]
-    elif run_hf_gated:
-        # Configuration 2: Default tests + hf_gated tests, excluding mcore
-        new_items = [item for item in items if not item.get_closest_marker("mcore")]
+    if run_hf_gated:
+        new_items = list(items)
     else:
-        # Configuration 1: Default only - exclude both hf_gated and mcore
         new_items = [
-            item
-            for item in items
-            if not item.get_closest_marker("hf_gated")
-            and not item.get_closest_marker("mcore")
+            item for item in items if not item.get_closest_marker("hf_gated")
         ]
 
     # Update the items list in-place
@@ -140,7 +117,7 @@ def _unit_test_data(request):
         start_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         metrics={},
         gpu_types=[],
-        coverage="[n/a] run with --cov=nemo_rl",
+        coverage="[n/a] run with --cov=rlkit",
     )
     session.config._unit_test_data = unit_test_data
     return unit_test_data
@@ -167,7 +144,7 @@ def session_data(request, init_ray_cluster, _unit_test_data):
     ############################################################
     # 2. Gather the ray metadata #
     ############################################################
-    from nemo_rl.utils.logger import RayGpuMonitorLogger
+    from rlkit.utils.logger import RayGpuMonitorLogger
 
     logger = RayGpuMonitorLogger(
         collection_interval=float("inf"),
@@ -277,7 +254,7 @@ def ray_gpu_monitor(init_ray_cluster):
 
     This fixture doesn't need to be called directly.
     """
-    from nemo_rl.utils.logger import RayGpuMonitorLogger
+    from rlkit.utils.logger import RayGpuMonitorLogger
 
     gpu_monitor = RayGpuMonitorLogger(
         collection_interval=1,

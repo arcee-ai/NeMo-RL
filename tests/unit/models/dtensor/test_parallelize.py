@@ -19,7 +19,7 @@ import pytest
 from torch.distributed.tensor.parallel import ParallelStyle, parallelize_module
 from transformers import AutoModelForCausalLM
 
-from nemo_rl.models.dtensor.parallelize import (
+from rlkit.models.dtensor.parallelize import (
     _parallelize_gemma3,
     _parallelize_llama,
     _parallelize_qwen,

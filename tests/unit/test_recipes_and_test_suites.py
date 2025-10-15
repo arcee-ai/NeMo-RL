@@ -35,7 +35,6 @@ release_performance_test_suite_path = os.path.join(
 # Relative to project root
 ALGO_MAPPING_TO_BASE_YAML = {
     "sft": "examples/configs/sft.yaml",
-    "dpo": "examples/configs/dpo.yaml",
     "grpo": "examples/configs/grpo_math_1B.yaml",
 }
 
@@ -283,7 +282,7 @@ def test_all_recipes_can_merge_configs_with_base_config(
 ):
     from omegaconf import OmegaConf
 
-    from nemo_rl.utils.config import load_config
+    from rlkit.utils.config import load_config
 
     base_yaml = os.path.join(project_root, algo_base_yaml)
     base_config = OmegaConf.load(base_yaml)
