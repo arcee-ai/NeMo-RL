@@ -296,8 +296,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 "pipeline_parallel",
             ],
         )
+        worker_results = await self.worker_group.get_all_worker_results_async(futures)
         logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
-            await asyncio.gather(*futures.futures)
+            worker_results
         )
 
         # dynamic batching sorts the inputs by sequence length to improve load balancing,
@@ -437,7 +438,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 "mbs": micro_batch_size,
             },
         )
-        results = await asyncio.gather(*futures.futures)
+        results = await self.worker_group.get_all_worker_results_async(futures)
 
         # Aggregate the results
         aggregated_results = {

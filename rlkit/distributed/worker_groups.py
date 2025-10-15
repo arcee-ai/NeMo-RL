@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import asyncio
 import importlib
 import os
 from copy import deepcopy
@@ -103,25 +104,9 @@ class MultiWorkerFuture:
         if has_generator:
             return all_results
 
-        if self.return_from_workers is not None:
-            if self.called_workers is not None:
-                # Create a mapping from global worker indices to local indices in all_results
-                worker_to_result_idx = {
-                    worker: idx for idx, worker in enumerate(self.called_workers)
-                }
-                # # Filter return_from_workers to only include workers that were actually called
-                valid_return_workers = [
-                    w for w in self.return_from_workers if w in worker_to_result_idx
-                ]
-                # Map global worker indices to local result indices and get results
-                return [
-                    all_results[worker_to_result_idx[worker]]
-                    for worker in valid_return_workers
-                ]
-            else:
-                return [all_results[worker] for worker in self.return_from_workers]
-
-        return all_results
+        return worker_group._select_results_from_future_bundle(
+            future_bundle=self, all_results=all_results
+        )
 
 
 class RayWorkerBuilder:
@@ -903,6 +888,57 @@ class RayWorkerGroup:
         return future_bundle.get_results(
             self, return_generators_as_proxies=return_generators_as_proxies
         )
+
+    async def get_all_worker_results_async(
+        self,
+        future_bundle: MultiWorkerFuture,
+    ) -> list[Any]:
+        """Async equivalent to get_all_worker_results with replica filtering."""
+        if not future_bundle.futures:
+            return []
+
+        from ray import ObjectRefGenerator
+
+        if any(
+            isinstance(fut, ObjectRefGenerator) for fut in future_bundle.futures
+        ):
+            # Generators are not awaitable; offload to sync implementation.
+            return await asyncio.to_thread(
+                self.get_all_worker_results, future_bundle
+            )
+
+        all_results = await asyncio.gather(*future_bundle.futures)
+        return self._select_results_from_future_bundle(
+            future_bundle=future_bundle, all_results=all_results
+        )
+
+    def _select_results_from_future_bundle(
+        self,
+        future_bundle: MultiWorkerFuture,
+        all_results: list[Any],
+    ) -> list[Any]:
+        """Filter results to those requested for non-replicated axes."""
+        if future_bundle.return_from_workers is None:
+            return all_results
+
+        if future_bundle.called_workers is not None:
+            worker_to_result_idx = {
+                worker: idx for idx, worker in enumerate(future_bundle.called_workers)
+            }
+            valid_workers = [
+                worker
+                for worker in future_bundle.return_from_workers
+                if worker in worker_to_result_idx
+            ]
+            return [
+                all_results[worker_to_result_idx[worker]] for worker in valid_workers
+            ]
+
+        return [
+            all_results[worker]
+            for worker in future_bundle.return_from_workers
+            if 0 <= worker < len(all_results)
+        ]
 
     def shutdown(
         self,
