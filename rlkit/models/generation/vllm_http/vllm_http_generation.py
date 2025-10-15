@@ -146,9 +146,9 @@ class VllmHttpGeneration(GenerationInterface):
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
 
-    def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
+    async def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         # Wait for the reset to complete across replicas
-        self.get_deployment_handle().admin_reset_prefix_cache.remote().result()
+        await self.get_deployment_handle().admin_reset_prefix_cache.remote()
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:

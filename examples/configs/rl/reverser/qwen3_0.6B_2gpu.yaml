@@ -11,6 +11,7 @@ grpo:
   max_val_samples: 256
   val_batch_size: 256
   seed: 42
+  interleave_rollouts: true
 
 loss_fn:
   reference_policy_kl_penalty: 0.01
@@ -18,8 +19,8 @@ loss_fn:
   ratio_clip_max: 0.2
   ratio_clip_c: null
   # (default off) loss formulation improvements (docs/guides/grpo.md#loss)
-  use_on_policy_kl_approximation: false
-  use_importance_sampling_correction: false
+  use_on_policy_kl_approximation: true
+  use_importance_sampling_correction: true
   token_level_loss: true
 
 checkpointing:

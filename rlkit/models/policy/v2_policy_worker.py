@@ -409,7 +409,6 @@ class DTensorV2PolicyWorker:
                     device_map="cpu",  # load weights onto CPU initially
                     trust_remote_code=True,
                     config=self.model_config,
-                    dtype=self.dtype,
                 )
                 
                 hf_state_dict = model.state_dict()
@@ -447,7 +446,6 @@ class DTensorV2PolicyWorker:
                     device_map="cpu",
                     trust_remote_code=True,
                     config=self.model_config,
-                    dtype=self.dtype,
                 )
                 full_state_dict = model.state_dict()
                 del model

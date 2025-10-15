@@ -15,7 +15,7 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Callable, NotRequired, Optional, TypedDict, cast
+from typing import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from datasets import Dataset
 import numpy as np
@@ -322,7 +322,7 @@ class SFTTrainer:
 
         return val_metrics, timing_metrics
 
-    def train(self) -> None:
+    async def train(self) -> None:
         timer = Timer()
         timeout = TimeoutChecker(
             timeout=self.master_config["checkpointing"]["checkpoint_must_save_by"],
@@ -376,7 +376,7 @@ class SFTTrainer:
 
                     logging.info("Taking a training step...")
                     with timer.time("policy_training"):
-                        train_results = self.policy.train(train_data, self.loss_fn)
+                        train_results = await self.policy.train(train_data, self.loss_fn)
 
                     is_last_step = total_steps + 1 >= self.master_config["sft"][
                         "max_num_steps"
@@ -475,49 +475,8 @@ class SFTTrainer:
                         metrics[k] = np.mean(v).item()
                     else:
                         metrics[k] = np.sum(v).item()
-
-                timing_metrics = timer.get_timing_metrics(reduction_op="sum")
-
-                print("\n📊 Training Results:")
-                print(f"  • Loss: {float(metrics['loss']):.4f}")
-                if "total_flops" in train_results:
-                    total_tflops = (
-                        train_results["total_flops"]
-                        / timing_metrics["policy_training"]
-                        / 1e12
-                    )
-                    num_ranks = train_results["num_ranks"]
-                    print(
-                        f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)"
-                    )
-                    if "theoretical_tflops" in train_results:
-                        theoretical_tflops = train_results["theoretical_tflops"]
-                        print(
-                            "  • Training Model Floating Point Utilization: "
-                            f"{100 * total_tflops / theoretical_tflops:.2f}%"
-                        )
-                        metrics["train_fp_utilization"] = (
-                            total_tflops / theoretical_tflops
-                        )
-                    total_valid_toks = sum(train_results["all_mb_metrics"]["global_valid_toks"])
-                    print(f"  • Total valid tokens: {total_valid_toks}")
-                    print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks'])}")
-                    
-                print("\n⏱️  Timing:")
-                total_time = timing_metrics.get("total_step_time", 0)
-                print(f"  • Total step time: {total_time:.2f}s")
-
-                for k, v in sorted(
-                    timing_metrics.items(), key=lambda item: item[1], reverse=True
-                ):
-                    if k != "total_step_time":
-                        percent = (v / total_time * 100) if total_time > 0 else 0
-                        print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
-
-                self.logger.log_metrics(metrics, total_steps + 1, prefix="train")
-                self.logger.log_metrics(
-                    timing_metrics, total_steps + 1, prefix="timing/train"
-                )
+                
+                self._log_step(metrics, timer, train_results, total_steps)
 
                 timer.reset()
                 current_step += 1
@@ -528,6 +487,55 @@ class SFTTrainer:
 
             current_epoch += 1
             current_step = 0
+    
+    def _log_step(
+        self,
+        metrics: dict[str, Any],
+        timer: Timer,
+        train_results: dict[str, Any],
+        total_steps: int,
+    ) -> None:
+        timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+        print("\n📊 Training Results:")
+        print(f"  • Loss: {float(metrics['loss']):.4f}")
+        if "total_flops" in train_results:
+            total_tflops = (
+                train_results["total_flops"]
+                / timing_metrics["policy_training"]
+                / 1e12
+            )
+            num_ranks = train_results["num_ranks"]
+            print(
+                f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)"
+            )
+            if "theoretical_tflops" in train_results:
+                theoretical_tflops = train_results["theoretical_tflops"]
+                print(
+                    "  • Training Model Floating Point Utilization: "
+                    f"{100 * total_tflops / theoretical_tflops:.2f}%"
+                )
+                metrics["train_fp_utilization"] = (
+                    total_tflops / theoretical_tflops
+                )
+            total_valid_toks = sum(train_results["all_mb_metrics"]["global_valid_toks"])
+            print(f"  • Total valid tokens: {total_valid_toks}")
+            print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks'])}")
+            
+        print("\n⏱️  Timing:")
+        total_time = timing_metrics.get("total_step_time", 0)
+        print(f"  • Total step time: {total_time:.2f}s")
+
+        for k, v in sorted(
+            timing_metrics.items(), key=lambda item: item[1], reverse=True
+        ):
+            if k != "total_step_time":
+                percent = (v / total_time * 100) if total_time > 0 else 0
+                print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
+
+        self.logger.log_metrics(metrics, total_steps + 1, prefix="train")
+        self.logger.log_metrics(
+            timing_metrics, total_steps + 1, prefix="timing/train"
+        )
 
     def _to_scalar_array(self, tensor: torch.Tensor) -> np.ndarray:
         """Convert a tensor to numpy array for logging purposes."""

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import argparse
+import asyncio
 import logging
 import os
 import pprint
@@ -125,7 +126,8 @@ def main():
     ) = setup_data(tokenizer, config["data"])
 
     trainer = SFTTrainer(config, tokenizer, dataset, val_dataset)
-    trainer.train()
+    
+    asyncio.run(trainer.train())
 
 
 if __name__ == "__main__":
