@@ -267,8 +267,12 @@ class ClippedPGLossFn(LossFunction):
         # Approximating entropy as E_{s ~ \pi_{gen}(s)}[-(\pi_{curr}/\pi_{gen})log(\pi_{curr}(s))]
         # See more details and other metrics in docs/guides/grpo.md#metrics
         with torch.no_grad():
+            # Mask out padded positions before exponentiation to avoid 0 * inf -> nan.
+            curr_logprobs_masked = curr_logprobs.masked_fill(mask == 0, 0.0)
+            generation_logprobs_masked = generation_logprobs.masked_fill(mask == 0, 0.0)
             seq_entropy_approx = -masked_mean(
-                torch.exp(curr_logprobs - generation_logprobs) * curr_logprobs,
+                torch.exp(curr_logprobs_masked - generation_logprobs_masked)
+                * curr_logprobs_masked,
                 mask,
                 global_normalization_factor=global_valid_toks,
             )

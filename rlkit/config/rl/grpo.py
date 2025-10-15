@@ -17,4 +17,4 @@ class GRPOConfig(TypedDict):
     val_at_start: bool
     max_val_samples: int
     seed: int
-    max_rollout_turns: NotRequired[int | None]
+    interleave_rollouts: bool

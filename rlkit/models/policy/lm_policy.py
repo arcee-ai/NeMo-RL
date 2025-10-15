@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import asyncio
 import os
 import warnings
 from collections import defaultdict
@@ -241,7 +242,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
-    def get_logprobs(
+    async def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
     ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a data dict.
@@ -296,7 +297,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             ],
         )
         logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
-            self.worker_group.get_all_worker_results(futures)
+            await asyncio.gather(*futures.futures)
         )
 
         # dynamic batching sorts the inputs by sequence length to improve load balancing,
@@ -371,7 +372,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         return logprobs
 
-    def train(
+    async def train(
         self,
         data: BatchedDataDict[Any],
         loss_fn: LossFunction,
@@ -436,7 +437,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 "mbs": micro_batch_size,
             },
         )
-        results = self.worker_group.get_all_worker_results(futures)
+        results = await asyncio.gather(*futures.futures)
 
         # Aggregate the results
         aggregated_results = {

@@ -338,8 +338,16 @@ class DTensorV2PolicyWorker:
             )
             print(f"[Rank {self.rank}] Using FlashAttention2 for sequence packing")
 
+        self.model_name = model_name
+        
+        # If we are checkpointing to HF format, we can just load a checkpoint directly from the weights path
+        if self.use_hf_checkpoint:
+            hf_model_name = model_name if weights_path is None else weights_path
+        else:
+            hf_model_name = model_name
+
         self.model_config = AutoConfig.from_pretrained(
-            model_name,
+            hf_model_name,
             # Always load the model in float32 to keep master weights in float32.
             # Keeping the master weights in lower precision has shown to cause issues with convergence.
             torch_dtype=torch.float32,
@@ -381,14 +389,6 @@ class DTensorV2PolicyWorker:
         self.adapter: Optional[BaseStateDictAdapter]
         self.adapter = None
         self._custom_parallelize_function: Optional[Callable] = None
-        
-        self.model_name = model_name
-        
-        # If we are checkpointing to HF format, we can just load a checkpoint directly from the weights path
-        if self.use_hf_checkpoint:
-            hf_model_name = model_name if weights_path is None else weights_path
-        else:
-            hf_model_name = model_name
 
         full_state_dict = None
         if self.uses_custom_model:
@@ -409,7 +409,6 @@ class DTensorV2PolicyWorker:
                     device_map="cpu",  # load weights onto CPU initially
                     trust_remote_code=True,
                     config=self.model_config,
-                    dtype=self.dtype,
                 )
                 
                 hf_state_dict = model.state_dict()
@@ -447,7 +446,6 @@ class DTensorV2PolicyWorker:
                     device_map="cpu",
                     trust_remote_code=True,
                     config=self.model_config,
-                    dtype=self.dtype,
                 )
                 full_state_dict = model.state_dict()
                 del model
