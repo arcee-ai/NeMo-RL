@@ -530,7 +530,8 @@ class GRPOTrainer:
                     with timer.time("refit_policy"):
                         await self._refit_policy_generation(colocated_inference)
                     logging.info("Generating rollouts...")
-                    repeated_batch, rollout_metrics = await self._rollout_step(rollout_batch, timer)
+                    with timer.time("generation"):
+                        repeated_batch, rollout_metrics = await self._rollout_step(rollout_batch, timer)
                 
                 logging.info("Preparing for logprob inference...")
                 self._prepare_for_logprob_inference(timer)
@@ -636,15 +637,13 @@ class GRPOTrainer:
             greedy=False,
         )
         
-        result = self.policy_generation.finish_generation()
-        if isinstance(result, CoroutineType):
-            await result
+        await self.policy_generation.finish_generation()
 
         return repeated_batch, rollout_metrics
 
     def _process_rollouts(self, repeated_batch: BatchedDataDict[DatumSpec]) -> BatchedDataDict[DatumSpec]:
-        # Tokenize entire conversation
-        assert "completion" in repeated_batch, "After-rollout tokenization method called before rollouts completed"
+        # Extract tokenized conversation from rollouts
+        assert "completion" in repeated_batch, "Rollouts not completed before processing"
         prompts = repeated_batch["prompt"]
         completions = repeated_batch["completion"]
         
