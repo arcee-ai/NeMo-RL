@@ -136,6 +136,11 @@ class GRPOTrainer:
             self.master_config["checkpointing"]
         )
 
+        # Filter long prompts from datasets before creating dataloaders
+        dataset = self._filter_dataset_by_prompt_length(dataset, grpo_config, policy_config)
+        if val_dataset is not None:
+            val_dataset = self._filter_dataset_by_prompt_length(val_dataset, grpo_config, policy_config)
+        
         dataloader, val_dataloader = self._setup_dataloaders(
             dataset,
             val_dataset,
@@ -231,6 +236,78 @@ class GRPOTrainer:
             grpo_save_state = _default_grpo_save_state()
         return checkpointer, grpo_save_state, last_checkpoint_path
 
+    def _filter_dataset_by_prompt_length(
+        self,
+        dataset: Dataset,
+        grpo_config: GRPOConfig,
+        policy_config: PolicyConfig,
+    ) -> Dataset:
+        """Filter dataset to remove prompts exceeding max_prompt_length_ratio.
+        
+        Args:
+            dataset: Input dataset to filter.
+            grpo_config: GRPO configuration.
+            policy_config: Policy configuration.
+            
+        Returns:
+            Filtered dataset with long prompts removed.
+        """
+        skip_long_prompts = grpo_config.get("skip_long_prompts", False)
+        if not skip_long_prompts:
+            return dataset
+        
+        max_prompt_ratio = grpo_config.get("max_prompt_length_ratio", 0.5)
+        max_context = policy_config["max_total_sequence_length"]
+        max_prompt_length = int(max_context * max_prompt_ratio)
+        
+        logging.info(
+            f"Filtering dataset for prompts exceeding {max_prompt_ratio * 100:.0f}% "
+            f"of max context ({max_prompt_length} tokens)..."
+        )
+        
+        original_size = len(dataset)
+        
+        def is_valid_prompt_batch(examples: dict[str, list[Any]]) -> list[bool]:
+            """Check if prompt lengths are within threshold (batched version)."""
+            prompts = examples["prompt"]
+            valid_flags = []
+            
+            for prompt in prompts:
+                prompt_text = self.tokenizer.apply_chat_template(
+                    prompt,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                # Use fast tokenization without padding
+                prompt_tokens = self.tokenizer.encode(
+                    prompt_text,
+                    add_special_tokens=False,
+                    padding=False,
+                )
+                valid_flags.append(len(prompt_tokens) <= max_prompt_length)
+            
+            return valid_flags
+        
+        # Use batched=True and num_proc=None for fast tokenization
+        filtered_dataset = dataset.filter(
+            is_valid_prompt_batch,
+            batched=True,
+            num_proc=None,
+        )
+        filtered_size = len(filtered_dataset)
+        removed_count = original_size - filtered_size
+        
+        if removed_count > 0:
+            logging.info(
+                f"  ✓ Filtered {removed_count}/{original_size} prompts "
+                f"({removed_count / original_size * 100:.1f}%) exceeding length threshold"
+            )
+            logging.info(f"  ✓ Remaining dataset size: {filtered_size} samples")
+        else:
+            logging.info(f"  ✓ No prompts filtered, all {original_size} samples within threshold")
+        
+        return filtered_dataset
+    
     def _setup_dataloaders(
         self,
         dataset: Dataset,

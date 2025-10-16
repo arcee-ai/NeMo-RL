@@ -18,3 +18,5 @@ class GRPOConfig(TypedDict):
     max_val_samples: int
     seed: int
     interleave_rollouts: bool
+    skip_long_prompts: NotRequired[bool]
+    max_prompt_length_ratio: NotRequired[float]
