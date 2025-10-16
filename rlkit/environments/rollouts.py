@@ -136,6 +136,11 @@ def run_vf_rollouts(
     current_batch = input_batch.copy()
     current_batch["reward"] = [0 for _ in current_batch["prompt"]]
 
+    # Track per-sample env_metrics instead of averaging across all samples
+    per_sample_env_metrics: list[dict[str, float]] = [{} for _ in current_batch["prompt"]]
+    # Track which task each sample belongs to for proper metric prefixing
+    per_sample_tasks: list[str] = ["" for _ in current_batch["prompt"]]
+
     sample_truncated = [False for _ in current_batch["prompt"]]
     
     current_batch["completion"] = [[] for _ in current_batch["prompt"]]
@@ -172,6 +177,7 @@ def run_vf_rollouts(
             responses: list[ChatCompletion] = rollouts.state[i]["responses"]
             responses_idx = 0
 
+            # Store per-sample metrics from this rollout
             log = []
             orig_idx = list(by_group.values())[g_i][i][-1]
             for msg in completion:
@@ -206,8 +212,34 @@ def run_vf_rollouts(
 
             current_batch["completion"][orig_idx].extend(log)
             current_batch["reward"][orig_idx] = rollouts.reward[i]
+            
+            # Store the task name for this sample
+            per_sample_tasks[orig_idx] = list(by_group.values())[g_i][i][3]
+            
+            # Extract per-sample metrics for this rollout
+            for key, value_list in rollouts.metrics.items():
+                if isinstance(value_list, list) and len(value_list) > i:
+                    per_sample_env_metrics[orig_idx][key] = float(value_list[i])
 
     current_batch["reward"] = torch.tensor(current_batch["reward"])
+
+    # Compute average metrics grouped by task for top-level wandb logging
+    # Flatten env_metrics with task-specific prefixes instead of generic "env_metrics."
+    env_metrics_by_task: dict[str, dict[str, list[float]]] = {}
+    for i, (sample_metrics, task_name) in enumerate(zip(per_sample_env_metrics, per_sample_tasks)):
+        if task_name not in env_metrics_by_task:
+            env_metrics_by_task[task_name] = {}
+        for key, value in sample_metrics.items():
+            if key not in env_metrics_by_task[task_name]:
+                env_metrics_by_task[task_name][key] = []
+            env_metrics_by_task[task_name][key].append(value)
+    
+    # Flatten to task.metric_name format
+    env_metrics_means = {}
+    for task_name, task_metrics in env_metrics_by_task.items():
+        for metric_name, values in task_metrics.items():
+            flattened_key = f"{task_name}.{metric_name}"
+            env_metrics_means[flattened_key] = sum(values) / len(values)
 
     # Compute per-sample metrics to populate rollout logs
     batch_size = len(current_batch["prompt"])
@@ -269,16 +301,16 @@ def run_vf_rollouts(
         "mean_total_tokens_per_sample": float(sum(sample_total_tokens) / denom),
         "mean_gen_tokens_per_sample": float(sum(sample_assistant_tokens) / denom),
         "mean_env_tokens_per_sample": 0.0,
-        "env": {
-            **group_means,
-            **rollout_means,
-        },
     }
+    
+    # Add flattened env_metrics directly to rollout_metrics (not nested)
+    rollout_metrics.update(env_metrics_means)
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
         message_logs=[prompt + completion for prompt, completion in zip(current_batch["prompt"], current_batch["completion"])],
         grpo_group_ids=current_batch["idx"],
         total_rewards=[current_batch["reward"][i].item() for i in range(len(current_batch["reward"]))],
+        extra_env_infos=[{"metrics": per_sample_env_metrics[i]} for i in range(len(current_batch["prompt"]))],
         sample_metrics=sync_sample_metrics,
         env_metrics=per_rollout_metrics,
     )
