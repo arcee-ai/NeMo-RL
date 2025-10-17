@@ -1,4 +1,3 @@
-import logging
 from typing import Any
 
 from openai.types.chat import ChatCompletion
@@ -43,8 +42,8 @@ def build_rollouts_log(
     message_logs: list[list[dict[str, Any]]],
     grpo_group_ids: list[int],
     total_rewards: list[float],
+    extra_env_infos: list[dict[str, Any]],
     sample_metrics: list[dict[str, Any]],
-    env_metrics: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Construct rich per-sample rollout logs for metrics dashboards."""
 
@@ -56,8 +55,12 @@ def build_rollouts_log(
                 "messages": message_logs[i],
                 "grpo_group_id": grpo_group_ids[i],
                 "total_reward": float(total_rewards[i]),
-                **metrics,
-                "env_metrics": env_metrics[i],
+                "terminated": bool(metrics.get("terminated", False)),
+                "truncated": bool(metrics.get("truncated", False)),
+                "total_tokens": int(metrics.get("total_tokens", 0)),
+                "assistant_tokens": int(metrics.get("assistant_tokens", 0)),
+                "env_tokens": int(metrics.get("env_tokens", 0)),
+                "env_metrics": extra_env_infos[i].get("metrics", {}),
             }
         )
 
@@ -145,28 +148,10 @@ def run_vf_rollouts(
     
     current_batch["completion"] = [[] for _ in current_batch["prompt"]]
 
-    # Track per-group scalar metrics and per-rollout list metrics
-    per_rollout_metrics = [{} for _ in current_batch["prompt"]]
-    per_group_metrics = [{} for _ in by_group.keys()]
-
     # Convert completion to RLKit message log format.
     for g_i, rollouts in enumerate(generate_results):
         # type hints for convenience
         rollouts: vf.GenerateOutputs
-        
-        # Process metrics
-        for key, value in rollouts.metrics.items():
-            if isinstance(value, (int, float)):
-                per_group_metrics[g_i][key] = value
-            elif isinstance(value, list):
-                if len(value) == len(rollouts.completion):
-                    for i, rollout_value in enumerate(value):
-                        orig_idx = list(by_group.values())[g_i][i][-1]
-                        per_rollout_metrics[orig_idx][key] = rollout_value
-                else:
-                    logging.warning(f"Found environment list metric {key} with length {len(value)} that is not equal to the group size {len(rollouts.completion)}. Skipping.")
-            else:
-                logging.warning(f"Found environment metric {key} with type {type(value)} that is not possible to collate. Skipping.")
         
         for i, completion in enumerate(rollouts.completion):
             assert isinstance(completion, list), "RLKit currently only supports chat completions."
@@ -262,38 +247,13 @@ def run_vf_rollouts(
             "terminated": False,
             "truncated": sample_truncated[i],
             "assistant_tokens": sample_assistant_tokens[i],
-            "total_tokens": sample_total_tokens[i],
+            "total_tokens": sample_total_tokens[i]
         }
         for i in range(batch_size)
     ]
 
-    # Aggregate rollout metrics
+    # Aggregate rollout metrics to mirror legacy rollout logging keys
     denom = max(batch_size, 1)
-    
-    # Take the mean across all groups for each per-group metric
-    group_means = {}
-    for group_metrics in per_group_metrics:
-        for key, value in group_metrics.items():
-            if key not in group_means:
-                group_means[key] = []
-            group_means[key].append(value)
-    group_means = {k: sum(v) / len(v) for k, v in group_means.items()}
-    
-    # Take the mean across all rollouts for each per-rollout metric
-    rollout_means = {}
-    for rollout_metrics in per_rollout_metrics:
-        for key, value in rollout_metrics.items():
-            # Only get mean of this metric if it is a number.
-            # It will still appear in the HTML rollout log, but won't be graphed.
-            if isinstance(value, (int, float)):
-                if key not in rollout_means:
-                    rollout_means[key] = []
-                rollout_means[key].append(value)
-    rollout_means = {k: sum(v) / len(v) for k, v in rollout_means.items()}
-    
-    # Get environment name for logging
-    env_name = getattr(env, 'cfg', {}).get('environment_name', 'env')
-    
     rollout_metrics = {
         "total_turns": batch_size,
         "avg_turns_per_sample": 1.0,
@@ -315,7 +275,6 @@ def run_vf_rollouts(
         total_rewards=[current_batch["reward"][i].item() for i in range(len(current_batch["reward"]))],
         extra_env_infos=[{"metrics": per_sample_env_metrics[i]} for i in range(len(current_batch["prompt"]))],
         sample_metrics=sync_sample_metrics,
-        env_metrics=per_rollout_metrics,
     )
 
     return current_batch, rollout_metrics
