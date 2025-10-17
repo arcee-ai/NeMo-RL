@@ -251,9 +251,12 @@ def run_vf_rollouts(
     rollout_means = {}
     for rollout_metrics in per_rollout_metrics:
         for key, value in rollout_metrics.items():
-            if key not in rollout_means:
-                rollout_means[key] = []
-            rollout_means[key].append(value)
+            # Only get mean of this metric if it is a number.
+            # It will still appear in the HTML rollout log, but won't be graphed.
+            if len(value) > 0 and isinstance(value, (int, float)):
+                if key not in rollout_means:
+                    rollout_means[key] = []
+                rollout_means[key].append(value)
     rollout_means = {k: sum(v) / len(per_rollout_metrics) for k, v in rollout_means.items()}
     
     rollout_metrics = {
