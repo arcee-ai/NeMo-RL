@@ -316,6 +316,9 @@ class BaseVllmGenerationWorker:
         )
 
         self._create_engine(llm_kwargs)
+        
+        # Monkey patch lm_head to use FP32 for numerical stability in RL training
+        self._patch_lm_head_to_fp32()
 
         # will be initialized in post_init
         # used in update_weights_from_ipc_handles
@@ -367,6 +370,63 @@ class BaseVllmGenerationWorker:
             stop=stop_strings,
             include_stop_str_in_output=True,
         )
+
+    def _patch_lm_head_to_fp32(self) -> None:
+        """Monkey patch vLLM's lm_head to use FP32 for numerical stability.
+        
+        This ensures both the lm_head weights and output logits are in FP32,
+        which is critical for RL training stability (MiniMax et al., 2025).
+        
+        Works for both sync (LLM) and async (AsyncLLM) vLLM engines.
+        """
+        if not self.is_model_owner or self.llm is None:
+            return
+            
+        try:
+            # Access the model through vLLM's internal structure
+            model_executor = None
+            
+            # Handle both sync and async engines
+            if hasattr(self.llm, "llm_engine"):
+                # Sync engine (vllm.LLM)
+                model_executor = self.llm.llm_engine.model_executor
+            elif hasattr(self.llm, "engine"):
+                # Async engine (vllm.v1.engine.async_llm.AsyncLLM)
+                model_executor = self.llm.engine.model_executor
+            else:
+                print("Warning: Could not find llm_engine or engine in vLLM instance")
+                return
+                
+            # Get the actual model - handle both single GPU and distributed cases
+            model = None
+            if hasattr(model_executor, "driver_worker"):
+                # Distributed case
+                model = model_executor.driver_worker.model_runner.model
+            elif hasattr(model_executor, "model_runner"):
+                # Single GPU case
+                model = model_executor.model_runner.model
+            else:
+                print("Warning: Could not access vLLM model for lm_head FP32 patch")
+                return
+            
+            # Wrap lm_head forward to compute and return FP32 logits without upcasting weights
+            if hasattr(model, "lm_head"):
+                original_forward = model.lm_head.forward
+
+                def fp32_lm_head_forward(hidden_states):
+                    with torch.autocast(device_type="cuda", enabled=False):
+                        logits = original_forward(hidden_states.to(torch.float32))
+                        return logits.to(torch.float32)
+
+                model.lm_head.forward = fp32_lm_head_forward
+                print("Wrapped vLLM lm_head.forward() to compute and return FP32 logits")
+            else:
+                print("Warning: vLLM model does not have lm_head attribute")
+                
+        except Exception as e:
+            print(f"Warning: Failed to patch vLLM lm_head to FP32: {e}")
+            import traceback
+            traceback.print_exc()
 
     def start_gpu_profiling(self) -> None:
         """Start GPU profiling."""

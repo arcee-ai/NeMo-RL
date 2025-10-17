@@ -80,6 +80,16 @@ from rlkit.utils.native_checkpoint import (
 from rlkit.utils.nsys import wrap_with_nvtx_name
 
 
+def is_liger_available() -> bool:
+    """Check if Liger kernels are available.
+    
+    Returns:
+        True if liger_kernel package is installed, False otherwise.
+    """
+    from importlib.util import find_spec
+    return find_spec("liger_kernel") is not None
+
+
 @contextmanager
 def unshard_fsdp2_model(model: nn.Module) -> Generator[None, None, None]:
     """Explicitly unshard and then reshard the FSDP2 modules. Useful for logprob inference."""
@@ -239,7 +249,21 @@ class DTensorPolicyWorker:
             else:
                 raise ValueError(f"Unknown reward model type: {rm_type}")
         else:
-            model_class = AutoModelForCausalLM
+            # Determine if we should use Liger kernels
+            use_liger = self.cfg.get("use_liger_kernels", False)
+            liger_available = is_liger_available()
+            
+            if use_liger and liger_available:
+                print(f"Using Liger kernels for {model_name}")
+                from liger_kernel.transformers import AutoLigerKernelForCausalLM
+                model_class = AutoLigerKernelForCausalLM
+            else:
+                if use_liger and not liger_available:
+                    print(
+                        "WARNING: Liger kernels requested but not available. "
+                        "Install with: pip install 'rlkit[liger]' or pip install liger-kernel>=0.5.10"
+                    )
+                model_class = AutoModelForCausalLM
 
         full_state_dict = None
         if self.rank == 0:
@@ -358,6 +382,15 @@ class DTensorPolicyWorker:
 
             if embed_tokens_weight is not None:
                 self.model.lm_head.weight = embed_tokens_weight
+
+        # Ensure lm_head computes and returns FP32 logits
+        if hasattr(self.model, "lm_head"):
+            _orig_forward = self.model.lm_head.forward
+            def _fp32_lm_head_forward(hidden_states):
+                with torch.autocast(device_type="cuda", enabled=False):
+                    logits = _orig_forward(hidden_states.to(torch.float32))
+                    return logits.to(torch.float32)
+            self.model.lm_head.forward = _fp32_lm_head_forward
 
         # Manually broadcast buffers
         for _, buf in self.model.named_buffers():
@@ -705,7 +738,8 @@ class DTensorPolicyWorker:
 
                         # Get logprobs
                         if not hasattr(outputs, "logits"):
-                            logits = self.model.lm_head(outputs.last_hidden_state)
+                            # Cast to FP32 for numerical stability in RL training (MiniMax et al., 2025)
+                            logits = self.model.lm_head(outputs.last_hidden_state.to(torch.float32))
                         else:
                             logits = outputs.logits
                         del outputs
