@@ -245,7 +245,7 @@ def run_vf_rollouts(
             if key not in group_means:
                 group_means[key] = []
             group_means[key].append(value)
-    group_means = {k: sum(v) / len(per_group_metrics) for k, v in group_means.items()}
+    group_means = {k: sum(v) / len(v) for k, v in group_means.items()}
     
     # Take the mean across all rollouts for each per-rollout metric
     rollout_means = {}
@@ -253,11 +253,11 @@ def run_vf_rollouts(
         for key, value in rollout_metrics.items():
             # Only get mean of this metric if it is a number.
             # It will still appear in the HTML rollout log, but won't be graphed.
-            if len(value) > 0 and isinstance(value, (int, float)):
+            if isinstance(value, (int, float)):
                 if key not in rollout_means:
                     rollout_means[key] = []
                 rollout_means[key].append(value)
-    rollout_means = {k: sum(v) / len(per_rollout_metrics) for k, v in rollout_means.items()}
+    rollout_means = {k: sum(v) / len(v) for k, v in rollout_means.items()}
     
     rollout_metrics = {
         "total_turns": batch_size,
