@@ -33,6 +33,7 @@ from rlkit.algorithms.interfaces import LossFunction
 from rlkit.algorithms.loss_functions import (
     ClippedPGLossDataDict,
     ClippedPGLossFn,
+    CISPOLossFn,
 )
 from rlkit.algorithms.utils import set_seed, vector_subseq_starts, _pad_tensor
 from rlkit.config import (
@@ -202,7 +203,14 @@ class GRPOTrainer:
         if self.policy_generation is not None:
             self.policy_generation.prepare_refit_info(state_dict_info)
 
-        loss_fn = ClippedPGLossFn(loss_config)
+        # Auto-detect loss function type based on config keys
+        # CISPO doesn't have ratio_clip_c or use_importance_sampling_correction
+        if "ratio_clip_c" in loss_config or "use_importance_sampling_correction" in loss_config:
+            loss_fn = ClippedPGLossFn(loss_config)
+            logging.info("Using ClippedPGLossFn (PPO/GRPO/DAPO)")
+        else:
+            loss_fn = CISPOLossFn(loss_config)
+            logging.info("Using CISPOLossFn (CISPO)")
         
         self.interleave_rollouts = self.master_config["grpo"].get("interleave_rollouts", False)
         
