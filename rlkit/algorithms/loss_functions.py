@@ -102,6 +102,12 @@ class ClippedPGLossFn(LossFunction):
             "use_importance_sampling_correction"
         ]
 
+        self.cispo_clip_is_weights = cfg.get("cispo_clip_is_weights", False)
+        self.cispo_eps_low_is: float | None = cfg.get("cispo_eps_low_is", None)
+        self.cispo_eps_high_is: float | None = cfg.get("cispo_eps_high_is", None)
+        self.cispo_use_curr_vs_gen = cfg.get("cispo_use_curr_vs_gen", False)
+        self.cispo_use_unified_mask = cfg.get("cispo_use_unified_mask", False)
+
         self.loss_type = (
             LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
         )
@@ -235,22 +241,50 @@ class ClippedPGLossFn(LossFunction):
         actor_importance_weights = torch.nan_to_num(
             actor_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
         )
-        if self.use_importance_sampling_correction:
+
+        if self.use_importance_sampling_correction and self.cispo_clip_is_weights:
+            if self.cispo_use_curr_vs_gen:
+                r_base = torch.exp((curr_logprobs.detach()) - generation_logprobs)
+            else:
+                r_base = actor_importance_weights
+            r_base = torch.nan_to_num(r_base, nan=0.0, posinf=0.0, neginf=0.0)
+
+            lb = 0.0 if self.cispo_eps_low_is is None else (1.0 - self.cispo_eps_low_is)
+            ub = 1.0 + self.ratio_clip_max if self.cispo_eps_high_is is None else (1.0 + self.cispo_eps_high_is)
+            lb = max(lb, 0.0)
+
+            clipped_is_weights = r_base.clamp(lb, ub).detach()
+            importance_weights_to_use = clipped_is_weights
+        elif self.use_importance_sampling_correction:
             importance_weights_to_use = actor_importance_weights
         else:
             importance_weights_to_use = torch.ones_like(prev_logprobs)
 
+        if self.cispo_use_unified_mask:
+            ppo_ratio = torch.exp(curr_logprobs - prev_logprobs)
+            drop_pos = (advantages > 0) & (ppo_ratio > (1.0 + self.ratio_clip_max))
+            drop_neg = (advantages < 0) & (ppo_ratio < (1.0 - self.ratio_clip_min))
+            unified_mask = (~(drop_pos | drop_neg)).float()
+            loss_mask = mask * unified_mask
+        else:
+            loss_mask = mask
+
         if self.loss_type == LossType.TOKEN_LEVEL:
             actor_loss = masked_mean(
                 importance_weights_to_use * clip_loss,
-                mask,
+                loss_mask,
                 global_normalization_factor=global_valid_toks,
             )
         else:
+            token_mask_inner = (
+                token_mask * (loss_mask > 0).float()
+                if self.cispo_use_unified_mask
+                else token_mask
+            )
             actor_loss = masked_mean(
                 masked_mean(
                     importance_weights_to_use * clip_loss,
-                    token_mask,
+                    token_mask_inner,
                     dim=-1,
                 ),
                 sample_mask,
@@ -290,9 +324,26 @@ class ClippedPGLossFn(LossFunction):
                 global_normalization_factor=global_valid_toks,
             ).item()
 
-        # If you provided a global_valid_{seqs/toks}, all metrics here are globally normalized
-        # by either sequence or token count, depending on particular metric.
-        # To get the true metric, you'll need to sum over the microbatch.
+        with torch.no_grad():
+            if self.use_importance_sampling_correction and self.cispo_clip_is_weights:
+                if self.cispo_use_curr_vs_gen:
+                    r_base_metrics = torch.exp((curr_logprobs.detach()) - generation_logprobs)
+                else:
+                    r_base_metrics = actor_importance_weights
+                r_base_metrics = torch.nan_to_num(r_base_metrics, nan=0.0, posinf=0.0, neginf=0.0)
+
+                lb_m = 0.0 if self.cispo_eps_low_is is None else (1.0 - self.cispo_eps_low_is)
+                ub_m = 1.0 + self.ratio_clip_max if self.cispo_eps_high_is is None else (1.0 + self.cispo_eps_high_is)
+                lb_m = max(lb_m, 0.0)
+                clipped_mask = ((r_base_metrics < lb_m) | (r_base_metrics > ub_m)).float()
+                clipped_fraction = masked_mean(clipped_mask, mask, global_normalization_factor=global_valid_toks).item()
+                is_weight_mean = masked_mean(r_base_metrics, mask, global_normalization_factor=global_valid_toks).item()
+                is_weight_max = masked_mean(r_base_metrics.max(dim=-1).values, sample_mask, global_normalization_factor=global_valid_seqs).item()
+            else:
+                clipped_fraction = 0.0
+                is_weight_mean = masked_mean(actor_importance_weights, mask, global_normalization_factor=global_valid_toks).item()
+                is_weight_max = masked_mean(actor_importance_weights.max(dim=-1).values, sample_mask, global_normalization_factor=global_valid_seqs).item()
+
         return (
             loss,
             {
@@ -304,6 +355,10 @@ class ClippedPGLossFn(LossFunction):
                 "sampling_importance_ratio": sample_importance_ratio.item(),
                 "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
+                # CISPO diagnostics
+                "cispo_clipped_fraction": clipped_fraction,
+                "cispo_is_weight_mean": is_weight_mean,
+                "cispo_is_weight_token_max_mean": is_weight_max,
             },
         )
 

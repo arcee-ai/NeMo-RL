@@ -12,6 +12,7 @@ class GRPOConfig(TypedDict):
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     minibatch_advantage_renorm: NotRequired[bool]
+    minibatch_advantage_divide_std_only: NotRequired[bool]
     val_period: int
     val_batch_size: int
     val_at_start: bool

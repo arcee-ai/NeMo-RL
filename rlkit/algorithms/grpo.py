@@ -800,14 +800,18 @@ class GRPOTrainer:
                 repeated_batch["token_mask"] = repeated_batch["token_mask"] * (~zero_variance_mask).float()[:, None]
                 repeated_batch["sample_mask"][zero_variance_mask] = 0
 
-            # Optional: z-score advantages within the mini-batch for stability
+            # Optional: batch-level advantage normalization
+            # If 'minibatch_advantage_divide_std_only' is set, follow ScaleRL style A/std without mean-centering.
             if self.master_config["grpo"].get("minibatch_advantage_renorm", False):
                 valid_advantages = advantages[repeated_batch["sample_mask"] > 0]
                 if len(valid_advantages) > 1:
                     adv_mean = valid_advantages.mean()
                     adv_std = valid_advantages.std()
                     if adv_std > 0:
-                        advantages = (advantages - adv_mean) / adv_std
+                        if self.master_config["grpo"].get("minibatch_advantage_divide_std_only", False):
+                            advantages = advantages / adv_std
+                        else:
+                            advantages = (advantages - adv_mean) / adv_std
 
         repeated_batch["advantages"] = advantages
 
