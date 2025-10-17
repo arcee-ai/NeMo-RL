@@ -19,6 +19,57 @@ except ImportError:
 
 
 class VllmHttpWorkerExtension:
+    def _patch_lm_head_to_fp32(self) -> None:
+        """Monkey patch vLLM's lm_head to use FP32 for numerical stability.
+        
+        This ensures both the lm_head weights and output logits are in FP32,
+        which is critical for RL training stability (MiniMax et al., 2025).
+        
+        Works for both sync (LLM) and async (AsyncLLM) vLLM engines.
+        """
+        # Skip if already patched
+        if hasattr(self, '_fp32_patch_applied') and self._fp32_patch_applied:
+            return
+            
+        try:
+            # Access the model through the worker extension's model_runner
+            if not hasattr(self, 'model_runner') or self.model_runner is None:
+                print("Warning: model_runner not available for lm_head FP32 patch")
+                return
+            
+            model = self.model_runner.model
+            if model is None:
+                print("Warning: Could not access vLLM model for lm_head FP32 patch")
+                return
+            
+            # Wrap lm_head forward to compute and return FP32 logits without upcasting weights
+            if hasattr(model, "lm_head"):
+                original_forward = model.lm_head.forward
+
+                def fp32_lm_head_forward(hidden_states):
+                    with torch.autocast(device_type="cuda", enabled=False):
+                        logits = original_forward(hidden_states.to(torch.float32))
+                        return logits.to(torch.float32)
+
+                model.lm_head.forward = fp32_lm_head_forward
+                print("Wrapped vLLM lm_head.forward() to compute and return FP32 logits")
+                self._fp32_patch_applied = True  # pyrefly: ignore[implicitly-defined-attribute]
+            else:
+                print("Warning: vLLM model does not have lm_head attribute")
+                
+        except Exception as e:
+            print(f"Warning: Failed to patch vLLM lm_head to FP32: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def report_device_id(self) -> str:
+        """Report device ID and apply FP32 patch if not already done."""
+        # Apply the patch when this method is first called (happens during worker initialization)
+        self._patch_lm_head_to_fp32()
+        
+        from rlkit.utils.nvml import get_device_uuid
+        return get_device_uuid(self.device.index)
+    
     def init_collective(
         self, rank_prefix: int, ip: str, port: int, world_size: int
     ) -> None:
@@ -37,11 +88,6 @@ class VllmHttpWorkerExtension:
         self.model_update_group = PyNcclCommunicator(  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__ so assignments like this should be ignored
             pg, device=self.device
         )
-
-    def report_device_id(self) -> str:
-        from rlkit.utils.nvml import get_device_uuid
-
-        return get_device_uuid(self.device.index)
 
     def prepare_refit_info(
         self, state_dict_info: Optional[dict[str, Any]] = None
