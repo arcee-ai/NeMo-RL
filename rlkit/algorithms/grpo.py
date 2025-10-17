@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
+from functools import lru_cache
 import logging
 import os
 from types import CoroutineType
+from typing import Any, Iterable, List, NotRequired, Optional, TypedDict, TypeVar, cast
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, NotRequired, Optional, TypedDict, TypeVar, cast
 
 from datasets import Dataset
 import numpy as np
@@ -238,75 +239,175 @@ class GRPOTrainer:
 
     def _filter_dataset_by_prompt_length(
         self,
-        dataset: Dataset,
-        grpo_config: GRPOConfig,
-        policy_config: PolicyConfig,
-    ) -> Dataset:
+        dataset: "Dataset",
+        grpo_config: "GRPOConfig",
+        policy_config: "PolicyConfig",
+    ) -> "Dataset":
         """Filter dataset to remove prompts exceeding max_prompt_length_ratio.
-        
+
         Args:
-            dataset: Input dataset to filter.
-            grpo_config: GRPO configuration.
-            policy_config: Policy configuration.
-            
+            dataset: Input dataset to filter (Hugging Face `datasets.Dataset` expected).
+            grpo_config: GRPO configuration (mapping-like; supports .get()).
+            policy_config: Policy configuration (mapping-like; contains max_total_sequence_length and optionally tokenizer).
+
         Returns:
-            Filtered dataset with long prompts removed.
+            Filtered dataset with long prompts removed (schema preserved).
         """
         skip_long_prompts = grpo_config.get("skip_long_prompts", False)
         if not skip_long_prompts:
             return dataset
-        
-        max_prompt_ratio = grpo_config.get("max_prompt_length_ratio", 0.5)
-        max_context = policy_config["max_total_sequence_length"]
+
+        # --- Configuration & validation ---
+        max_prompt_ratio = float(grpo_config.get("max_prompt_length_ratio", 0.5))
+        # Clamp to sane range; treat edge cases defensively.
+        if max_prompt_ratio <= 0:
+            logging.warning("max_prompt_length_ratio <= 0; no prompts will be kept. Clamping to 1e-6.")
+            max_prompt_ratio = 1e-6
+        if max_prompt_ratio > 1:
+            logging.warning("max_prompt_length_ratio > 1; clamping to 1.0 (full context).")
+            max_prompt_ratio = 1.0
+
+        max_context = int(policy_config["max_total_sequence_length"])
         max_prompt_length = int(max_context * max_prompt_ratio)
-        
+
         logging.info(
             f"Filtering dataset for prompts exceeding {max_prompt_ratio * 100:.0f}% "
             f"of max context ({max_prompt_length} tokens)..."
         )
-        
-        original_size = len(dataset)
-        
-        def is_valid_prompt_batch(examples: dict[str, list[Any]]) -> list[bool]:
-            """Check if prompt lengths are within threshold (batched version)."""
-            prompts = examples["prompt"]
-            valid_flags = []
-            
-            for prompt in prompts:
-                prompt_text = self.tokenizer.apply_chat_template(
-                    prompt,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                # Use fast tokenization without padding
-                prompt_tokens = self.tokenizer.encode(
-                    prompt_text,
-                    add_special_tokens=False,
-                    padding=False,
-                )
-                valid_flags.append(len(prompt_tokens) <= max_prompt_length)
-            
-            return valid_flags
-        
-        # Use batched=True and num_proc=None for fast tokenization
-        filtered_dataset = dataset.filter(
-            is_valid_prompt_batch,
-            batched=True,
-            num_proc=None,
+
+        # Parallelism knobs (optional; both configs may define these under different names)
+        num_proc: Optional[int] = (
+            grpo_config.get("num_proc")
+            or policy_config.get("num_proc")
+            or policy_config.get("preprocessing_num_proc")
         )
-        filtered_size = len(filtered_dataset)
-        removed_count = original_size - filtered_size
-        
-        if removed_count > 0:
-            logging.info(
-                f"  ✓ Filtered {removed_count}/{original_size} prompts "
-                f"({removed_count / original_size * 100:.1f}%) exceeding length threshold"
+
+        # --- Resolve tokenizer (best-effort, with safe fallback) ---
+        tokenizer = getattr(self, "tokenizer", None) or policy_config.get("tokenizer")
+        if tokenizer is None:
+            # Optional lazy load if a name/path is provided
+            tk_name = (
+                policy_config.get("tokenizer_name_or_path")
+                or policy_config.get("tokenizer_name")
+                or policy_config.get("model_name_or_path")
             )
-            logging.info(f"  ✓ Remaining dataset size: {filtered_size} samples")
+            if tk_name:
+                try:
+                    from transformers import AutoTokenizer  # type: ignore
+                    tokenizer = AutoTokenizer.from_pretrained(tk_name, use_fast=True)
+                    logging.info(f"Loaded tokenizer from '{tk_name}'.")
+                except Exception as e:
+                    logging.warning(
+                        f"Failed to load tokenizer '{tk_name}'. Falling back to whitespace token counts. Reason: {e}"
+                    )
+
+        def _count_tokens_no_cache(text: str) -> int:
+            """Count tokens using the model tokenizer if available; otherwise whitespace tokens."""
+            if tokenizer is not None:
+                # Avoid adding special tokens; we only care about raw prompt length.
+                return len(tokenizer.encode(text, add_special_tokens=False))
+            # Safe fallback: approximate by whitespace splitting.
+            return len(text.split())
+
+        # In-memory LRU cache for repeated prompts within this process.
+        @lru_cache(maxsize=65_536)
+        def _count_tokens_cached(text: str) -> int:
+            return _count_tokens_no_cache(text)
+
+        # --- Determine the prompt column ---
+        # 1) Respect explicit config if provided
+        configured_key = grpo_config.get("prompt_key") or policy_config.get("prompt_key")
+        if configured_key and configured_key in getattr(dataset, "column_names", []):
+            prompt_key = configured_key
         else:
-            logging.info(f"  ✓ No prompts filtered, all {original_size} samples within threshold")
-        
-        return filtered_dataset
+            # 2) Heuristic detection over common column names
+            candidates = ["prompt", "input", "instruction", "question", "text", "messages"]
+            present = [c for c in candidates if c in dataset.column_names]
+            prompt_key = present[0] if present else None
+
+        if prompt_key is None:
+            logging.warning(
+                "No prompt-like column found (looked for: prompt, input, instruction, question, text, messages). "
+                "Returning dataset unchanged."
+            )
+            return dataset
+
+        # --- Utilities to normalize prompt text from various schemas ---
+        def _messages_to_text(messages: Any) -> str:
+            """Join chat-style messages into a single prompt string."""
+            if not isinstance(messages, list):
+                return str(messages)
+            # If list of dicts with 'role'/'content', join non-assistant content.
+            if messages and isinstance(messages[0], dict) and "content" in messages[0]:
+                parts: List[str] = []
+                for m in messages:
+                    role = m.get("role")
+                    content = m.get("content", "")
+                    if role == "assistant":
+                        # Exclude assistant completions; we only want the prompt side.
+                        continue
+                    # Some toolchains store multi-modal content as a list of {type, ...}; keep text only.
+                    if isinstance(content, list):
+                        for piece in content:
+                            if isinstance(piece, dict) and piece.get("type") == "text":
+                                parts.append(str(piece.get("text", "")))
+                    else:
+                        parts.append(str(content))
+                return "\n".join(p for p in parts if p)
+            # Otherwise, join list elements as strings
+            return " ".join(str(x) for x in messages)
+
+        # --- Step 1: Precompute token lengths (on-disk cached by HF Datasets) ---
+        tmp_len_col = "_prompt_token_len"
+
+        if tmp_len_col not in dataset.column_names:
+            # Use batched map to amortize tokenizer overhead; relies on HF Datasets caching.
+            def _map_lengths(batch):
+                vals: Iterable[Any] = batch[prompt_key]
+                # Normalize values into strings
+                texts = []
+                for v in vals:
+                    if prompt_key == "messages" or isinstance(v, list):
+                        texts.append(_messages_to_text(v))
+                    else:
+                        texts.append(str(v))
+                lengths = [_count_tokens_cached(t) for t in texts]
+                return {tmp_len_col: lengths}
+
+            dataset = dataset.map(
+                _map_lengths,
+                batched=True,
+                num_proc=num_proc,
+                desc=f"Computing prompt token lengths (cap={max_prompt_length})",
+                load_from_cache_file=True,
+            )
+
+        # --- Step 2: Filter by length (batched, parallel, cached) ---
+        original_rows = dataset.num_rows
+
+        def _keep_mask(batch):
+            lens = batch[tmp_len_col]
+            return [l <= max_prompt_length for l in lens]
+
+        filtered = dataset.filter(
+            _keep_mask,
+            batched=True,
+            num_proc=num_proc,
+            desc=f"Filtering prompts longer than {max_prompt_length} tokens",
+        )
+
+        # --- Logging & cleanup ---
+        removed = original_rows - filtered.num_rows
+        pct = (removed / original_rows * 100.0) if original_rows else 0.0
+        logging.info(
+            f"Removed {removed} of {original_rows} examples ({pct:.2f}%) with prompt length > {max_prompt_length} tokens."
+        )
+
+        # Preserve original schema: drop temporary length column if we created it.
+        if tmp_len_col in filtered.column_names:
+            filtered = filtered.remove_columns([tmp_len_col])
+
+        return filtered
     
     def _setup_dataloaders(
         self,
