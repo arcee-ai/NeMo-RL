@@ -85,6 +85,16 @@ from rlkit.models.custom.convert import get_model_config
 from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
 
 
+def is_liger_available() -> bool:
+    """Check if Liger kernels are available.
+    
+    Returns:
+        True if liger_kernel package is installed, False otherwise.
+    """
+    from importlib.util import find_spec
+    return find_spec("liger_kernel") is not None
+
+
 @contextmanager
 def unshard_fsdp2_model(model: nn.Module) -> Generator[None, None, None]:
     """Explicitly unshard and then reshard the FSDP2 modules. Useful for logprob inference."""
@@ -423,6 +433,19 @@ class DTensorV2PolicyWorker:
                 self.model = custom_model_class(model_args=model_args)
         else:
             logging.info(f"Using HuggingFace implementation for {model_name}")
+            
+            # Determine if we should use Liger kernels
+            use_liger = self.cfg.get("use_liger_kernels", False)
+            liger_available = is_liger_available()
+            
+            if use_liger and liger_available:
+                logging.info(f"Using Liger kernels for {model_name}")
+            elif use_liger and not liger_available:
+                logging.warning(
+                    "Liger kernels requested but not available. "
+                    "Install with: pip install 'rlkit[liger]' or pip install liger-kernel>=0.5.10"
+                )
+            
             if self._is_reward_model:
                 rm_cfg = self.cfg.get("reward_model_cfg", {})
                 rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
@@ -436,7 +459,12 @@ class DTensorV2PolicyWorker:
                 else:
                     raise ValueError(f"Unknown reward model type: {rm_type}")
             else:
-                model_class = AutoModelForCausalLM
+                # Use Liger kernels if available and requested
+                if use_liger and liger_available:
+                    from liger_kernel.transformers import AutoLigerKernelForCausalLM
+                    model_class = AutoLigerKernelForCausalLM
+                else:
+                    model_class = AutoModelForCausalLM
 
             if self.rank == 0:
                 print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
@@ -597,6 +625,14 @@ class DTensorV2PolicyWorker:
 
         if not self.uses_custom_model:
             self._tie_word_embeddings_if_needed()
+
+        if hasattr(self.model, "lm_head"):
+            _orig_forward = self.model.lm_head.forward
+            def _fp32_lm_head_forward(hidden_states):
+                with torch.autocast(device_type="cuda", enabled=False):
+                    logits = _orig_forward(hidden_states.to(torch.float32))
+                    return logits.to(torch.float32)
+            self.model.lm_head.forward = _fp32_lm_head_forward
 
         if self.cpu_offload:
             self.model = self.move_to_device(self.model, "cpu")
@@ -763,7 +799,8 @@ class DTensorV2PolicyWorker:
 
         if hasattr(outputs, "logits"):
             return outputs.logits
-        return self.model.lm_head(outputs.last_hidden_state)
+        # Cast to FP32 for numerical stability in RL training (MiniMax et al., 2025)
+        return self.model.lm_head(outputs.last_hidden_state.to(torch.float32))
 
     def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
         state_dict = self.model.state_dict()
