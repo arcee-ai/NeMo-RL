@@ -259,6 +259,9 @@ def run_vf_rollouts(
                 rollout_means[key].append(value)
     rollout_means = {k: sum(v) / len(v) for k, v in rollout_means.items()}
     
+    # Get environment name for logging
+    env_name = getattr(env, 'cfg', {}).get('environment_name', 'env')
+    
     rollout_metrics = {
         "total_turns": batch_size,
         "avg_turns_per_sample": 1.0,
@@ -269,7 +272,7 @@ def run_vf_rollouts(
         "mean_total_tokens_per_sample": float(sum(sample_total_tokens) / denom),
         "mean_gen_tokens_per_sample": float(sum(sample_assistant_tokens) / denom),
         "mean_env_tokens_per_sample": 0.0,
-        "env": {
+        env_name: {
             **group_means,
             **rollout_means,
         },
