@@ -1790,10 +1790,9 @@ class DTensorV2PolicyWorker:
             if self.uses_custom_model:
                 # Create empty version of the HF model
                 with init_empty_weights():
-                    model_hf = AutoModelForCausalLM.from_pretrained(
-                        self.model_name,
+                    model_hf = AutoModelForCausalLM.from_config(
+                        self.model_config,
                         trust_remote_code=True,
-                        config=self.model_config,
                     )
                 
                 assert self.adapter is not None
