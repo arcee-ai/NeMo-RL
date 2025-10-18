@@ -661,6 +661,20 @@ class GRPOTrainer:
             repeated_batch["token_mask"][i] = generation_logprobs != -9999
             repeated_batch["input_lengths"][i] = input_length
         
+        # Run VRAM "torture test" and override everything to use maximum context.
+        if self.master_config["grpo"].get("run_vram_torture_test", False):
+            logging.warning("Filling batch with BOS token to test VRAM usage. Do not use this for training!")
+            max_seq_len = self.master_config["policy"]["max_total_sequence_length"]
+            # Not all models have a BOS token, so whatever the first token is will do.
+            first_token = repeated_batch["input_ids"][0][0].item()
+            
+            repeated_batch["input_ids"] = torch.tensor([[first_token] * max_seq_len for _ in prompts])
+            repeated_batch["generation_logprobs"] = torch.tensor([[1.0] * max_seq_len for _ in prompts])
+            repeated_batch["token_mask"] = torch.tensor([[1.0] * max_seq_len for _ in prompts])
+            repeated_batch["input_lengths"] = torch.tensor([max_seq_len] * len(prompts), dtype=torch.int32)
+            repeated_batch["sample_mask"] = torch.tensor([1.0] * len(prompts), dtype=torch.float32)
+            return repeated_batch
+        
         # Pad and stack tensors where necessary
         max_len = max([input_ids.shape[0] for input_ids in repeated_batch["input_ids"]])
         for key in ["input_ids", "generation_logprobs", "token_mask"]:
@@ -1139,7 +1153,7 @@ class GRPOTrainer:
         return val_metrics, timing_metrics
 
     @staticmethod
-    async def _wait_on_futures_sync(futures: list[Any]) -> list[Any]:
+    def _wait_on_futures_sync(futures: list[Any]) -> list[Any]:
         results: list[Any] = []
         for fut in futures:
             try:
@@ -1155,7 +1169,7 @@ class GRPOTrainer:
 
             result_method = getattr(fut, "result", None)
             if callable(result_method):
-                results.append(ray.get(result_method()))
+                results.append(result_method())
                 continue
 
             results.append(ray.get(fut))

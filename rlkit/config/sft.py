@@ -16,6 +16,8 @@ class SFTConfig(TypedDict):
     val_micro_batch_size: int
     val_at_start: bool
     seed: int
+    
+    run_vram_torture_test: bool  # Ignore prompts and run all training on a full context window of nonsense.
 
 
 class SFTMasterConfig(TypedDict):
