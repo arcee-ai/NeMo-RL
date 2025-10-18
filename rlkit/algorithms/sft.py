@@ -233,11 +233,22 @@ class SFTTrainer:
         
         truncated = 0
         
+        if self.master_config["sft"].get("run_vram_torture_test", False):
+            logging.warning("Filling batch with BOS token to test VRAM usage. Do not use this for training!")
+        
         for i, (input_ids, token_mask, sample_mask) in enumerate(zip(
             batch["input_ids"],
             batch["token_mask"],
             batch["sample_mask"]
         )):
+            # Run VRAM torture test by filling the batch with BOS tokens (or whatever the first token in a sequence is).
+            if self.master_config["sft"].get("run_vram_torture_test", False):
+                train_data["input_ids"][i] = torch.tensor([input_ids[0]] * max_seq_len)
+                train_data["token_mask"][i] = torch.ones_like(train_data["input_ids"][i])
+                train_data["sample_mask"][i] = torch.tensor(1.0)
+                train_data["input_lengths"][i] = torch.tensor(max_seq_len)
+                continue
+            
             if len(input_ids) > max_batch_len:
                 # This sample is too long, so we truncate it
                 input_ids = input_ids[:max_batch_len]
