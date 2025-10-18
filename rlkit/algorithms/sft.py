@@ -265,7 +265,7 @@ class SFTTrainer:
         
         return BatchedDataDict({k: torch.stack(v) for k, v in train_data.items()})
 
-    def validate(self, step: int) -> Optional[tuple[dict[str, float], dict[str, float]]]:
+    async def validate(self, step: int) -> Optional[tuple[dict[str, float], dict[str, float]]]:
         """Run validation on the validation dataset."""
         if self.val_dataloader is None:
             logging.info("No validation dataloader provided, skipping validation")
@@ -286,7 +286,7 @@ class SFTTrainer:
                 
                 val_data = self._process_batch(val_batch)
 
-                val_results = self.policy.train(
+                val_results = await self.policy.train(
                     val_data,
                     self.loss_fn,
                     eval_mode=True,
@@ -352,7 +352,7 @@ class SFTTrainer:
 
         if val_at_start and total_steps == 0:
             print("\n🔍 Running initial validation...")
-            validation_result = self.validate(step=0)
+            validation_result = await self.validate(step=0)
             if validation_result is not None:
                 val_metrics, validation_timings = validation_result
                 self.logger.log_metrics(val_metrics, total_steps, prefix="validation")
@@ -398,7 +398,7 @@ class SFTTrainer:
 
                     if val_period > 0 and (total_steps + 1) % val_period == 0:
                         logging.info("Running validation...")
-                        validation_result = self.validate(step=total_steps + 1)
+                        validation_result = await self.validate(step=total_steps + 1)
                         if validation_result is not None:
                             val_metrics, validation_timings = validation_result
                             self.logger.log_metrics(
