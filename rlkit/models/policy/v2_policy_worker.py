@@ -626,14 +626,6 @@ class DTensorV2PolicyWorker:
         if not self.uses_custom_model:
             self._tie_word_embeddings_if_needed()
 
-        if hasattr(self.model, "lm_head"):
-            _orig_forward = self.model.lm_head.forward
-            def _fp32_lm_head_forward(hidden_states):
-                with torch.autocast(device_type="cuda", enabled=False):
-                    logits = _orig_forward(hidden_states.to(torch.float32))
-                    return logits.to(torch.float32)
-            self.model.lm_head.forward = _fp32_lm_head_forward
-
         if self.cpu_offload:
             self.model = self.move_to_device(self.model, "cpu")
 
@@ -799,8 +791,7 @@ class DTensorV2PolicyWorker:
 
         if hasattr(outputs, "logits"):
             return outputs.logits
-        # Cast to FP32 for numerical stability in RL training (MiniMax et al., 2025)
-        return self.model.lm_head(outputs.last_hidden_state.to(torch.float32))
+        return self.model.lm_head(outputs.last_hidden_state)
 
     def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
         state_dict = self.model.state_dict()
