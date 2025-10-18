@@ -719,7 +719,6 @@ class GRPOTrainer:
     ) -> BatchedDataDict[DatumSpec]:
         with timer.time("reward_calculation"):
             rewards = repeated_batch["reward"]
-            logging.info("Computing advantages...")
             baseline, std = self._calculate_baseline_and_std_per_prompt(
                 torch.tensor(repeated_batch["idx"]),
                 repeated_batch["reward"],
