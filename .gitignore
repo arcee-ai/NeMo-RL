@@ -45,8 +45,12 @@ docker/*
 wandb/
 checkpoints/
 results/
+backup/
+output-dir/
 code_snapshots/
 
 # Runtime env
 *runtime_env.yaml
 !default_runtime_env.yaml
+
+conv-440/
