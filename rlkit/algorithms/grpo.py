@@ -709,6 +709,8 @@ class GRPOTrainer:
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                     else:
                         # Queue up rollout with current datapoint and move to the next. Should only happen on the first step.
+                        with timer.time("refit_policy"):
+                            await self._refit_policy_generation(colocated_inference)
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                         continue
                 else:
