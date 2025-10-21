@@ -380,27 +380,18 @@ class GRPOTrainer:
         inference_cluster: RayVirtualCluster,
         policy_config: PolicyConfig,
     ) -> Optional[GenerationInterface]:
-        if backend == "vllm":
-            generation_config = cast(VllmConfig, generation_config)
-            policy_generation = VllmGeneration(
-                cluster=inference_cluster, config=generation_config
-            )
-            policy_generation.finish_generation()
-            logging.info(
-                f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
-            )
-            return policy_generation
-        if backend == "vllm_http":
-            generation_config = cast(HttpVllmConfig, generation_config)
-            policy_generation = VllmHttpGeneration(
-                cluster=inference_cluster, config=generation_config
-            )
-            policy_generation.finish_generation()
-            logging.info(
-                f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
-            )
-            return policy_generation
-        raise ValueError(f"Unsupported generation backend: {backend}")
+        # Temporary until full deprecation of this config option
+        if backend != "vllm_http":
+            raise ValueError(f"Unsupported generation backend: {backend}")
+        
+        generation_config = cast(HttpVllmConfig, generation_config)
+        policy_generation = VllmHttpGeneration(
+            cluster=inference_cluster, config=generation_config
+        )
+        logging.info(
+            f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
+        )
+        return policy_generation
 
     def _initialize_policy(
         self,
@@ -479,10 +470,13 @@ class GRPOTrainer:
         val_at_start = self.master_config["grpo"]["val_at_start"]
         colocated_inference = self.master_config["policy"]["generation"]["colocated"]["enabled"]
 
+        # Call finish generation before training begins to ensure the policy is ready.
+        await self.policy_generation.finish_generation()
+
         if val_at_start and step == 0:
             logging.info("\n🔍 Running initial validation...")
             val_metrics, validation_timings = self._validate(0)
-            self.policy_generation.finish_generation()
+            await self.policy_generation.finish_generation()
             self.logger.log_metrics(val_metrics, 0, prefix="validation")
             self.logger.log_metrics(validation_timings, 0, prefix="timing/validation")
 
@@ -522,6 +516,11 @@ class GRPOTrainer:
                         
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                     else:
+                        # Refit policy before the first rollout in case we are reloading a checkpoint.
+                        logging.info("Refitting policy...")
+                        with timer.time("refit_policy"):
+                            await self._refit_policy_generation(colocated_inference)
+                        
                         # Queue up rollout with current datapoint and move to the next. Should only happen on the first step.
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                         continue
@@ -551,7 +550,7 @@ class GRPOTrainer:
                 (
                     val_metrics,
                     validation_timings
-                ) = self._run_validation_step(
+                ) = await self._run_validation_step(
                     step,
                     val_period,
                 )
@@ -816,18 +815,12 @@ class GRPOTrainer:
         train_data: BatchedDataDict[DatumSpec],
         timer: Timer,
     ) -> None:
-        with timer.time("policy_and_reference_logprobs"):
-            fprop_logprobs = (await self.policy.get_logprobs(train_data))["logprobs"]
-            
+        with timer.time("reference_logprobs"):
             if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
                 reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
                 ]
-            else:
-                reference_logprobs = torch.zeros_like(fprop_logprobs)
-            
-            train_data["prev_logprobs"] = fprop_logprobs
-            train_data["reference_policy_logprobs"] = reference_logprobs
+                train_data["reference_policy_logprobs"] = reference_logprobs
         
         return train_data
 
@@ -837,7 +830,7 @@ class GRPOTrainer:
         with timer.time("training_prep"):
             self.policy.prepare_for_training()
 
-    def _run_validation_step(
+    async def _run_validation_step(
         self,
         step: int,
         val_period: int,
@@ -852,7 +845,7 @@ class GRPOTrainer:
             self.policy_generation.prepare_for_generation()
 
             val_metrics, validation_timings = self._validate(step+1)
-            self.policy_generation.finish_generation()
+            await self.policy_generation.finish_generation()
             self.logger.log_metrics(validation_timings, step + 1, prefix="timing/validation")
             self.logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
@@ -923,11 +916,11 @@ class GRPOTrainer:
         log_data = {"content": [prompt + completion for prompt, completion in zip(repeated_batch["prompt"], repeated_batch["completion"])]}
         log_data["rewards"] = repeated_batch["reward"].tolist()
         log_data["generation_logprobs"] = repeated_batch["generation_logprobs"].tolist()
-        log_data["prev_logprobs"] = repeated_batch["prev_logprobs"].tolist()
         log_data["input_lengths"] = sum(len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"])
         
         # Logger chokes on integers, drop it
-        self.logger.log_batched_dict_as_jsonl({k: v for k, v in log_data.items() if k != "input_lengths"}, f"train_data_step{step}.jsonl")
+        log_data = {k: v for k, v in log_data.items() if k != "input_lengths"}
+        self.logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
 
         metrics = {
             "loss": train_results["loss"].numpy(),
@@ -952,19 +945,18 @@ class GRPOTrainer:
         metrics.update(rollout_metrics)
 
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore[assignment]
-        if metrics.get("token_mult_prob_error", 0) > 1.05:
-            self.logger.log_plot_token_mult_prob_error(
-                {
-                    "full_lengths": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
-                    "generation_logprobs": repeated_batch["generation_logprobs"],
-                    "prev_logprobs": repeated_batch["prev_logprobs"],
-                    "token_mask": repeated_batch["token_mask"],
-                    "sample_mask": repeated_batch["sample_mask"],
-                    "prompt_lengths": repeated_batch["input_lengths"]
-                },
-                step + 1,
-                name="train/token_mult_prob_error_plot_sample",
-            )
+        # if metrics.get("token_mult_prob_error", 0) > 1.05:
+        #     self.logger.log_plot_token_mult_prob_error(
+        #         {
+        #             "full_lengths": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
+        #             "generation_logprobs": repeated_batch["generation_logprobs"],
+        #             "token_mask": repeated_batch["token_mask"],
+        #             "sample_mask": repeated_batch["sample_mask"],
+        #             "prompt_lengths": repeated_batch["input_lengths"]
+        #         },
+        #         step + 1,
+        #         name="train/token_mult_prob_error_plot_sample",
+        #     )
         
         print("\n📊 Training Results:\n")
         print(f"  • Loss: {metrics['loss']:.4f}\n")

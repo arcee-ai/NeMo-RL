@@ -388,6 +388,7 @@ class DTensorV2PolicyWorker:
         self.uses_custom_model = custom_model_setup is not None
         self.adapter: Optional[BaseStateDictAdapter]
         self.adapter = None
+        self.model_class: Optional[type[nn.Module]] = None
         self._custom_parallelize_function: Optional[Callable] = None
 
         full_state_dict = None
@@ -598,13 +599,18 @@ class DTensorV2PolicyWorker:
         if not self.uses_custom_model:
             self._tie_word_embeddings_if_needed()
 
+        if init_reference_model:
+            if self.use_hf_checkpoint and weights_path:
+                self.reference_model_state_dict = self._load_reference_full_state_dict(
+                    model_name=model_name
+                )
+            else:
+                self.reference_model_state_dict = get_cpu_state_dict(
+                    self.model.state_dict().items(), pin_memory=True
+                )
+
         if self.cpu_offload:
             self.model = self.move_to_device(self.model, "cpu")
-
-        if init_reference_model:
-            self.reference_model_state_dict = get_cpu_state_dict(
-                self.model.state_dict().items(), pin_memory=True
-            )
 
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
@@ -715,6 +721,43 @@ class DTensorV2PolicyWorker:
             None
         )
         self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
+
+    def _load_reference_full_state_dict(
+        self,
+        *,
+        model_name: str,
+    ) -> Optional[dict[str, Any]]:
+        """Load the base Hugging Face weights used to seed the reference policy."""
+        logging.info("Loading reference policy weights from %s", model_name)
+
+        if self.uses_custom_model:
+            assert (
+                self.adapter is not None
+            ), "Adapter must be initialized for custom model reference loading."
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map="cpu",
+                trust_remote_code=True,
+                config=self.model_config,
+            )
+            state_dict = self.adapter.from_hf(model.state_dict())
+            del model
+        else:
+            assert (
+                self.model_class is not None
+            ), "Model class must be set when using Hugging Face implementations."
+            model = self.model_class.from_pretrained(
+                model_name,
+                device_map="cpu",
+                trust_remote_code=True,
+                config=self.model_config,
+            )
+            state_dict = model.state_dict()
+            del model
+
+        gc.collect()
+
+        return state_dict
 
     def _tie_word_embeddings_if_needed(self) -> None:
         if not hasattr(self.model, "lm_head"):
@@ -1477,7 +1520,13 @@ class DTensorV2PolicyWorker:
                 # Swap reference model state_dict to self.model
                 for k, v in self.model.state_dict().items():
                     val = to_local_if_dtensor(v)
-                    val.copy_(self.reference_model_state_dict[k])
+                    # Sometimes ref policy dict is loaded from scratch, other times it is from a parallelized model. Handle both cases.
+                    try:
+                        ref_param = self.reference_model_state_dict[k]
+                    except KeyError:
+                        k = k.replace("_orig_mod.", "")
+                        ref_param = self.reference_model_state_dict[k]
+                    val.copy_(ref_param)
 
                 # - self.model is the original reference_model, now on CUDA
                 # - curr_state_dict is the train model, now on CPU
