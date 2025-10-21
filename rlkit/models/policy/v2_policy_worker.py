@@ -728,9 +728,6 @@ class DTensorV2PolicyWorker:
         model_name: str,
     ) -> Optional[dict[str, Any]]:
         """Load the base Hugging Face weights used to seed the reference policy."""
-        if self.rank != 0:
-            return None
-
         logging.info("Loading reference policy weights from %s", model_name)
 
         if self.uses_custom_model:
