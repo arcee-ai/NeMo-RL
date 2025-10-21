@@ -550,7 +550,7 @@ class GRPOTrainer:
                 (
                     val_metrics,
                     validation_timings
-                ) = self._run_validation_step(
+                ) = await self._run_validation_step(
                     step,
                     val_period,
                 )
@@ -830,7 +830,7 @@ class GRPOTrainer:
         with timer.time("training_prep"):
             self.policy.prepare_for_training()
 
-    def _run_validation_step(
+    async def _run_validation_step(
         self,
         step: int,
         val_period: int,
@@ -845,7 +845,7 @@ class GRPOTrainer:
             self.policy_generation.prepare_for_generation()
 
             val_metrics, validation_timings = self._validate(step+1)
-            self.policy_generation.finish_generation()
+            await self.policy_generation.finish_generation()
             self.logger.log_metrics(validation_timings, step + 1, prefix="timing/validation")
             self.logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
