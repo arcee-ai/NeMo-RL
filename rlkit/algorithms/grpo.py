@@ -522,6 +522,11 @@ class GRPOTrainer:
                         
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                     else:
+                        # Refit policy before the first rollout in case we are reloading a checkpoint.
+                        logging.info("Refitting policy...")
+                        with timer.time("refit_policy"):
+                            await self._refit_policy_generation(colocated_inference)
+                        
                         # Queue up rollout with current datapoint and move to the next. Should only happen on the first step.
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                         continue
