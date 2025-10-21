@@ -380,27 +380,18 @@ class GRPOTrainer:
         inference_cluster: RayVirtualCluster,
         policy_config: PolicyConfig,
     ) -> Optional[GenerationInterface]:
-        if backend == "vllm":
-            generation_config = cast(VllmConfig, generation_config)
-            policy_generation = VllmGeneration(
-                cluster=inference_cluster, config=generation_config
-            )
-            policy_generation.finish_generation()
-            logging.info(
-                f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
-            )
-            return policy_generation
-        if backend == "vllm_http":
-            generation_config = cast(HttpVllmConfig, generation_config)
-            policy_generation = VllmHttpGeneration(
-                cluster=inference_cluster, config=generation_config
-            )
-            policy_generation.finish_generation()
-            logging.info(
-                f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
-            )
-            return policy_generation
-        raise ValueError(f"Unsupported generation backend: {backend}")
+        # Temporary until full deprecation of this config option
+        if backend != "vllm_http":
+            raise ValueError(f"Unsupported generation backend: {backend}")
+        
+        generation_config = cast(HttpVllmConfig, generation_config)
+        policy_generation = VllmHttpGeneration(
+            cluster=inference_cluster, config=generation_config
+        )
+        logging.info(
+            f"  ✓ Using vLLM-over-HTTP backend for generation with {policy_config['model_name']}"
+        )
+        return policy_generation
 
     def _initialize_policy(
         self,
@@ -479,10 +470,13 @@ class GRPOTrainer:
         val_at_start = self.master_config["grpo"]["val_at_start"]
         colocated_inference = self.master_config["policy"]["generation"]["colocated"]["enabled"]
 
+        # Call finish generation before training begins to ensure the policy is ready.
+        await self.policy_generation.finish_generation()
+
         if val_at_start and step == 0:
             logging.info("\n🔍 Running initial validation...")
             val_metrics, validation_timings = self._validate(0)
-            self.policy_generation.finish_generation()
+            await self.policy_generation.finish_generation()
             self.logger.log_metrics(val_metrics, 0, prefix="validation")
             self.logger.log_metrics(validation_timings, 0, prefix="timing/validation")
 
