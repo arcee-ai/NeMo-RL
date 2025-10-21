@@ -120,22 +120,18 @@ class ClippedPGLossFn(LossFunction):
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
         advantages = data["advantages"][:, 1:]
-        prev_logprobs = data["prev_logprobs"][:, 1:]
+        if "prev_logprobs" in data:
+            prev_logprobs = data["prev_logprobs"][:, 1:]
+        else:
+            prev_logprobs = None
         generation_logprobs = data["generation_logprobs"][:, 1:]
-        reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
+        if "reference_policy_logprobs" in data:
+            reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
+        else:
+            reference_policy_logprobs = None
         seq_index = data.get("seq_index", None)
 
         mask = token_mask * sample_mask.unsqueeze(-1)
-
-        # token_mult_prob_error
-        # See more details and other metrics in docs/guides/grpo.md#metrics
-        lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
-        # average over all tokens in the microbatch
-        mult_prob_error = masked_mean(
-            torch.exp(lp_error * mask),
-            mask,
-            global_normalization_factor=global_valid_toks,
-        ).item()
 
         if vocab_parallel_group is not None:
             assert vocab_parallel_rank is not None, (
@@ -173,6 +169,9 @@ class ClippedPGLossFn(LossFunction):
 
         # Calculate KL regularization.
         if self.reference_policy_kl_penalty != 0:
+            if reference_policy_logprobs is None:
+                raise ValueError("reference_policy_logprobs is required when reference_policy_kl_penalty is nonzero")
+
             if self.use_on_policy_kl_approximation:
                 # See: docs/guides/grpo.md#on-policy-kl-approximation
                 kl_importance_weights = torch.exp(
@@ -203,6 +202,10 @@ class ClippedPGLossFn(LossFunction):
                 )
         else:
             kl = torch.tensor(0.0)
+
+        # If we are only doing one step per batch, we can just use the same logprobs detached for the ratio
+        if prev_logprobs is None:
+            prev_logprobs = curr_logprobs.detach()
 
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
@@ -289,6 +292,16 @@ class ClippedPGLossFn(LossFunction):
                 mask,
                 global_normalization_factor=global_valid_toks,
             ).item()
+        
+        # token_mult_prob_error
+        # See more details and other metrics in docs/guides/grpo.md#metrics
+        lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
+        # average over all tokens in the microbatch
+        mult_prob_error = masked_mean(
+            torch.exp(lp_error * mask),
+            mask,
+            global_normalization_factor=global_valid_toks,
+        ).item()
 
         # If you provided a global_valid_{seqs/toks}, all metrics here are globally normalized
         # by either sequence or token count, depending on particular metric.

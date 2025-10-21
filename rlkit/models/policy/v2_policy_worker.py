@@ -1523,9 +1523,13 @@ class DTensorV2PolicyWorker:
                 # Swap reference model state_dict to self.model
                 for k, v in self.model.state_dict().items():
                     val = to_local_if_dtensor(v)
-                    # Deal with torch.compile name mangling
-                    k = k.replace("_orig_mod.", "")
-                    val.copy_(self.reference_model_state_dict[k])
+                    # Sometimes ref policy dict is loaded from scratch, other times it is from a parallelized model. Handle both cases.
+                    try:
+                        ref_param = self.reference_model_state_dict[k]
+                    except KeyError:
+                        k = k.replace("_orig_mod.", "")
+                        ref_param = self.reference_model_state_dict[k]
+                    val.copy_(ref_param)
 
                 # - self.model is the original reference_model, now on CUDA
                 # - curr_state_dict is the train model, now on CPU

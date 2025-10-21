@@ -815,18 +815,12 @@ class GRPOTrainer:
         train_data: BatchedDataDict[DatumSpec],
         timer: Timer,
     ) -> None:
-        with timer.time("policy_and_reference_logprobs"):
-            fprop_logprobs = (await self.policy.get_logprobs(train_data))["logprobs"]
-            
+        with timer.time("reference_logprobs"):
             if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
                 reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
                 ]
-            else:
-                reference_logprobs = torch.zeros_like(fprop_logprobs)
-            
-            train_data["prev_logprobs"] = fprop_logprobs
-            train_data["reference_policy_logprobs"] = reference_logprobs
+                train_data["reference_policy_logprobs"] = reference_logprobs
         
         return train_data
 
@@ -922,11 +916,11 @@ class GRPOTrainer:
         log_data = {"content": [prompt + completion for prompt, completion in zip(repeated_batch["prompt"], repeated_batch["completion"])]}
         log_data["rewards"] = repeated_batch["reward"].tolist()
         log_data["generation_logprobs"] = repeated_batch["generation_logprobs"].tolist()
-        log_data["prev_logprobs"] = repeated_batch["prev_logprobs"].tolist()
         log_data["input_lengths"] = sum(len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"])
         
         # Logger chokes on integers, drop it
-        self.logger.log_batched_dict_as_jsonl({k: v for k, v in log_data.items() if k != "input_lengths"}, f"train_data_step{step}.jsonl")
+        log_data = {k: v for k, v in log_data.items() if k != "input_lengths"}
+        self.logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
 
         metrics = {
             "loss": train_results["loss"].numpy(),
@@ -951,19 +945,18 @@ class GRPOTrainer:
         metrics.update(rollout_metrics)
 
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore[assignment]
-        if metrics.get("token_mult_prob_error", 0) > 1.05:
-            self.logger.log_plot_token_mult_prob_error(
-                {
-                    "full_lengths": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
-                    "generation_logprobs": repeated_batch["generation_logprobs"],
-                    "prev_logprobs": repeated_batch["prev_logprobs"],
-                    "token_mask": repeated_batch["token_mask"],
-                    "sample_mask": repeated_batch["sample_mask"],
-                    "prompt_lengths": repeated_batch["input_lengths"]
-                },
-                step + 1,
-                name="train/token_mult_prob_error_plot_sample",
-            )
+        # if metrics.get("token_mult_prob_error", 0) > 1.05:
+        #     self.logger.log_plot_token_mult_prob_error(
+        #         {
+        #             "full_lengths": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
+        #             "generation_logprobs": repeated_batch["generation_logprobs"],
+        #             "token_mask": repeated_batch["token_mask"],
+        #             "sample_mask": repeated_batch["sample_mask"],
+        #             "prompt_lengths": repeated_batch["input_lengths"]
+        #         },
+        #         step + 1,
+        #         name="train/token_mult_prob_error_plot_sample",
+        #     )
         
         print("\n📊 Training Results:\n")
         print(f"  • Loss: {metrics['loss']:.4f}\n")
