@@ -12,6 +12,8 @@ sft:
   val_at_start: false
   seed: 42
 
+  use_cut_cross_entropy: true
+
 checkpointing:
   enabled: true
   checkpoint_dir: "results/sft"
@@ -26,8 +28,8 @@ policy:
   model_name: "Qwen/Qwen3-4B-Base"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 256
-  train_micro_batch_size: 16
+  train_global_batch_size: 384
+  train_micro_batch_size: 48
   max_total_sequence_length: 1024
   precision: "bfloat16"
 

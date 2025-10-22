@@ -83,9 +83,6 @@ class SFTTrainer:
         self.val_dataset = val_dataset
         
         policy_config = self.master_config["policy"]
-        sft_config = self.master_config["sft"]
-        data_config = self.master_config["data"]
-        logger_config = self.master_config["logger"]
         cluster_config = self.master_config["cluster"]
 
         set_seed(master_config["sft"]["seed"])
@@ -209,6 +206,10 @@ class SFTTrainer:
         weights_path: Optional[Path],
         optimizer_path: Optional[Path]
     ) -> Policy:
+        use_cce = self.master_config["sft"].get("use_cut_cross_entropy", False)
+        if use_cce:
+            logging.info("Using cut cross-entropy loss kernel")
+        
         return Policy(
             cluster=train_cluster,
             config=policy_config,
@@ -218,6 +219,7 @@ class SFTTrainer:
             init_optimizer=True,
             init_reference_model=False,
             use_hf_checkpoint=self.use_hf_checkpoint,
+            use_cut_cross_entropy=use_cce,
         )
 
     def _process_batch(self, batch: BatchedDataDict) -> BatchedDataDict:
@@ -528,9 +530,10 @@ class SFTTrainer:
                 metrics["train_fp_utilization"] = (
                     total_tflops / theoretical_tflops
                 )
-            total_valid_toks = sum(train_results["all_mb_metrics"]["global_valid_toks"])
+            total_valid_toks = train_results["all_mb_metrics"]["global_valid_toks"][0]
             print(f"  • Total valid tokens: {total_valid_toks}")
-            print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks'])}")
+            print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks']):.0f}")
+            print(f"  • Estimated throughput: {total_valid_toks / timing_metrics['policy_training']:.2f} tok/s")
             
         print("\n⏱️  Timing:")
         total_time = timing_metrics.get("total_step_time", 0)

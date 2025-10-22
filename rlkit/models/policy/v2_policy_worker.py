@@ -22,6 +22,7 @@ import re
 from typing import Any, Callable, Generator, Iterable, Optional, Set, Union, cast
 import logging
 
+from liger_kernel.transformers import LigerCrossEntropyLoss
 import ray
 import torch
 from accelerate import init_empty_weights
@@ -48,6 +49,7 @@ from transformers import (
 )
 from rlkit.algorithms.interfaces import LossFunction, LossType
 from rlkit.algorithms.loss_functions import SequencePackingLossWrapper
+from rlkit.algorithms.utils import masked_mean
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.models.dtensor.parallelize import (
     _parallelize_model,
@@ -292,9 +294,11 @@ class DTensorV2PolicyWorker:
         init_optimizer: bool = True,
         init_reference_model: bool = True,
         use_hf_checkpoint: bool = False,
+        use_cut_cross_entropy: bool = False,
         **kwargs: Any,
     ):
         self.use_hf_checkpoint = use_hf_checkpoint
+        self.use_cut_cross_entropy = use_cut_cross_entropy
         self.is_generation_colocated = None
         if "generation" in config and config["generation"] is not None:
             self.is_generation_colocated = config["generation"]["colocated"]["enabled"]
@@ -397,6 +401,7 @@ class DTensorV2PolicyWorker:
             custom_model_class, model_args, adapter_class, model_parallelize_function = (
                 custom_model_setup  # type: ignore[arg-type]
             )
+            self.custom_model_args = model_args
             self.adapter = adapter_class(
                 model_args=model_args, hf_assets_path=model_name
             )
@@ -421,9 +426,10 @@ class DTensorV2PolicyWorker:
 
             print("Initializing custom model on meta device...")
             with init_empty_weights():
-                self.model = custom_model_class(model_args=model_args)
+                self.model = custom_model_class(model_args=model_args, skip_logits=self.use_cut_cross_entropy)
         else:
             logging.info(f"Using HuggingFace implementation for {model_name}")
+            assert not self.use_cut_cross_entropy, "Cut cross-entropy loss kernel is not supported with HuggingFace models"
             if self._is_reward_model:
                 rm_cfg = self.cfg.get("reward_model_cfg", {})
                 rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
@@ -1047,128 +1053,163 @@ class DTensorV2PolicyWorker:
                                 seq_len, device=input_ids.device
                             ).repeat(batch_size, 1)
                             flash_attn_kwargs = {}
-
-                    context_parallel_ctx = None
-                    if self.cp_size > 1:
-                        seq_index = torch.arange(
-                            seq_len, device=input_ids.device
-                        ).repeat(1, 1)
-                        cp_buffers = (
-                            [input_ids, position_ids, seq_index]
-                            if self.cp_size > 1
-                            else []
-                        )
-
-                        # Create context parallel context
-                        context_parallel_ctx = self.create_context_parallel_ctx(
-                            cp_mesh=self.cp_mesh,
-                            cp_buffers=cp_buffers,
-                            cp_seq_dims=[sequence_dim] * len(cp_buffers),
-                            cp_no_restore_buffers=set(cp_buffers),
-                        )
-
-                    with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
+                    
+                    if self.use_cut_cross_entropy:
+                        assert self.cp_size == 1, "Liger's cross-entropy loss kernel is not supported with context parallel"
+                        assert not self.enable_seq_packing, "Liger's cross-entropy loss kernel is not supported with sequence packing"
+                        
                         with torch.autocast(device_type="cuda", dtype=self.dtype):
-                            model_args = self._build_forward_kwargs(
-                                input_ids=input_ids,
-                                attention_mask=attention_mask,
-                                position_ids=position_ids,
-                                flash_attn_kwargs=flash_attn_kwargs,
-                                use_cache=False,
+                            token_mask = mb["token_mask"][:, 1:]
+                            sample_mask = mb["sample_mask"]
+                            mask = token_mask * sample_mask.unsqueeze(-1)
+                            
+                            from cut_cross_entropy import linear_cross_entropy
+                            hidden = self.model(input_ids)
+                            token_loss = linear_cross_entropy(
+                                # Returns final hidden state
+                                hidden,
+                                self.model.output.weight,
+                                mb["input_ids"],
+                                ignore_index=self.tokenizer.eos_token_id,
+                                shift=True,
+                                reduction="none"
                             )
-
-                            logits = self._compute_model_logits(model_args)
-
-                        # Apply temperature scaling
-                        logits = self._apply_temperature_scaling(logits)
-
+                            
+                            loss = masked_mean(
+                                token_loss,
+                                mask,
+                                global_normalization_factor=global_valid_toks,
+                            )
+                            
+                            del hidden
+                            
+                            loss_metrics = {
+                                "loss": loss.item() if loss.ndim == 0 else loss,
+                                "num_unmasked_tokens": mask.sum().item(),
+                                "num_valid_samples": sample_mask.sum().item(),
+                            }
+                    else:
+                        context_parallel_ctx = None
                         if self.cp_size > 1:
-                            seq_index_dtensor = (
-                                DTensor.from_local(
-                                    seq_index,
-                                    device_mesh=self.cp_mesh,
-                                    placements=[Shard(1)],
-                                )
-                                .full_tensor()
-                                .squeeze(0)
+                            seq_index = torch.arange(
+                                seq_len, device=input_ids.device
+                            ).repeat(1, 1)
+                            cp_buffers = (
+                                [input_ids, position_ids, seq_index]
+                                if self.cp_size > 1
+                                else []
                             )
 
-                            mb["seq_index"] = seq_index_dtensor
+                            # Create context parallel context
+                            context_parallel_ctx = self.create_context_parallel_ctx(
+                                cp_mesh=self.cp_mesh,
+                                cp_buffers=cp_buffers,
+                                cp_seq_dims=[sequence_dim] * len(cp_buffers),
+                                cp_no_restore_buffers=set(cp_buffers),
+                            )
 
-                            for tensor_name in mb:
-                                current_tensor = mb[tensor_name]
-                                for buffer in cp_buffers:
-                                    if current_tensor is buffer:
-                                        assert type(current_tensor) == torch.Tensor, (
-                                            f"tensor {tensor_name} is not a tensor"
-                                        )
-                                        mb[tensor_name] = DTensor.from_local(
-                                            current_tensor,
-                                            device_mesh=self.cp_mesh,
-                                            placements=[Shard(sequence_dim)],
-                                        )
-                                        break
+                        with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
+                            with torch.autocast(device_type="cuda", dtype=self.dtype):
+                                model_args = self._build_forward_kwargs(
+                                    input_ids=input_ids,
+                                    attention_mask=attention_mask,
+                                    position_ids=position_ids,
+                                    flash_attn_kwargs=flash_attn_kwargs,
+                                    use_cache=False,
+                                )
 
-                            if isinstance(logits, DTensor):
-                                # Must be tp sharded
-                                assert (
-                                    logits.device_mesh.ndim == 1
-                                    and logits.device_mesh.mesh_dim_names[0] == "tp"
-                                ), "logits must be tp sharded"
+                                logits = self._compute_model_logits(model_args)
 
-                                # CP is implicitly sharded on the seq dim, so we need to redistribute to the tp dim
-                                logits = DTensor.from_local(
-                                    logits.to_local(),
-                                    device_mesh=self.device_mesh[("cp", "tp")],
-                                    placements=[Shard(sequence_dim), Shard(-1)],
+                            # Apply temperature scaling
+                            logits = self._apply_temperature_scaling(logits)
+
+                            if self.cp_size > 1:
+                                seq_index_dtensor = (
+                                    DTensor.from_local(
+                                        seq_index,
+                                        device_mesh=self.cp_mesh,
+                                        placements=[Shard(1)],
+                                    )
+                                    .full_tensor()
+                                    .squeeze(0)
+                                )
+
+                                mb["seq_index"] = seq_index_dtensor
+
+                                for tensor_name in mb:
+                                    current_tensor = mb[tensor_name]
+                                    for buffer in cp_buffers:
+                                        if current_tensor is buffer:
+                                            assert type(current_tensor) == torch.Tensor, (
+                                                f"tensor {tensor_name} is not a tensor"
+                                            )
+                                            mb[tensor_name] = DTensor.from_local(
+                                                current_tensor,
+                                                device_mesh=self.cp_mesh,
+                                                placements=[Shard(sequence_dim)],
+                                            )
+                                            break
+
+                                if isinstance(logits, DTensor):
+                                    # Must be tp sharded
+                                    assert (
+                                        logits.device_mesh.ndim == 1
+                                        and logits.device_mesh.mesh_dim_names[0] == "tp"
+                                    ), "logits must be tp sharded"
+
+                                    # CP is implicitly sharded on the seq dim, so we need to redistribute to the tp dim
+                                    logits = DTensor.from_local(
+                                        logits.to_local(),
+                                        device_mesh=self.device_mesh[("cp", "tp")],
+                                        placements=[Shard(sequence_dim), Shard(-1)],
+                                    )
+                                else:
+                                    logits = DTensor.from_local(
+                                        logits,
+                                        device_mesh=self.device_mesh[("cp", "tp")],
+                                        placements=[Shard(sequence_dim), Shard(-1)],
+                                    )
+
+                            if self.enable_seq_packing:
+                                loss_fn_ = SequencePackingLossWrapper(
+                                    loss_fn=loss_fn,
+                                    cu_seqlens_q=flash_attn_kwargs.cu_seqlens_q,
+                                    cu_seqlens_q_padded=flash_attn_kwargs.cu_seqlens_q,
                                 )
                             else:
-                                logits = DTensor.from_local(
-                                    logits,
-                                    device_mesh=self.device_mesh[("cp", "tp")],
-                                    placements=[Shard(sequence_dim), Shard(-1)],
-                                )
+                                loss_fn_ = loss_fn
 
-                        if self.enable_seq_packing:
-                            loss_fn_ = SequencePackingLossWrapper(
-                                loss_fn=loss_fn,
-                                cu_seqlens_q=flash_attn_kwargs.cu_seqlens_q,
-                                cu_seqlens_q_padded=flash_attn_kwargs.cu_seqlens_q,
+                            loss, loss_metrics = loss_fn_(
+                                logits,
+                                mb,
+                                global_valid_seqs,
+                                global_valid_toks,
                             )
-                        else:
-                            loss_fn_ = loss_fn
+                            del logits
 
-                        loss, loss_metrics = loss_fn_(
-                            logits,
-                            mb,
-                            global_valid_seqs,
-                            global_valid_toks,
-                        )
-                        del logits
+                    # skip the update for dummy batches
+                    if mb_idx < iterator_len:
+                        ## scale by the number of global batches so we get the correct
+                        ## value when summing metrics across all microbatches
+                        for k in loss_metrics.keys():
+                            loss_metrics[k] /= num_global_batches
+                        num_valid_samples = loss_metrics["num_valid_samples"]
+                        loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
+                        loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
+                        loss_metrics["global_valid_toks"] = global_valid_toks.item()
+                    else:
+                        loss *= 0
 
-                        # skip the update for dummy batches
-                        if mb_idx < iterator_len:
-                            ## scale by the number of global batches so we get the correct
-                            ## value when summing metrics across all microbatches
-                            for k in loss_metrics.keys():
-                                loss_metrics[k] /= num_global_batches
-                            num_valid_samples = loss_metrics["num_valid_samples"]
-                            loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                            loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
-                            loss_metrics["global_valid_toks"] = global_valid_toks.item()
-                        else:
-                            loss *= 0
+                    # Backward pass
+                    if not eval_mode:
+                        ## NOTE: invalid samples should be multiplied
+                        ## by zero in the loss function to prevent them
+                        ## from affecting the gradient calculation
 
-                        # Backward pass
-                        if not eval_mode:
-                            ## NOTE: invalid samples should be multiplied
-                            ## by zero in the loss function to prevent them
-                            ## from affecting the gradient calculation
-
-                            # when FSDP reduces the gradients over the DP dim, they're automatically averaged
-                            # but we want to sum them so we cancel out the average here
-                            loss *= self.dp_size * self.cp_size
-                            loss.backward()
+                        # when FSDP reduces the gradients over the DP dim, they're automatically averaged
+                        # but we want to sum them so we cancel out the average here
+                        loss *= self.dp_size * self.cp_size
+                        loss.backward()
 
                     if num_valid_samples > 0:
                         mb_losses.append(loss.item())
