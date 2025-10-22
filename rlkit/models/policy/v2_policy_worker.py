@@ -1071,6 +1071,8 @@ class DTensorV2PolicyWorker:
                                 self.model.output.weight,
                                 mb["input_ids"],
                                 ignore_index=self.tokenizer.eos_token_id,
+                                shift=True,
+                                reduction="none"
                             )
                             
                             loss = masked_mean(
