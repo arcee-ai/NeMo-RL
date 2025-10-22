@@ -67,6 +67,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         optimizer_path: Optional[PathLike] = None,
         init_reference_model: bool = True,
         use_hf_checkpoint: bool = False,
+        use_cut_cross_entropy: bool = False,
     ):
         if weights_path:
             weights_path = os.path.abspath(weights_path)
@@ -171,6 +172,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             worker_sharding_annotations=self.sharding_annotations,
             pre_init_communication_queue=pre_init_queue,
             use_hf_checkpoint=use_hf_checkpoint,
+            use_cut_cross_entropy=use_cut_cross_entropy,
         )
 
         self.worker_group = RayWorkerGroup(

@@ -70,7 +70,7 @@ class TransformerBlock(nn.Module):
             self.feed_forward.init_weights(self.weight_init_std)
 
 class Qwen3MoEModel(BaseModel):
-    def __init__(self, model_args: Qwen3MoEModelArgs):
+    def __init__(self, model_args: Qwen3MoEModelArgs, skip_logits: bool = False):
         super().__init__(model_args)
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
@@ -90,6 +90,7 @@ class Qwen3MoEModel(BaseModel):
         
         self.norm = nn.RMSNorm(self.model_args.dim, eps=self.model_args.norm_eps)
         
+        self.skip_logits = skip_logits
         self.output = nn.Linear(self.model_args.dim, self.vocab_size, bias=False)
         
         self.init_weights()
@@ -165,7 +166,10 @@ class Qwen3MoEModel(BaseModel):
             h = layer(h, self.rope_cache)
             
         h = self.norm(h) if self.norm is not None else h
-        output = self.output(h) if self.output is not None else h
-        return output
+        if self.skip_logits:
+            return h
+        else:
+            output = self.output(h) if self.output is not None else h
+            return output
 
 # TODO: router aux loss

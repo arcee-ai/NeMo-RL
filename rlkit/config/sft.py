@@ -18,6 +18,7 @@ class SFTConfig(TypedDict):
     seed: int
     
     run_vram_torture_test: bool  # Ignore prompts and run all training on a full context window of nonsense.
+    use_cut_cross_entropy: bool  # Use cut-cross-entropy loss kernel
 
 
 class SFTMasterConfig(TypedDict):
