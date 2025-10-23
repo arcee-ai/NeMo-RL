@@ -9,81 +9,71 @@ from .args import AFMoEModelArgs
 from .moe import FeedForward, MoE
 
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
+    Precompute the cosine and sine frequencies for rotary embeddings.
 
-    This function calculates a frequency tensor with complex exponentials using the given dimension 'dim'
-    and the end index 'end'. The 'theta' parameter scales the frequencies.
-    The returned tensor contains complex values in complex64 data type.
+    This function calculates frequency tensors and returns their cosine and sine values
+    for use in rotary position embeddings.
 
     Args:
         dim (int): Dimension of the frequency tensor.
         end (int): End index for precomputing frequencies.
-        theta (float | None): Scaling factor for frequency computation. Defaults to 10000.0.
+        theta (float): Scaling factor for frequency computation. Defaults to 10000.0.
 
     Returns:
-        torch.Tensor: Precomputed frequency tensor with complex exponentials.
+        tuple[torch.Tensor, torch.Tensor]: Precomputed cosine and sine frequency tensors.
     """
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
     t = torch.arange(end, device=freqs.device)
     freqs = torch.outer(t, freqs).float()
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
+    # Duplicate frequencies to match full head dimension (needed for rotate_half)
+    emb = torch.cat((freqs, freqs), dim=-1)
+    cos = emb.cos()
+    sin = emb.sin()
+    return cos, sin
 
 
-def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    """
-    Reshape frequency tensor for broadcasting it with another tensor.
-
-    This function reshapes the frequency tensor to have the same shape as the target tensor 'x'
-    for the purpose of broadcasting the frequency tensor during element-wise operations.
-
-    The input freqs_cis tensor is assumed to be of shape (max_seqlen, dim),
-    and the first seqlen elements will be sliced, but dim must match x.
-
-    Args:
-        freqs_cis (torch.Tensor): Frequency tensor to be reshaped.
-        x (torch.Tensor): Target tensor for broadcasting compatibility.
-
-    Returns:
-        torch.Tensor: Reshaped frequency tensor.
-    """
-    ndim = x.ndim
-    assert ndim > 1
-    seqlen = x.shape[1]
-    freqs_cis = freqs_cis[0:seqlen]
-    assert freqs_cis.shape == (seqlen, x.shape[-1])
-    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-    return freqs_cis.view(*shape)
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """Rotates half the hidden dims of the input."""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_emb(
     xq: torch.Tensor,
     xk: torch.Tensor,
-    freqs_cis: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Apply rotary embeddings to input tensors using the given frequency tensor.
+    Apply rotary embeddings to input tensors using cosine and sine frequencies.
 
     This function applies rotary embeddings to the given query 'xq' and key 'xk' tensors using the provided
-    frequency tensor 'freqs_cis'. The input tensors are reshaped as complex numbers, and the frequency tensor
-    is reshaped for broadcasting compatibility. The resulting tensors contain rotary embeddings and are
-    returned as real tensors.
+    cosine and sine frequency tensors. The rotary embeddings are applied using the rotate_half approach.
 
     Args:
-        xq (torch.Tensor): Query tensor to apply rotary embeddings.
-        xk (torch.Tensor): Key tensor to apply rotary embeddings.
-        freqs_cis (torch.Tensor): Precomputed frequency tensor for complex exponentials.
+        xq (torch.Tensor): Query tensor to apply rotary embeddings. Shape: (bs, seqlen, n_heads, head_dim)
+        xk (torch.Tensor): Key tensor to apply rotary embeddings. Shape: (bs, seqlen, n_kv_heads, head_dim)
+        cos (torch.Tensor): Precomputed cosine frequencies. Shape: (seqlen, head_dim)
+        sin (torch.Tensor): Precomputed sine frequencies. Shape: (seqlen, head_dim)
 
     Returns:
         tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
     """
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    # Get sequence length from query tensor
+    seqlen = xq.shape[1]
+    
+    # Slice cos/sin to match sequence length and reshape for broadcasting
+    # cos/sin: (seqlen, head_dim) -> (1, seqlen, 1, head_dim)
+    cos = cos[:seqlen].unsqueeze(0).unsqueeze(2)
+    sin = sin[:seqlen].unsqueeze(0).unsqueeze(2)
+    
+    # Apply rotary embeddings: x_embed = (x * cos) + (rotate_half(x) * sin)
+    xq_out = (xq * cos) + (rotate_half(xq) * sin)
+    xk_out = (xk * cos) + (rotate_half(xk) * sin)
+    
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
@@ -171,14 +161,14 @@ class Attention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        freqs_cis: torch.Tensor,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ):
         """
         Forward pass of the attention module.
 
         Args:
             x (torch.Tensor): Input tensor.
-            freqs_cis (torch.Tensor): Precomputed frequency tensor.
+            freqs_cis (tuple[torch.Tensor, torch.Tensor]): Precomputed cosine and sine frequency tensors.
 
         Returns:
             torch.Tensor: Output tensor after attention.
@@ -199,7 +189,8 @@ class Attention(nn.Module):
         xq, xk = self.q_norm(xq), self.k_norm(xk)
 
         if self.is_local_attention:
-            xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+            cos, sin = freqs_cis
+            xq, xk = apply_rotary_emb(xq, xk, cos, sin)
 
         # repeat k/v heads if n_kv_heads < n_heads
         keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
@@ -269,14 +260,14 @@ class TransformerBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        freqs_cis: torch.Tensor,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ):
         """
         Perform a forward pass through the TransformerBlock.
 
         Args:
             x (torch.Tensor): Input tensor.
-            freqs_cis (torch.Tensor): Precomputed cosine and sine frequencies.
+            freqs_cis (tuple[torch.Tensor, torch.Tensor]): Precomputed cosine and sine frequencies.
 
         Returns:
             torch.Tensor: Output tensor after applying attention and feedforward layers.
@@ -329,9 +320,10 @@ class AFMoEModel(BaseModel):
 
         self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
 
-        self.register_buffer(
-            "freqs_cis", self._precompute_freqs_cis(), persistent=False
-        )
+        # Register separate buffers for cos and sin
+        freqs_cos, freqs_sin = self._precompute_freqs_cis()
+        self.register_buffer("freqs_cos", freqs_cos, persistent=False)
+        self.register_buffer("freqs_sin", freqs_sin, persistent=False)
 
         self.layers = torch.nn.ModuleDict()
         for layer_id in range(model_args.n_layers):
@@ -355,7 +347,7 @@ class AFMoEModel(BaseModel):
         ``init_weights``. We only call it in the constructor of this
         ``Transformer`` root module to avoid reinitializing tensors.
         """
-        buffer_device = buffer_device or self.freqs_cis.device
+        buffer_device = buffer_device or self.freqs_cos.device
         cutoff_factor = 3
         if self.model_args.mup_enabled:
             emb_std = 0.5 * (self.model_args.dim**-0.5)
@@ -364,7 +356,9 @@ class AFMoEModel(BaseModel):
             emb_std = 1
             lmh_std = self.model_args.dim**-0.5
         with torch.device(buffer_device):
-            self.freqs_cis = self._precompute_freqs_cis()
+            freqs_cos, freqs_sin = self._precompute_freqs_cis()
+            self.freqs_cos = freqs_cos
+            self.freqs_sin = freqs_sin
         if self.tok_embeddings is not None: # pyright: ignore[reportUnnecessaryComparison]
             nn.init.trunc_normal_(
                 self.tok_embeddings.weight,
@@ -386,7 +380,7 @@ class AFMoEModel(BaseModel):
                 b=cutoff_factor*lmh_std,
             ) # pyright: ignore[reportUnusedCallResult]
 
-    def _precompute_freqs_cis(self) -> torch.Tensor:
+    def _precompute_freqs_cis(self) -> tuple[torch.Tensor, torch.Tensor]:
         head_dim = self.model_args.head_dim if self.model_args.head_dim is not None else self.model_args.dim // self.model_args.n_heads
         return precompute_freqs_cis(
             head_dim,
@@ -433,8 +427,9 @@ class AFMoEModel(BaseModel):
         if self.model_args.mup_enabled:
             h = h * (self.model_args.dim**0.5)
 
+        freqs_cis = (self.freqs_cos, self.freqs_sin)
         for layer in self.layers.values():
-            h = layer(h, self.freqs_cis)
+            h = layer(h, freqs_cis)
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h
