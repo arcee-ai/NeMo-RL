@@ -49,7 +49,6 @@ class FlexAttention(torch.nn.Module):
     flex_attn: ClassVar[Callable] = torch.compile(
         flex_attention, mode="max-autotune-no-cudagraphs"
     )
-    compiled_create_block_mask: ClassVar[Callable] = torch.compile(create_block_mask)
     used_attn_mask_types: ClassVar[set[FLEX_ATTN_MASK_T]] = set()
     # Attention mask type to the created BlockMask.
     # This allows us to keep track the created block masks for each
@@ -228,7 +227,7 @@ class FlexAttention(torch.nn.Module):
                 )
 
             seq_len = batch.shape[1]
-            block_mask = FlexAttention.compiled_create_block_mask(
+            block_mask = create_block_mask(
                 mask_mod, batch_dimension, None, seq_len, seq_len
             )
             FlexAttention.block_masks[mask_key] = block_mask
