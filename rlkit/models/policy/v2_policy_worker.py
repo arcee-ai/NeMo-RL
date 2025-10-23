@@ -22,7 +22,6 @@ import re
 from typing import Any, Callable, Generator, Iterable, Optional, Set, Union, cast
 import logging
 
-from liger_kernel.transformers import LigerCrossEntropyLoss
 import ray
 import torch
 from accelerate import init_empty_weights
