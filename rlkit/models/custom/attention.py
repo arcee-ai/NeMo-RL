@@ -2,16 +2,14 @@
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
-# LICENSE_TORCHTITAN file in the root directory of this source tree.
+# LICENSE file in the root directory of this source tree.
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
-import functools
 from typing import Callable, ClassVar
 
 import torch
 import torch.nn.functional as F
-# from torch.distributed.tensor.experimental._attention import create_cp_block_mask
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
@@ -67,7 +65,7 @@ class FlexAttention(torch.nn.Module):
         self, attn_mask_type: str, fixed_block_size: int | None = None
     ) -> None:
         super().__init__()
-        if attn_mask_type not in ["causal", "block_causal", "sliding_causal"]:
+        if attn_mask_type not in ["causal", "block_causal", "causal_sliding_window", "block_causal_sliding_window"]:
             raise ValueError(f"Unrecognized attn_mask_type {attn_mask_type}.")
         self.attn_mask_type = attn_mask_type
         self.fixed_block_size = fixed_block_size
@@ -86,7 +84,7 @@ class FlexAttention(torch.nn.Module):
         scale: float | None = None,
     ) -> torch.Tensor:
         block_mask = FlexAttention.block_masks[self.mask_key]
-        return FlexAttention.flex_attn(q, k, v, block_mask=block_mask, scale=scale)
+        return FlexAttention.flex_attn(q, k, v, block_mask=block_mask)
 
     @staticmethod
     def _get_causal_mask_mod() -> _mask_mod_signature:
@@ -96,18 +94,17 @@ class FlexAttention(torch.nn.Module):
             return q_idx >= kv_idx
 
         return causal_mask
-
+    
     @staticmethod
-    def _get_sliding_causal_mask_mod(window: int) -> _mask_mod_signature:
-        if window is None or window <= 0:
-            raise ValueError("sliding window must be positive")
-
-        def sliding_causal_mask(
+    def _get_causal_sliding_window_mask_mod(sliding_window_size: int) -> _mask_mod_signature:
+        def causal_sliding_window_mask(
             b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
         ):
-            return (q_idx >= kv_idx) & (kv_idx >= (q_idx - window + 1))
+            causal_mask = q_idx >= kv_idx
+            window_mask = q_idx - kv_idx < sliding_window_size
+            return causal_mask & window_mask
 
-        return sliding_causal_mask
+        return causal_sliding_window_mask
 
     @staticmethod
     def _get_block_causal_mask_mod(
@@ -126,13 +123,32 @@ class FlexAttention(torch.nn.Module):
             return (seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)
 
         return block_causal_mask
+    
+    @staticmethod
+    def _get_block_causal_sliding_window_mask_mod(
+        batch: torch.Tensor, eos_id: int, sliding_window_size: int
+    ) -> _mask_mod_signature:
+        # batch is [b, s, h, d] shape
+        mask = batch == eos_id
+        mask[:, -1] = True
+        acc_mask = torch.cumsum(torch.where(mask, 1, 0), dim=1)
+        seq_idx = torch.zeros_like(acc_mask, dtype=torch.int32)
+        seq_idx[:, 1:] = acc_mask[:, :-1]
+
+        def block_causal_mask(
+            b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+        ):
+            window_mask = q_idx - kv_idx < sliding_window_size
+            return ((seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)) & window_mask
+
+        return block_causal_mask
 
     @staticmethod
     def _fixed_block_mask_mod(
         mask_mod: _mask_mod_signature, fixed_block_size: int
     ) -> _mask_mod_signature:
         """
-        Given an arbitrary mask_mod, divide the input sequence to blocks
+        Given an arbirary mask_mod, divide the input sequence to blocks
         and only allow attention within the same block.
 
         Args:
@@ -164,7 +180,7 @@ class FlexAttention(torch.nn.Module):
 
     @staticmethod
     @torch.no_grad()
-    def init_attention_mask(batch: torch.Tensor, eos_id: int | None) -> None:
+    def init_attention_mask(batch: torch.Tensor, eos_id: int | None, sliding_window_size: int | None = None) -> None:
         # batch is [b, s, h, d] shape
         for mask_key in FlexAttention.used_attn_mask_types:
             attn_mask_type, fixed_block_size = mask_key
@@ -183,15 +199,26 @@ class FlexAttention(torch.nn.Module):
                         )
                     batch_dimension = batch.shape[0]
                     mask_mod = FlexAttention._get_block_causal_mask_mod(batch, eos_id)
-                case "sliding_causal":
-                    if fixed_block_size is None or fixed_block_size <= 0:
+                case "causal_sliding_window":
+                    if FlexAttention.block_masks.get(mask_key, None) is not None:
+                        continue
+                    if sliding_window_size is None:
                         raise RuntimeError(
-                            "sliding_causal requires a positive fixed_block_size as window"
+                            "sliding_window_size must be provided for causal_sliding_window mask."
                         )
                     batch_dimension = 1
-                    mask_mod = FlexAttention._get_sliding_causal_mask_mod(
-                        fixed_block_size
-                    )
+                    mask_mod = FlexAttention._get_causal_sliding_window_mask_mod(sliding_window_size)
+                case "block_causal_sliding_window":
+                    if eos_id is None:
+                        raise RuntimeError(
+                            "eos_id must be provided for block_causal_sliding_window mask."
+                        )
+                    if sliding_window_size is None:
+                        raise RuntimeError(
+                            "sliding_window_size must be provided for causal_sliding_window mask."
+                        )
+                    batch_dimension = batch.shape[0]
+                    mask_mod = FlexAttention._get_block_causal_sliding_window_mask_mod(batch, eos_id, sliding_window_size)
                 case _:
                     raise RuntimeError(f"Shouldn't reach here. {attn_mask_type}")
 
@@ -246,9 +273,7 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 
 def build_attention(
-    use_flex_attn: bool,
-    attn_mask_type: str,
-    fixed_block_size: int | None = None,
+    use_flex_attn: bool, attn_mask_type: str, fixed_block_size: int | None = None
 ):
     if use_flex_attn:
         return FlexAttention(attn_mask_type, fixed_block_size)
@@ -264,19 +289,5 @@ def build_attention(
         return ScaledDotProductAttention(attn_mask_type)
 
 
-def init_attention_mask(
-    batch: torch.Tensor,
-    eos_id: int | None,
-    cp_mesh: torch.distributed.device_mesh.DeviceMesh | None = None,
-) -> None:
-
-    # This is not functional yet because we currently gate the use of Flex + CP
-    # while we continue debugging accuracy issues. However, we want to evaluate
-    # the user experience with CP enabled.
-    # TODO: get this working?
-    # if cp_mesh is not None:
-    #     FlexAttention.compiled_create_block_mask = functools.partial(
-    #         create_cp_block_mask, device_mesh=cp_mesh
-    #     )
-
-    FlexAttention.init_attention_mask(batch, eos_id)
+def init_attention_mask(batch: torch.Tensor, eos_id: int | None, sliding_window_size: int | None = None) -> None:
+    FlexAttention.init_attention_mask(batch, eos_id, sliding_window_size)
