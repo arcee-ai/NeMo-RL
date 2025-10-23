@@ -25,7 +25,8 @@ checkpointing:
   hf_checkpoint: true
 
 policy:
-  model_name: "Qwen/Qwen3-4B-Base"
+  # model_name: "Qwen/Qwen3-4B-Base"
+  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v2"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 384
@@ -71,7 +72,7 @@ policy:
       eps: 1e-5
     
 data:
-  dataset_name: "arcee-train/AFM-SFT-v0.1.7-32k-Qwen3-RLKit"
+  dataset_name: "arcee-train/AFMoE-SFT-v0.1.8-64k-RLKit"
   dataset_type: "native"
   on_disk: false
   shuffle: false

@@ -50,12 +50,11 @@ class FlexAttention(torch.nn.Module):
         flex_attention, mode="max-autotune-no-cudagraphs"
     )
     used_attn_mask_types: ClassVar[set[FLEX_ATTN_MASK_T]] = set()
-    # Attention mask type to the created BlockMask.
-    # This allows us to keep track the created block masks for each
-    # new batch. We will use this to update the block mask when a
-    # new batch is created. This also allows user to create different
-    # block masks for different layers.
+    # Attention mask type to the created BlockMask and its associated sequence sizes.
+    # This allows us to reuse compatible masks while regenerating masks when sequence
+    # lengths change between microbatches.
     block_masks: ClassVar[dict[FLEX_ATTN_MASK_T, BlockMask]] = {}
+    block_mask_sizes: ClassVar[dict[FLEX_ATTN_MASK_T, tuple[int, int]]] = {}
 
     # Instance variables.
     attn_mask_type: str
@@ -181,11 +180,15 @@ class FlexAttention(torch.nn.Module):
     @torch.no_grad()
     def init_attention_mask(batch: torch.Tensor, eos_id: int | None, sliding_window_size: int | None = None) -> None:
         # batch is [b, s, h, d] shape
+        seq_len = batch.shape[1]
         for mask_key in FlexAttention.used_attn_mask_types:
             attn_mask_type, fixed_block_size = mask_key
             match attn_mask_type:
                 case "causal":
-                    if FlexAttention.block_masks.get(mask_key, None) is not None:
+                    if (
+                        FlexAttention.block_masks.get(mask_key, None) is not None
+                        and FlexAttention.block_mask_sizes.get(mask_key) == (seq_len, seq_len)
+                    ):
                         continue
                     # We don't care about batch dimension --
                     # all samples have the same lower triangle mask.
@@ -199,7 +202,10 @@ class FlexAttention(torch.nn.Module):
                     batch_dimension = batch.shape[0]
                     mask_mod = FlexAttention._get_block_causal_mask_mod(batch, eos_id)
                 case "causal_sliding_window":
-                    if FlexAttention.block_masks.get(mask_key, None) is not None:
+                    if (
+                        FlexAttention.block_masks.get(mask_key, None) is not None
+                        and FlexAttention.block_mask_sizes.get(mask_key) == (seq_len, seq_len)
+                    ):
                         continue
                     if sliding_window_size is None:
                         raise RuntimeError(
@@ -226,11 +232,11 @@ class FlexAttention(torch.nn.Module):
                     mask_mod, fixed_block_size
                 )
 
-            seq_len = batch.shape[1]
             block_mask = create_block_mask(
                 mask_mod, batch_dimension, None, seq_len, seq_len
             )
             FlexAttention.block_masks[mask_key] = block_mask
+            FlexAttention.block_mask_sizes[mask_key] = (seq_len, seq_len)
 
 
 class ScaledDotProductAttention(torch.nn.Module):
