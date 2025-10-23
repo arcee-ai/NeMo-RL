@@ -722,7 +722,8 @@ class GRPOTrainer:
                         repeated_batch, rollout_metrics = await self._rollout_step(rollout_batch, timer)
                 
                 logging.info("Preparing for logprob inference...")
-                self._prepare_for_logprob_inference(timer)
+                if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
+                    self._prepare_for_logprob_inference(timer)
 
                 logging.info("Computing logprobs...")
                 await self._compute_logprobs(repeated_batch, timer)
@@ -992,16 +993,19 @@ class GRPOTrainer:
         timer: Timer,
     ) -> None:
         with timer.time("policy_and_reference_logprobs"):
-            fprop_logprobs = (await self.policy.get_logprobs(train_data))["logprobs"]
-            
-            if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
+            kl_coeff = self.master_config["loss_fn"]["reference_policy_kl_penalty"]
+            if kl_coeff == 0:
+                gen_lp = train_data["generation_logprobs"]
+                token_mask = train_data["token_mask"]
+                prev_logprobs = torch.where(token_mask.bool(), gen_lp, torch.zeros_like(gen_lp))
+                reference_logprobs = torch.zeros_like(prev_logprobs)
+            else:
+                prev_logprobs = (await self.policy.get_logprobs(train_data))["logprobs"]
                 reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
                 ]
-            else:
-                reference_logprobs = torch.zeros_like(fprop_logprobs)
             
-            train_data["prev_logprobs"] = fprop_logprobs
+            train_data["prev_logprobs"] = prev_logprobs
             train_data["reference_policy_logprobs"] = reference_logprobs
         
         return train_data
