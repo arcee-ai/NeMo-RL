@@ -348,7 +348,27 @@ class AFMoEModel(BaseModel):
         ``init_weights``. We only call it in the constructor of this
         ``Transformer`` root module to avoid reinitializing tensors.
         """
-        buffer_device = buffer_device or self.freqs_cos.device
+        if buffer_device is None:
+            # Prefer aligning buffers with parameter placement so distributed load/broadcast keeps everything on GPU.
+            param_device: torch.device | None = None
+            for param in self.parameters():
+                if param is None:
+                    continue
+                device = param.device
+                if device.type == "meta":
+                    continue
+                param_device = device
+                break
+            if param_device is None and torch.cuda.is_available():
+                param_device = torch.device(
+                    "cuda", torch.cuda.current_device()
+                )
+            if param_device is not None:
+                buffer_device = param_device
+        if not isinstance(buffer_device, torch.device):
+            buffer_device = torch.device(buffer_device or self.freqs_cos.device)
+        if buffer_device is None:
+            buffer_device = self.freqs_cos.device
         cutoff_factor = 3
         if self.model_args.mup_enabled:
             emb_std = 0.5 * (self.model_args.dim**-0.5)
