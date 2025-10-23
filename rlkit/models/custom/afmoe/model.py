@@ -312,7 +312,7 @@ class AFMoEModel(BaseModel):
 
     """
 
-    def __init__(self, model_args: AFMoEModelArgs):
+    def __init__(self, model_args: AFMoEModelArgs, skip_logits: bool = False):
         super().__init__(model_args)
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
@@ -329,6 +329,7 @@ class AFMoEModel(BaseModel):
         for layer_id in range(model_args.n_layers):
             self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
         self.norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
+        self.skip_logits = skip_logits
         self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
         self.init_weights()
 
@@ -432,5 +433,8 @@ class AFMoEModel(BaseModel):
             h = layer(h, freqs_cis)
 
         h = self.norm(h) if self.norm else h
-        output = self.output(h) if self.output else h
-        return output
+        if self.skip_logits:
+            return h
+        else:
+            output = self.output(h) if self.output else h
+            return output
