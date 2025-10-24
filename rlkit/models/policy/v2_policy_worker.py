@@ -1735,12 +1735,13 @@ class DTensorV2PolicyWorker:
     @wrap_with_nvtx_name("dtensor_policy_worker/prepare_for_training")
     def prepare_for_training(self, *args, **kwargs) -> None:
         # onload models and optimizer state to cuda
-        if not self.cpu_offload:
-            self.move_to_cuda(self.model)
-        else:
-            # when cpu offload is enabled, the buffers do not get moved
-            # to cuda automatically, so we need to do that manually
-            self.model = self.move_buffer_to_device(self.model, "cuda")
+        if not self.using_custom_model:
+            if not self.cpu_offload:
+                self.move_to_cuda(self.model)
+            else:
+                # when cpu offload is enabled, the buffers do not get moved
+                # to cuda automatically, so we need to do that manually
+                self.model = self.move_buffer_to_device(self.model, "cuda")
 
         self.model.train()
         # Move optimizer state to CUDA if it exists
