@@ -47,6 +47,7 @@ class PytorchOptimizerConfig(TypedDict):
     name: str
     scalar_optim: NotRequired[str | None]
     scalar_optim_kwargs: NotRequired[dict[str, Any] | None]
+    pass_device_mesh: NotRequired[bool | None]
     non_muon_params: NotRequired[list[str] | None]
     kwargs: dict[str, Any]
 

@@ -665,9 +665,17 @@ class DTensorV2PolicyWorker:
                 )
                 
                 # Create optimizer
-                self.optimizer = optimizer_cls(
-                    param_groups, **self.cfg["optimizer"]["kwargs"]
-                )
+                if self.cfg["optimizer"]["pass_device_mesh"]:
+                    self.optimizer = optimizer_cls(
+                        param_groups,
+                        self.device_mesh["dp"],
+                        **self.cfg["optimizer"]["kwargs"],
+                    )
+                else:
+                    self.optimizer = optimizer_cls(
+                        param_groups,
+                        **self.cfg["optimizer"]["kwargs"],
+                    )
             else:
                 if "muon" in self.cfg["optimizer"]["name"].lower():
                     raise ValueError("Please specify policy.optimizer.scalar_optim to use the Muon optimizer.")
@@ -1735,7 +1743,7 @@ class DTensorV2PolicyWorker:
     @wrap_with_nvtx_name("dtensor_policy_worker/prepare_for_training")
     def prepare_for_training(self, *args, **kwargs) -> None:
         # onload models and optimizer state to cuda
-        if not self.using_custom_model:
+        if not self.uses_custom_model:
             if not self.cpu_offload:
                 self.move_to_cuda(self.model)
             else:

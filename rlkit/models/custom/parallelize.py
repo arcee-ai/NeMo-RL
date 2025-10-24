@@ -249,7 +249,7 @@ def parallelize_model(
         apply_compile(model)
 
     dp_mesh: DeviceMesh | None = None
-    if dp_replicate > 1 or ep_size > 1:
+    if dp_replicate > 1 or ep_size > 1 or dp_shard > 1:
         # apply FSDP or HSDP, potentially with Context Parallel
         if dp_replicate > 1:
             dp_mesh_dim_names = ("dp_replicate", "dp_shard_cp")

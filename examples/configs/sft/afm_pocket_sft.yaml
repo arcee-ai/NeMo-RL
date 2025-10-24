@@ -9,7 +9,7 @@ sft:
   val_batches: 8
   val_global_batch_size: 8
   val_micro_batch_size: 1
-  val_at_start: false
+  val_at_start: true
   seed: 42
 
   use_cut_cross_entropy: true
@@ -26,7 +26,7 @@ checkpointing:
 
 policy:
   # model_name: "Qwen/Qwen3-4B-Base"
-  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v2"
+  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v3"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 384
@@ -44,6 +44,7 @@ policy:
     activation_checkpointing: true
     tensor_parallel_size: 1
     context_parallel_size: 1
+    expert_parallel_size: 1
     custom_parallel_plan: null
 
   dynamic_batching:
@@ -64,12 +65,14 @@ policy:
   max_grad_norm: 1.0
 
   optimizer:
-    name: "torchao.optim.AdamW8bit"
+    name: "dion.Muon"
+    scalar_optim: "adamw"
+    pass_device_mesh: true
     kwargs:
       lr: 5.0e-5
       weight_decay: 0.1
       betas: [0.9, 0.98]
-      eps: 1e-5
+      # eps: 1e-5
     
 data:
   dataset_name: "arcee-train/AFMoE-SFT-v0.1.8-64k-RLKit"
