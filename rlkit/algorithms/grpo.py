@@ -1099,6 +1099,40 @@ class GRPOTrainer:
         rollout_metrics: dict[str, Any],
         timer: Timer,
     ) -> None:
+        # # ========== DEBUG: Check prompts at JSONL creation ==========
+        # print("\n" + "=" * 80, flush=True)
+        # print("GRPO.PY DEBUG: JSONL Creation - Checking prompt structures", flush=True)
+        # print("=" * 80, flush=True)
+        
+        # single_turn_count = 0
+        # multi_turn_count = 0
+        
+        # for idx in range(min(10, len(repeated_batch["prompt"]))):  # Check first 10
+        #     prompt_structure = [m.get('role') for m in repeated_batch["prompt"][idx]]
+        #     completion_structure = [m.get('role') for m in repeated_batch["completion"][idx]]
+            
+        #     # Count user messages in prompt to determine if multi-turn
+        #     user_messages_in_prompt = sum(1 for role in prompt_structure if role == "user")
+        #     is_multi_turn = user_messages_in_prompt > 1
+            
+        #     if is_multi_turn:
+        #         multi_turn_count += 1
+        #     else:
+        #         single_turn_count += 1
+            
+        #     print(f"GRPO.PY DEBUG: Sample {idx}:", flush=True)
+        #     print(f"  Prompt structure: {prompt_structure} ({len(prompt_structure)} msgs)", flush=True)
+        #     print(f"  Completion structure: {completion_structure} ({len(completion_structure)} msgs)", flush=True)
+        #     print(f"  User messages in prompt: {user_messages_in_prompt}", flush=True)
+        #     print(f"  Multi-turn: {is_multi_turn}", flush=True)
+        #     print(f"  Reward: {repeated_batch['reward'][idx].item():.4f}", flush=True)
+        
+        # print(f"\nGRPO.PY DEBUG: Summary (first 10 samples):", flush=True)
+        # print(f"  Single-turn: {single_turn_count}", flush=True)
+        # print(f"  Multi-turn: {multi_turn_count}", flush=True)
+        # print("=" * 80 + "\n", flush=True)
+        # # ========== END DEBUG ==========
+        
         log_data = {"content": [prompt + completion for prompt, completion in zip(repeated_batch["prompt"], repeated_batch["completion"])]}
         log_data["rewards"] = repeated_batch["reward"].tolist()
         log_data["generation_logprobs"] = repeated_batch["generation_logprobs"].tolist()

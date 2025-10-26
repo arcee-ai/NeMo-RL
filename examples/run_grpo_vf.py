@@ -94,7 +94,10 @@ def setup_data(
     logging.info("Loading and processing verifiers environment dataset...")
     
     # Load the verifiers environment, just to get the dataset. This is not used for grading.
-    vf_env_local = vf.load_environment(env_config["vf"]["environment_name"])
+    vf_env_local = vf.load_environment(
+        env_config["vf"]["environment_name"],
+        **env_config["vf"].get("environment_config", {})
+    )
     
     # This same requirement is also in the environment worker.
     assert isinstance(vf_env_local, vf.MultiTurnEnv), "Verifiers environment must be a MultiTurnEnv or subclass"

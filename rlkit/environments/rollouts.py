@@ -83,6 +83,16 @@ def run_vf_rollouts(
     answer = input_batch["answer"]
     task = input_batch["task"]
 
+    # # ========== DEBUG: Log input structure ==========
+    # print("\n" + "=" * 80, flush=True)
+    # print("ROLLOUTS.PY DEBUG: Input batch structure", flush=True)
+    # print("=" * 80, flush=True)
+    # for idx in range(min(5, len(prompt))):
+    #     prompt_structure = [m.get('role') for m in prompt[idx]]
+    #     print(f"  Input prompt[{idx}]: {prompt_structure} ({len(prompt[idx])} msgs)", flush=True)
+    # print("=" * 80 + "\n", flush=True)
+    # # ========== END DEBUG ==========
+
     by_group = split_rollouts_by_group(prompt, answer, info, task, grpo_gids)
 
     # Convert input batch to verifiers input format
@@ -198,6 +208,35 @@ def run_vf_rollouts(
             current_batch["completion"][orig_idx].extend(log)
             current_batch["reward"][orig_idx] = rollouts.reward[i]
             
+            # ========== DEBUG FIX: Update prompt from rollouts for wrapper envs that modify prompts ==========
+            # Get BEFORE structure for logging (keep for future debugging)
+            before_prompt_structure = [m.get('role') for m in current_batch["prompt"][orig_idx]]
+
+            # FIX: Update prompt from rollouts if available (for wrapper envs that modify prompts)
+            if hasattr(rollouts, 'prompt') and i < len(rollouts.prompt):
+                # Get AFTER structure for comparison
+                after_prompt_structure = [m.get('role') for m in rollouts.prompt[i]]
+                
+                # Check if structure changed (reprompting occurred)
+                structure_changed = before_prompt_structure != after_prompt_structure
+                
+                # if structure_changed:
+                #     # Count user messages to determine multi-turn
+                #     user_count_before = sum(1 for role in before_prompt_structure if role == "user")
+                #     user_count_after = sum(1 for role in after_prompt_structure if role == "user")
+                #     
+                #     print(f"ROLLOUTS.PY DEBUG: Updating prompt[{orig_idx}]", flush=True)
+                #     print(f"  BEFORE: {before_prompt_structure} (User msgs: {user_count_before})", flush=True)
+                #     print(f"  AFTER:  {after_prompt_structure} (User msgs: {user_count_after})", flush=True)
+                #     print(f"  Reward: {rollouts.reward[i]:.4f}", flush=True)
+                #     print(f"  Multi-turn: {user_count_after > 1}", flush=True)
+                
+                # Perform the update
+                current_batch["prompt"][orig_idx] = rollouts.prompt[i]
+            # else:
+            #     print(f"ROLLOUTS.PY DEBUG: NOT updating prompt[{orig_idx}] - hasattr={hasattr(rollouts, 'prompt')}, len check={i < len(rollouts.prompt) if hasattr(rollouts, 'prompt') else 'N/A'}", flush=True)
+            # ========== END DEBUG FIX ==========
+            
             # Store the task name for this sample
             per_sample_tasks[orig_idx] = list(by_group.values())[g_i][i][3]
             
@@ -205,6 +244,35 @@ def run_vf_rollouts(
             for key, value_list in rollouts.metrics.items():
                 if isinstance(value_list, list) and len(value_list) > i:
                     per_sample_env_metrics[orig_idx][key] = float(value_list[i])
+
+    # # ========== DEBUG: Log output structure before returning ==========
+    # print("\n" + "=" * 80, flush=True)
+    # print("ROLLOUTS.PY DEBUG: Output batch structure (after updates)", flush=True)
+    # print("=" * 80, flush=True)
+    
+    # single_turn = 0
+    # multi_turn = 0
+    
+    # for idx in range(min(10, len(current_batch["prompt"]))):
+    #     prompt_structure = [m.get('role') for m in current_batch["prompt"][idx]]
+    #     completion_structure = [m.get('role') for m in current_batch["completion"][idx]]
+    #     user_count = sum(1 for role in prompt_structure if role == "user")
+    #     is_multi = user_count > 1
+        
+    #     if is_multi:
+    #         multi_turn += 1
+    #     else:
+    #         single_turn += 1
+        
+    #     print(f"  Output prompt[{idx}]: {prompt_structure} ({len(current_batch['prompt'][idx])} msgs, {user_count} user)", flush=True)
+    #     print(f"  Output completion[{idx}]: {completion_structure} ({len(current_batch['completion'][idx])} msgs)", flush=True)
+    #     print(f"  Multi-turn: {is_multi}, Reward: {current_batch['reward'][idx]:.4f}", flush=True)
+    
+    # print(f"\nROLLOUTS.PY DEBUG: Summary (first 10 samples):", flush=True)
+    # print(f"  Single-turn: {single_turn}", flush=True)
+    # print(f"  Multi-turn: {multi_turn}", flush=True)
+    # print("=" * 80 + "\n", flush=True)
+    # # ========== END DEBUG ==========
 
     current_batch["reward"] = torch.tensor(current_batch["reward"])
 
