@@ -36,6 +36,7 @@ from torch.distributed.fsdp import (
     FSDPModule,
 )
 from torch.distributed.tensor import DTensor, Shard
+from torch.distributed._tensor import distribute_tensor
 from torch.distributed.tensor.experimental import context_parallel
 from torch.distributed.tensor.experimental._attention import (
     set_rotate_method,
@@ -1990,6 +1991,8 @@ class DTensorV2PolicyWorker:
             scheduler=self.scheduler if optimizer_path else None,
             optimizer_path=optimizer_path,
         )
+        if optimizer_path and self.optimizer is not None:
+            self._reshard_optimizer_state()
     
     def _load_optim_checkpoint(self, optimizer_path: str) -> None:
         """Manually loads a non-sharded optimizer checkpoint. Used for HF checkpoints."""
@@ -2010,10 +2013,43 @@ class DTensorV2PolicyWorker:
         optimizer_state = optimizer_payload.get("optimizer", optimizer_payload)
         
         self.optimizer.load_state_dict(optimizer_state)
+        self._reshard_optimizer_state()
         
         if self.scheduler is not None:
             scheduler_state = optimizer_payload.get("scheduler", optimizer_payload)
             self.scheduler.load_state_dict(scheduler_state)
+
+    def _reshard_optimizer_state(self) -> None:
+        """Restore DTensor layout for optimizer states associated with DTensor parameters."""
+        if self.optimizer is None:
+            return
+
+        for group in self.optimizer.param_groups:
+            for param in group.get("params", []):
+                if not isinstance(param, DTensor):
+                    continue
+
+                state = self.optimizer.state.get(param)
+                if not state:
+                    continue
+
+                mesh = param.device_mesh
+                placements = param.placements
+
+                for key, buf in list(state.items()):
+                    if isinstance(buf, DTensor):
+                        continue
+                    if not isinstance(buf, torch.Tensor):
+                        continue
+                    if buf.dim() == 0:
+                        continue
+                    if buf.shape != param.shape:
+                        continue
+                    state[key] = distribute_tensor(
+                        buf.detach(),
+                        device_mesh=mesh,
+                        placements=placements,
+                    )
 
     def shutdown(self) -> None:
         """Shutdown the policy."""
