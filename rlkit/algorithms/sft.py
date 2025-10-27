@@ -483,8 +483,16 @@ class SFTTrainer:
                     "grad_norm": self._to_scalar_array(train_results["grad_norm"]),
                 }
                 metrics.update(train_results["all_mb_metrics"])
+                mean_reduction_keys = {
+                    "lr",
+                    "wd",
+                    "global_valid_seqs",
+                    "global_valid_toks",
+                    "avg_pad_tokens_per_sequence",
+                    "packing_efficiency",
+                }
                 for k, v in metrics.items():
-                    if k in {"lr", "wd", "global_valid_seqs", "global_valid_toks"}:
+                    if k in mean_reduction_keys:
                         metrics[k] = np.mean(v).item()
                     else:
                         metrics[k] = np.sum(v).item()

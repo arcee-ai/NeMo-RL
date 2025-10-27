@@ -930,33 +930,24 @@ class GRPOTrainer:
             "total_num_tokens": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
         }
         metrics.update(train_results["all_mb_metrics"])
+        mean_reduction_keys = {
+            "lr",
+            "wd",
+            "reward",
+            "global_valid_seqs",
+            "global_valid_toks",
+            "mean_prompt_length",
+            "avg_pad_tokens_per_sequence",
+            "packing_efficiency",
+        }
         for key, value in list(metrics.items()):
-            if key in {
-                "lr",
-                "wd",
-                "reward",
-                "global_valid_seqs",
-                "global_valid_toks",
-                "mean_prompt_length",
-            }:
+            if key in mean_reduction_keys:
                 metrics[key] = np.mean(value).item()
             else:
                 metrics[key] = np.sum(value).item()
         metrics.update(rollout_metrics)
 
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore[assignment]
-        # if metrics.get("token_mult_prob_error", 0) > 1.05:
-        #     self.logger.log_plot_token_mult_prob_error(
-        #         {
-        #             "full_lengths": [len(token_ids.tolist()) for token_ids in repeated_batch["input_ids"]],
-        #             "generation_logprobs": repeated_batch["generation_logprobs"],
-        #             "token_mask": repeated_batch["token_mask"],
-        #             "sample_mask": repeated_batch["sample_mask"],
-        #             "prompt_lengths": repeated_batch["input_lengths"]
-        #         },
-        #         step + 1,
-        #         name="train/token_mult_prob_error_plot_sample",
-        #     )
         
         print("\n📊 Training Results:\n")
         print(f"  • Loss: {metrics['loss']:.4f}\n")

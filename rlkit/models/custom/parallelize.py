@@ -249,7 +249,7 @@ def parallelize_model(
         apply_compile(model)
 
     dp_mesh: DeviceMesh | None = None
-    if dp_replicate > 1 or ep_size > 1 or dp_shard > 1:
+    if dp_replicate > 1 or ep_size > 1:
         # apply FSDP or HSDP, potentially with Context Parallel
         if dp_replicate > 1:
             dp_mesh_dim_names = ("dp_replicate", "dp_shard_cp")
@@ -494,9 +494,19 @@ def apply_fsdp(
 
     # As an optimization, do not reshard_after_forward the last layers by default
     # since FSDP would prefetch them immediately after the forward pass
-    if model.norm is not None and model.output is not None:
+    skip_output = getattr(model, "skip_logits", False)
+    final_modules: list[nn.Module] = []
+    if model.norm is not None:
+        final_modules.append(model.norm)
+    if model.output is not None and not skip_output:
+        final_modules.append(model.output)
+
+    if final_modules:
+        target = (
+            final_modules[0] if len(final_modules) == 1 else final_modules
+        )
         fully_shard(
-            [model.norm, model.output],
+            target,
             **fsdp_config,
             reshard_after_forward=reshard_after_forward_policy == "always",
         )
@@ -529,15 +539,15 @@ def apply_fsdp(
                 )
         elif model.norm is not None and model.output is not None:
             transformer_block.set_modules_to_forward_prefetch(
-                [model.norm, model.output]
+                final_modules
             )
 
     # backward
     reversed_transformer_blocks = list(reversed(model.layers.values()))
     prev_transformer_blocks = reversed_transformer_blocks[1:] + [None]
 
-    if model.norm is not None and model.output is not None and model.layers is not None:
-        model.output.set_modules_to_backward_prefetch([reversed_transformer_blocks[0]])
+    if final_modules and model.layers is not None:
+        final_modules[0].set_modules_to_backward_prefetch([reversed_transformer_blocks[0]])
 
     for transformer_block, prev_transformer_block in zip(
         reversed_transformer_blocks, prev_transformer_blocks

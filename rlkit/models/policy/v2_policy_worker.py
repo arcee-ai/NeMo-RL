@@ -957,6 +957,13 @@ class DTensorV2PolicyWorker:
 
             losses = []
             all_mb_metrics = []
+            track_packing_stats = (
+                self.cfg["dynamic_batching"]["enabled"] or self.enable_seq_packing
+            )
+            total_pad_tokens = 0
+            total_capacity_tokens = 0
+            total_sequences_seen = 0
+            tracked_microbatches = 0
             for gb_idx in range(num_global_batches):
                 global_batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
 
@@ -1071,11 +1078,14 @@ class DTensorV2PolicyWorker:
                             mask = token_mask * sample_mask.unsqueeze(-1)
                             
                             from cut_cross_entropy import linear_cross_entropy
+                            output_weight = self.model.output.weight
+                            if isinstance(output_weight, DTensor):
+                                output_weight = output_weight.full_tensor()
                             hidden = self.model(input_ids)
                             token_loss = linear_cross_entropy(
                                 # Returns final hidden state
                                 hidden,
-                                self.model.output.weight,
+                                output_weight,
                                 mb["input_ids"],
                                 ignore_index=self.tokenizer.eos_token_id,
                                 shift=True,
@@ -1196,6 +1206,19 @@ class DTensorV2PolicyWorker:
 
                     # skip the update for dummy batches
                     if mb_idx < iterator_len:
+                        if track_packing_stats and "input_lengths" in mb:
+                            input_lengths_tensor = mb["input_lengths"]
+                            if not torch.is_tensor(input_lengths_tensor):
+                                input_lengths_tensor = torch.as_tensor(
+                                    input_lengths_tensor, device="cpu"
+                                )
+                            actual_tokens = int(input_lengths_tensor.sum().item())
+                            capacity_tokens = int(input_ids.shape[0] * input_ids.shape[1])
+                            pad_tokens = max(0, capacity_tokens - actual_tokens)
+                            total_pad_tokens += pad_tokens
+                            total_capacity_tokens += capacity_tokens
+                            total_sequences_seen += int(input_lengths_tensor.numel())
+                            tracked_microbatches += 1
                         ## scale by the number of global batches so we get the correct
                         ## value when summing metrics across all microbatches
                         for k in loss_metrics.keys():
@@ -1264,6 +1287,25 @@ class DTensorV2PolicyWorker:
                 for k, v in m.items():
                     mb_metrics[k].append(v)
 
+            avg_pad_tokens_per_sequence: Optional[float] = None
+            packing_efficiency: Optional[float] = None
+            if track_packing_stats and total_sequences_seen > 0:
+                avg_pad_tokens_per_sequence = total_pad_tokens / total_sequences_seen
+                mb_metrics["avg_pad_tokens_per_sequence"].append(
+                    avg_pad_tokens_per_sequence
+                )
+                mb_metrics["total_pad_tokens"].append(total_pad_tokens)
+                mb_metrics["total_capacity_tokens"].append(total_capacity_tokens)
+                mb_metrics["packing_tracked_microbatches"].append(
+                    tracked_microbatches
+                )
+                if total_capacity_tokens > 0:
+                    packing_efficiency = (
+                        (total_capacity_tokens - total_pad_tokens)
+                        / total_capacity_tokens
+                    )
+                    mb_metrics["packing_efficiency"].append(packing_efficiency)
+
             metrics = {
                 "global_loss": global_loss.cpu(),
                 "grad_norm": grad_norm,
@@ -1272,6 +1314,13 @@ class DTensorV2PolicyWorker:
                 "model_dtype": self.dtype,
                 "all_mb_metrics": dict(mb_metrics)
             }
+
+            if avg_pad_tokens_per_sequence is not None:
+                metrics["avg_pad_tokens_per_sequence"] = avg_pad_tokens_per_sequence
+            if packing_efficiency is not None:
+                metrics["packing_efficiency"] = packing_efficiency
+            if tracked_microbatches > 0:
+                metrics["packing_tracked_microbatches"] = tracked_microbatches
 
             return metrics
 

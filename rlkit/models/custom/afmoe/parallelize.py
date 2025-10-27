@@ -27,7 +27,8 @@ def parallelize_afmoe(
         pp_size=pp_mesh.size(),
         dp_replicate=1,
         dp_shard=mesh["dp_shard_mod_ep"].size() * mesh["dp_shard_in_ep"].size(),
-        model_compile_enabled=True,
+        # We use fused/compiled kernels for output and attention, so we do eager for everything else to avoid headaches.
+        model_compile_enabled=False,
         param_dtype=param_dtype,
         reduce_dtype=torch.float32,
         enable_cpu_offload=cpu_offload,
