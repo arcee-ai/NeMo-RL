@@ -251,10 +251,10 @@ class SFTTrainer:
                 train_data["input_lengths"][i] = torch.tensor(max_seq_len)
                 continue
             
-            if len(input_ids) > max_batch_len:
+            if len(input_ids) > max_seq_len:
                 # This sample is too long, so we truncate it
-                input_ids = input_ids[:max_batch_len]
-                token_mask = token_mask[:max_batch_len]
+                input_ids = input_ids[:max_seq_len]
+                token_mask = token_mask[:max_seq_len]
                 truncated += 1
             
             train_data["input_ids"][i] = _pad_tensor(torch.tensor(input_ids), max_batch_len, "right", pad_value=self.tokenizer.pad_token_id)
