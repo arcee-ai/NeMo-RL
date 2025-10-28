@@ -17,12 +17,12 @@ sft:
 checkpointing:
   enabled: true
   checkpoint_dir: "results/sft"
-  metric_name: "val_loss" ## set to null to save most recent k checkpoints
+  metric_name: null
   higher_is_better: false
   keep_top_k: 3
   save_period: 10
   checkpoint_must_save_by: null
-  hf_checkpoint: true
+  hf_checkpoint: false
 
 policy:
   # model_name: "Qwen/Qwen3-4B-Base"
