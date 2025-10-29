@@ -50,7 +50,7 @@ dependencies = [
     "vf-exts",
     "flash-attn==2.7.4.post1",
     "vllm>=0.10.0",
-    "dion @ https://github.com/microsoft/dion.git",
+    "dion @ https://github.com/samsja/dion.git",
     "cut-cross-entropy @ git+https://github.com/apple/ml-cross-entropy.git"
 ]
 
