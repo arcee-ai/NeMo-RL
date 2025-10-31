@@ -907,7 +907,9 @@ class RayWorkerGroup:
                 self.get_all_worker_results, future_bundle
             )
 
-        all_results = await asyncio.gather(*future_bundle.futures)
+        # Use ray.get() instead of asyncio.gather() to avoid sequential await blocking
+        # Ray's async implementation can block sequentially even when futures are ready
+        all_results = ray.get(list(future_bundle.futures))
         return self._select_results_from_future_bundle(
             future_bundle=future_bundle, all_results=all_results
         )
