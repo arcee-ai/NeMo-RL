@@ -143,6 +143,14 @@ class GRPOTrainer:
         if val_dataset is not None:
             val_dataset = self._filter_dataset_by_prompt_length(val_dataset, grpo_config, policy_config)
         
+        # Ensure 'task' field exists in datasets (required by run_vf_rollouts)
+        # Use the environment's env_id as the task name for metrics tracking
+        env_task_name = getattr(env, "env_id", "default")
+        if "task" not in dataset.column_names:
+            dataset = dataset.map(lambda x: {"task": env_task_name})
+        if val_dataset is not None and "task" not in val_dataset.column_names:
+            val_dataset = val_dataset.map(lambda x: {"task": env_task_name})
+        
         dataloader, val_dataloader = self._setup_dataloaders(
             dataset,
             val_dataset,
