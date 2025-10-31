@@ -352,10 +352,11 @@ class WandbLogger(LoggerInterface):
                 
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
-                    message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;")
-                                        
                     if message["role"] == "tool":
                         continue
+                    
+                    message_content = message.get("content") or ""
+                    message_fixed = message_content.replace("<", "&lt;").replace(">", "&gt;")
                     
                     content += f"<div><b>[{message['role']}]:</b><pre>{message_fixed}</pre></div>"
                 
