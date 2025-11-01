@@ -343,7 +343,7 @@ class Qwen3Model(BaseModel):
 
     """
 
-    def __init__(self, model_args: Qwen3ModelArgs, skip_logits: bool = False):
+    def __init__(self, model_args: Qwen3ModelArgs):
         super().__init__(model_args)
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
@@ -362,7 +362,6 @@ class Qwen3Model(BaseModel):
             self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
         self.norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
 
-        self.skip_logits = skip_logits
         self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
 
         self.init_weights()
@@ -442,9 +441,5 @@ class Qwen3Model(BaseModel):
             h = layer(h, self.rope_cache)
 
         h = self.norm(h) if self.norm else h
-        
-        if self.skip_logits:
-            return h
-        else:
-            output = self.output(h) if self.output else h
-            return output
+        output = self.output(h) if self.output else h
+        return output

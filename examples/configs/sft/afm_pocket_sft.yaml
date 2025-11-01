@@ -12,8 +12,6 @@ sft:
   val_at_start: true
   seed: 42
 
-  use_cut_cross_entropy: true
-
 checkpointing:
   enabled: true
   checkpoint_dir: "results/sft"
@@ -29,8 +27,8 @@ policy:
   model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v3"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 384
-  train_micro_batch_size: 48
+  train_global_batch_size: 256
+  train_micro_batch_size: 16
   max_total_sequence_length: 1024
   precision: "bfloat16"
 

@@ -1,6 +1,6 @@
 from .rl import RLConfig, GRPOMasterConfig
 from .rl.policy import PolicyConfig, TokenizerConfig
-from .rl.loss import ClippedPGLossConfig
+from .rl.loss import ClippedPGLossConfig, CISPOLossConfig
 from .data import DataConfig
 from .rl.grpo import GRPOConfig, GRPOLoggerConfig
 from .logging import LoggerConfig
@@ -23,6 +23,7 @@ __all__ = [
     "PolicyConfig",
     "TokenizerConfig",
     "ClippedPGLossConfig",
+    "CISPOLossConfig",
     "DataConfig",
     "GRPOConfig",
     "GRPOLoggerConfig",

@@ -83,6 +83,9 @@ class SFTTrainer:
         self.val_dataset = val_dataset
         
         policy_config = self.master_config["policy"]
+        sft_config = self.master_config["sft"]
+        data_config = self.master_config["data"]
+        logger_config = self.master_config["logger"]
         cluster_config = self.master_config["cluster"]
 
         set_seed(master_config["sft"]["seed"])
@@ -206,10 +209,6 @@ class SFTTrainer:
         weights_path: Optional[Path],
         optimizer_path: Optional[Path]
     ) -> Policy:
-        use_cce = self.master_config["sft"].get("use_cut_cross_entropy", False)
-        if use_cce:
-            logging.info("Using cut cross-entropy loss kernel")
-        
         return Policy(
             cluster=train_cluster,
             config=policy_config,
@@ -219,7 +218,6 @@ class SFTTrainer:
             init_optimizer=True,
             init_reference_model=False,
             use_hf_checkpoint=self.use_hf_checkpoint,
-            use_cut_cross_entropy=use_cce,
         )
 
     def _process_batch(self, batch: BatchedDataDict) -> BatchedDataDict:
@@ -235,22 +233,11 @@ class SFTTrainer:
         
         truncated = 0
         
-        if self.master_config["sft"].get("run_vram_torture_test", False):
-            logging.warning("Filling batch with BOS token to test VRAM usage. Do not use this for training!")
-        
         for i, (input_ids, token_mask, sample_mask) in enumerate(zip(
             batch["input_ids"],
             batch["token_mask"],
             batch["sample_mask"]
         )):
-            # Run VRAM torture test by filling the batch with BOS tokens (or whatever the first token in a sequence is).
-            if self.master_config["sft"].get("run_vram_torture_test", False):
-                train_data["input_ids"][i] = torch.tensor([input_ids[0]] * max_seq_len)
-                train_data["token_mask"][i] = torch.ones_like(train_data["input_ids"][i])
-                train_data["sample_mask"][i] = torch.tensor(1.0)
-                train_data["input_lengths"][i] = torch.tensor(max_seq_len)
-                continue
-            
             if len(input_ids) > max_batch_len:
                 # This sample is too long, so we truncate it
                 input_ids = input_ids[:max_batch_len]
@@ -267,7 +254,7 @@ class SFTTrainer:
         
         return BatchedDataDict({k: torch.stack(v) for k, v in train_data.items()})
 
-    async def validate(self, step: int) -> Optional[tuple[dict[str, float], dict[str, float]]]:
+    def validate(self, step: int) -> Optional[tuple[dict[str, float], dict[str, float]]]:
         """Run validation on the validation dataset."""
         if self.val_dataloader is None:
             logging.info("No validation dataloader provided, skipping validation")
@@ -288,7 +275,7 @@ class SFTTrainer:
                 
                 val_data = self._process_batch(val_batch)
 
-                val_results = await self.policy.train(
+                val_results = self.policy.train(
                     val_data,
                     self.loss_fn,
                     eval_mode=True,
@@ -354,7 +341,7 @@ class SFTTrainer:
 
         if val_at_start and total_steps == 0:
             print("\n🔍 Running initial validation...")
-            validation_result = await self.validate(step=0)
+            validation_result = self.validate(step=0)
             if validation_result is not None:
                 val_metrics, validation_timings = validation_result
                 self.logger.log_metrics(val_metrics, total_steps, prefix="validation")
@@ -400,7 +387,7 @@ class SFTTrainer:
 
                     if val_period > 0 and (total_steps + 1) % val_period == 0:
                         logging.info("Running validation...")
-                        validation_result = await self.validate(step=total_steps + 1)
+                        validation_result = self.validate(step=total_steps + 1)
                         if validation_result is not None:
                             val_metrics, validation_timings = validation_result
                             self.logger.log_metrics(
@@ -530,10 +517,9 @@ class SFTTrainer:
                 metrics["train_fp_utilization"] = (
                     total_tflops / theoretical_tflops
                 )
-            total_valid_toks = train_results["all_mb_metrics"]["global_valid_toks"][0]
+            total_valid_toks = sum(train_results["all_mb_metrics"]["global_valid_toks"])
             print(f"  • Total valid tokens: {total_valid_toks}")
-            print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks']):.0f}")
-            print(f"  • Estimated throughput: {total_valid_toks / timing_metrics['policy_training']:.2f} tok/s")
+            print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks'])}")
             
         print("\n⏱️  Timing:")
         total_time = timing_metrics.get("total_step_time", 0)

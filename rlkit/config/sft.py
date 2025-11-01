@@ -16,9 +16,6 @@ class SFTConfig(TypedDict):
     val_micro_batch_size: int
     val_at_start: bool
     seed: int
-    
-    run_vram_torture_test: bool  # Ignore prompts and run all training on a full context window of nonsense.
-    use_cut_cross_entropy: bool  # Use cut-cross-entropy loss kernel
 
 
 class SFTMasterConfig(TypedDict):

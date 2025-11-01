@@ -20,7 +20,7 @@ requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
     "setuptools",
-    "ninja",  # for flash-attn parallel build
+    "ninja", # for flash-attn parallel build
     "torch==2.7.1",
     "triton",
     "colored==2.2.3",
@@ -51,7 +51,7 @@ dependencies = [
     "flash-attn==2.7.4.post1",
     "vllm>=0.10.0",
     "dion @ https://github.com/microsoft/dion.git",
-    "cut-cross-entropy @ git+https://github.com/apple/ml-cross-entropy.git"
+    "liger-kernel>=0.6.2",
 ]
 
 [project.optional-dependencies]

@@ -77,6 +77,7 @@ class PolicyConfig(TypedDict):
     dynamic_batching: DynamicBatchingConfig
     make_sequence_length_divisible_by: int
     max_total_sequence_length: int
+    use_liger_kernels: NotRequired[bool]
     logprob_batch_size: NotRequired[int | None]
     logprob_chunk_size: NotRequired[int | None]
     generation: NotRequired[GenerationConfig | None]

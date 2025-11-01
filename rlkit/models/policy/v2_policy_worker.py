@@ -48,7 +48,6 @@ from transformers import (
 )
 from rlkit.algorithms.interfaces import LossFunction, LossType
 from rlkit.algorithms.loss_functions import SequencePackingLossWrapper
-from rlkit.algorithms.utils import masked_mean
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.models.dtensor.parallelize import (
     _parallelize_model,
@@ -84,6 +83,16 @@ from rlkit.utils.nsys import wrap_with_nvtx_name
 
 from rlkit.models.custom.convert import get_model_config
 from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
+
+
+def is_liger_available() -> bool:
+    """Check if Liger kernels are available.
+    
+    Returns:
+        True if liger_kernel package is installed, False otherwise.
+    """
+    from importlib.util import find_spec
+    return find_spec("liger_kernel") is not None
 
 
 @contextmanager
@@ -293,11 +302,9 @@ class DTensorV2PolicyWorker:
         init_optimizer: bool = True,
         init_reference_model: bool = True,
         use_hf_checkpoint: bool = False,
-        use_cut_cross_entropy: bool = False,
         **kwargs: Any,
     ):
         self.use_hf_checkpoint = use_hf_checkpoint
-        self.use_cut_cross_entropy = use_cut_cross_entropy
         self.is_generation_colocated = None
         if "generation" in config and config["generation"] is not None:
             self.is_generation_colocated = config["generation"]["colocated"]["enabled"]
@@ -391,7 +398,6 @@ class DTensorV2PolicyWorker:
         self.uses_custom_model = custom_model_setup is not None
         self.adapter: Optional[BaseStateDictAdapter]
         self.adapter = None
-        self.model_class: Optional[type[nn.Module]] = None
         self._custom_parallelize_function: Optional[Callable] = None
 
         full_state_dict = None
@@ -400,7 +406,6 @@ class DTensorV2PolicyWorker:
             custom_model_class, model_args, adapter_class, model_parallelize_function = (
                 custom_model_setup  # type: ignore[arg-type]
             )
-            self.custom_model_args = model_args
             self.adapter = adapter_class(
                 model_args=model_args, hf_assets_path=model_name
             )
@@ -425,10 +430,22 @@ class DTensorV2PolicyWorker:
 
             print("Initializing custom model on meta device...")
             with init_empty_weights():
-                self.model = custom_model_class(model_args=model_args, skip_logits=self.use_cut_cross_entropy)
+                self.model = custom_model_class(model_args=model_args)
         else:
             logging.info(f"Using HuggingFace implementation for {model_name}")
-            assert not self.use_cut_cross_entropy, "Cut cross-entropy loss kernel is not supported with HuggingFace models"
+            
+            # Determine if we should use Liger kernels
+            use_liger = self.cfg.get("use_liger_kernels", False)
+            liger_available = is_liger_available()
+            
+            if use_liger and liger_available:
+                logging.info(f"Using Liger kernels for {model_name}")
+            elif use_liger and not liger_available:
+                logging.warning(
+                    "Liger kernels requested but not available. "
+                    "Install with: pip install 'rlkit[liger]' or pip install liger-kernel>=0.5.10"
+                )
+            
             if self._is_reward_model:
                 rm_cfg = self.cfg.get("reward_model_cfg", {})
                 rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
@@ -442,7 +459,12 @@ class DTensorV2PolicyWorker:
                 else:
                     raise ValueError(f"Unknown reward model type: {rm_type}")
             else:
-                model_class = AutoModelForCausalLM
+                # Use Liger kernels if available and requested
+                if use_liger and liger_available:
+                    from liger_kernel.transformers import AutoLigerKernelForCausalLM
+                    model_class = AutoLigerKernelForCausalLM
+                else:
+                    model_class = AutoModelForCausalLM
 
             if self.rank == 0:
                 print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
@@ -604,18 +626,13 @@ class DTensorV2PolicyWorker:
         if not self.uses_custom_model:
             self._tie_word_embeddings_if_needed()
 
-        if init_reference_model:
-            if self.use_hf_checkpoint and weights_path:
-                self.reference_model_state_dict = self._load_reference_full_state_dict(
-                    model_name=model_name
-                )
-            else:
-                self.reference_model_state_dict = get_cpu_state_dict(
-                    self.model.state_dict().items(), pin_memory=True
-                )
-
         if self.cpu_offload:
             self.model = self.move_to_device(self.model, "cpu")
+
+        if init_reference_model:
+            self.reference_model_state_dict = get_cpu_state_dict(
+                self.model.state_dict().items(), pin_memory=True
+            )
 
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
@@ -734,43 +751,6 @@ class DTensorV2PolicyWorker:
             None
         )
         self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
-
-    def _load_reference_full_state_dict(
-        self,
-        *,
-        model_name: str,
-    ) -> Optional[dict[str, Any]]:
-        """Load the base Hugging Face weights used to seed the reference policy."""
-        logging.info("Loading reference policy weights from %s", model_name)
-
-        if self.uses_custom_model:
-            assert (
-                self.adapter is not None
-            ), "Adapter must be initialized for custom model reference loading."
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="cpu",
-                trust_remote_code=True,
-                config=self.model_config,
-            )
-            state_dict = self.adapter.from_hf(model.state_dict())
-            del model
-        else:
-            assert (
-                self.model_class is not None
-            ), "Model class must be set when using Hugging Face implementations."
-            model = self.model_class.from_pretrained(
-                model_name,
-                device_map="cpu",
-                trust_remote_code=True,
-                config=self.model_config,
-            )
-            state_dict = model.state_dict()
-            del model
-
-        gc.collect()
-
-        return state_dict
 
     def _tie_word_embeddings_if_needed(self) -> None:
         if not hasattr(self.model, "lm_head"):
@@ -1060,163 +1040,128 @@ class DTensorV2PolicyWorker:
                                 seq_len, device=input_ids.device
                             ).repeat(batch_size, 1)
                             flash_attn_kwargs = {}
-                    
-                    if self.use_cut_cross_entropy:
-                        assert self.cp_size == 1, "Liger's cross-entropy loss kernel is not supported with context parallel"
-                        assert not self.enable_seq_packing, "Liger's cross-entropy loss kernel is not supported with sequence packing"
-                        
+
+                    context_parallel_ctx = None
+                    if self.cp_size > 1:
+                        seq_index = torch.arange(
+                            seq_len, device=input_ids.device
+                        ).repeat(1, 1)
+                        cp_buffers = (
+                            [input_ids, position_ids, seq_index]
+                            if self.cp_size > 1
+                            else []
+                        )
+
+                        # Create context parallel context
+                        context_parallel_ctx = self.create_context_parallel_ctx(
+                            cp_mesh=self.cp_mesh,
+                            cp_buffers=cp_buffers,
+                            cp_seq_dims=[sequence_dim] * len(cp_buffers),
+                            cp_no_restore_buffers=set(cp_buffers),
+                        )
+
+                    with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                         with torch.autocast(device_type="cuda", dtype=self.dtype):
-                            token_mask = mb["token_mask"][:, 1:]
-                            sample_mask = mb["sample_mask"]
-                            mask = token_mask * sample_mask.unsqueeze(-1)
-                            
-                            from cut_cross_entropy import linear_cross_entropy
-                            hidden = self.model(input_ids)
-                            token_loss = linear_cross_entropy(
-                                # Returns final hidden state
-                                hidden,
-                                self.model.output.weight,
-                                mb["input_ids"],
-                                ignore_index=self.tokenizer.eos_token_id,
-                                shift=True,
-                                reduction="none"
+                            model_args = self._build_forward_kwargs(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask,
+                                position_ids=position_ids,
+                                flash_attn_kwargs=flash_attn_kwargs,
+                                use_cache=False,
                             )
-                            
-                            loss = masked_mean(
-                                token_loss,
-                                mask,
-                                global_normalization_factor=global_valid_toks,
-                            )
-                            
-                            del hidden
-                            
-                            loss_metrics = {
-                                "loss": loss.item() if loss.ndim == 0 else loss,
-                                "num_unmasked_tokens": mask.sum().item(),
-                                "num_valid_samples": sample_mask.sum().item(),
-                            }
-                    else:
-                        context_parallel_ctx = None
+
+                            logits = self._compute_model_logits(model_args)
+
+                        # Apply temperature scaling
+                        logits = self._apply_temperature_scaling(logits)
+
                         if self.cp_size > 1:
-                            seq_index = torch.arange(
-                                seq_len, device=input_ids.device
-                            ).repeat(1, 1)
-                            cp_buffers = (
-                                [input_ids, position_ids, seq_index]
-                                if self.cp_size > 1
-                                else []
+                            seq_index_dtensor = (
+                                DTensor.from_local(
+                                    seq_index,
+                                    device_mesh=self.cp_mesh,
+                                    placements=[Shard(1)],
+                                )
+                                .full_tensor()
+                                .squeeze(0)
                             )
 
-                            # Create context parallel context
-                            context_parallel_ctx = self.create_context_parallel_ctx(
-                                cp_mesh=self.cp_mesh,
-                                cp_buffers=cp_buffers,
-                                cp_seq_dims=[sequence_dim] * len(cp_buffers),
-                                cp_no_restore_buffers=set(cp_buffers),
-                            )
+                            mb["seq_index"] = seq_index_dtensor
 
-                        with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
-                            with torch.autocast(device_type="cuda", dtype=self.dtype):
-                                model_args = self._build_forward_kwargs(
-                                    input_ids=input_ids,
-                                    attention_mask=attention_mask,
-                                    position_ids=position_ids,
-                                    flash_attn_kwargs=flash_attn_kwargs,
-                                    use_cache=False,
-                                )
+                            for tensor_name in mb:
+                                current_tensor = mb[tensor_name]
+                                for buffer in cp_buffers:
+                                    if current_tensor is buffer:
+                                        assert type(current_tensor) == torch.Tensor, (
+                                            f"tensor {tensor_name} is not a tensor"
+                                        )
+                                        mb[tensor_name] = DTensor.from_local(
+                                            current_tensor,
+                                            device_mesh=self.cp_mesh,
+                                            placements=[Shard(sequence_dim)],
+                                        )
+                                        break
 
-                                logits = self._compute_model_logits(model_args)
+                            if isinstance(logits, DTensor):
+                                # Must be tp sharded
+                                assert (
+                                    logits.device_mesh.ndim == 1
+                                    and logits.device_mesh.mesh_dim_names[0] == "tp"
+                                ), "logits must be tp sharded"
 
-                            # Apply temperature scaling
-                            logits = self._apply_temperature_scaling(logits)
-
-                            if self.cp_size > 1:
-                                seq_index_dtensor = (
-                                    DTensor.from_local(
-                                        seq_index,
-                                        device_mesh=self.cp_mesh,
-                                        placements=[Shard(1)],
-                                    )
-                                    .full_tensor()
-                                    .squeeze(0)
-                                )
-
-                                mb["seq_index"] = seq_index_dtensor
-
-                                for tensor_name in mb:
-                                    current_tensor = mb[tensor_name]
-                                    for buffer in cp_buffers:
-                                        if current_tensor is buffer:
-                                            assert type(current_tensor) == torch.Tensor, (
-                                                f"tensor {tensor_name} is not a tensor"
-                                            )
-                                            mb[tensor_name] = DTensor.from_local(
-                                                current_tensor,
-                                                device_mesh=self.cp_mesh,
-                                                placements=[Shard(sequence_dim)],
-                                            )
-                                            break
-
-                                if isinstance(logits, DTensor):
-                                    # Must be tp sharded
-                                    assert (
-                                        logits.device_mesh.ndim == 1
-                                        and logits.device_mesh.mesh_dim_names[0] == "tp"
-                                    ), "logits must be tp sharded"
-
-                                    # CP is implicitly sharded on the seq dim, so we need to redistribute to the tp dim
-                                    logits = DTensor.from_local(
-                                        logits.to_local(),
-                                        device_mesh=self.device_mesh[("cp", "tp")],
-                                        placements=[Shard(sequence_dim), Shard(-1)],
-                                    )
-                                else:
-                                    logits = DTensor.from_local(
-                                        logits,
-                                        device_mesh=self.device_mesh[("cp", "tp")],
-                                        placements=[Shard(sequence_dim), Shard(-1)],
-                                    )
-
-                            if self.enable_seq_packing:
-                                loss_fn_ = SequencePackingLossWrapper(
-                                    loss_fn=loss_fn,
-                                    cu_seqlens_q=flash_attn_kwargs.cu_seqlens_q,
-                                    cu_seqlens_q_padded=flash_attn_kwargs.cu_seqlens_q,
+                                # CP is implicitly sharded on the seq dim, so we need to redistribute to the tp dim
+                                logits = DTensor.from_local(
+                                    logits.to_local(),
+                                    device_mesh=self.device_mesh[("cp", "tp")],
+                                    placements=[Shard(sequence_dim), Shard(-1)],
                                 )
                             else:
-                                loss_fn_ = loss_fn
+                                logits = DTensor.from_local(
+                                    logits,
+                                    device_mesh=self.device_mesh[("cp", "tp")],
+                                    placements=[Shard(sequence_dim), Shard(-1)],
+                                )
 
-                            loss, loss_metrics = loss_fn_(
-                                logits,
-                                mb,
-                                global_valid_seqs,
-                                global_valid_toks,
+                        if self.enable_seq_packing:
+                            loss_fn_ = SequencePackingLossWrapper(
+                                loss_fn=loss_fn,
+                                cu_seqlens_q=flash_attn_kwargs.cu_seqlens_q,
+                                cu_seqlens_q_padded=flash_attn_kwargs.cu_seqlens_q,
                             )
-                            del logits
+                        else:
+                            loss_fn_ = loss_fn
 
-                    # skip the update for dummy batches
-                    if mb_idx < iterator_len:
-                        ## scale by the number of global batches so we get the correct
-                        ## value when summing metrics across all microbatches
-                        for k in loss_metrics.keys():
-                            loss_metrics[k] /= num_global_batches
-                        num_valid_samples = loss_metrics["num_valid_samples"]
-                        loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                        loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
-                        loss_metrics["global_valid_toks"] = global_valid_toks.item()
-                    else:
-                        loss *= 0
+                        loss, loss_metrics = loss_fn_(
+                            logits,
+                            mb,
+                            global_valid_seqs,
+                            global_valid_toks,
+                        )
+                        del logits
 
-                    # Backward pass
-                    if not eval_mode:
-                        ## NOTE: invalid samples should be multiplied
-                        ## by zero in the loss function to prevent them
-                        ## from affecting the gradient calculation
+                        # skip the update for dummy batches
+                        if mb_idx < iterator_len:
+                            ## scale by the number of global batches so we get the correct
+                            ## value when summing metrics across all microbatches
+                            for k in loss_metrics.keys():
+                                loss_metrics[k] /= num_global_batches
+                            num_valid_samples = loss_metrics["num_valid_samples"]
+                            loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
+                            loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
+                            loss_metrics["global_valid_toks"] = global_valid_toks.item()
+                        else:
+                            loss *= 0
 
-                        # when FSDP reduces the gradients over the DP dim, they're automatically averaged
-                        # but we want to sum them so we cancel out the average here
-                        loss *= self.dp_size * self.cp_size
-                        loss.backward()
+                        # Backward pass
+                        if not eval_mode:
+                            ## NOTE: invalid samples should be multiplied
+                            ## by zero in the loss function to prevent them
+                            ## from affecting the gradient calculation
+
+                            # when FSDP reduces the gradients over the DP dim, they're automatically averaged
+                            # but we want to sum them so we cancel out the average here
+                            loss *= self.dp_size * self.cp_size
+                            loss.backward()
 
                     if num_valid_samples > 0:
                         mb_losses.append(loss.item())
@@ -1568,13 +1513,7 @@ class DTensorV2PolicyWorker:
                 # Swap reference model state_dict to self.model
                 for k, v in self.model.state_dict().items():
                     val = to_local_if_dtensor(v)
-                    # Sometimes ref policy dict is loaded from scratch, other times it is from a parallelized model. Handle both cases.
-                    try:
-                        ref_param = self.reference_model_state_dict[k]
-                    except KeyError:
-                        k = k.replace("_orig_mod.", "")
-                        ref_param = self.reference_model_state_dict[k]
-                    val.copy_(ref_param)
+                    val.copy_(self.reference_model_state_dict[k])
 
                 # - self.model is the original reference_model, now on CUDA
                 # - curr_state_dict is the train model, now on CPU
@@ -1888,9 +1827,10 @@ class DTensorV2PolicyWorker:
             if self.uses_custom_model:
                 # Create empty version of the HF model
                 with init_empty_weights():
-                    model_hf = AutoModelForCausalLM.from_config(
-                        self.model_config,
+                    model_hf = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
                         trust_remote_code=True,
+                        config=self.model_config,
                     )
                 
                 assert self.adapter is not None

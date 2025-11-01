@@ -1,7 +1,8 @@
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, NotRequired
 
 import ray
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+import httpx
 
 import verifiers as vf
 
@@ -16,6 +17,10 @@ class VfEnvironmentConfig(TypedDict):
     environment_name: str
     # Passed to vf.load_environment as kwargs - make sure this is serializable.
     environment_config: dict[str, Any] | None
+    # Timeout settings for OpenAI API client (in seconds).
+    # Increase these for large batch sizes on weak GPU machines.
+    client_timeout: NotRequired[float]  # Total timeout for requests
+    client_connect_timeout: NotRequired[float]  # Connection timeout
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class VfEnvironment(EnvironmentInterface):
@@ -56,9 +61,23 @@ class VfEnvironment(EnvironmentInterface):
         **kwargs,
     ) -> tuple[vf.GenerateOutputs, vf.ProcessedOutputs]:
         if self.client is None:
+            # Get timeout settings from config or use defaults.
+            # Default timeout is 600 seconds (10 minutes) for large batch processing.
+            totalTimeout = self.cfg.get("client_timeout", 600.0)
+            connectTimeout = self.cfg.get("client_connect_timeout", 60.0)
+            
+            # Create httpx client with custom timeouts.
+            httpxClient = httpx.AsyncClient(
+                timeout=httpx.Timeout(
+                    timeout=totalTimeout,
+                    connect=connectTimeout,
+                )
+            )
+            
             self.client = AsyncOpenAI(
                 api_key="n/a",
-                base_url="http://127.0.0.1:8000/v1"
+                base_url="http://127.0.0.1:8000/v1",
+                http_client=httpxClient,
             )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         results = await self.env.a_generate(
