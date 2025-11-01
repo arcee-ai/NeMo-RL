@@ -5,7 +5,7 @@ sft:
   max_num_epochs: 1
   max_num_steps: 9999999
 
-  val_period: 20
+  val_period: 50
   val_batches: 8
   val_global_batch_size: 8
   val_micro_batch_size: 1
@@ -20,18 +20,18 @@ checkpointing:
   metric_name: null
   higher_is_better: false
   keep_top_k: 3
-  save_period: 10
+  save_period: 20
   checkpoint_must_save_by: null
   hf_checkpoint: false
 
 policy:
   # model_name: "Qwen/Qwen3-4B-Base"
-  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v3"
+  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v4"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 256
-  train_micro_batch_size: 16
-  max_total_sequence_length: 1024
+  train_global_batch_size: 768
+  train_micro_batch_size: 1
+  max_total_sequence_length: 65536
   precision: "bfloat16"
 
   dtensor_cfg:
@@ -69,13 +69,34 @@ policy:
     scalar_optim: "adamw"
     pass_device_mesh: true
     kwargs:
-      lr: 5.0e-5
-      weight_decay: 0.1
+      lr: 6.0e-5
+      weight_decay: 0.0
       betas: [0.9, 0.98]
+      adjust_lr: "keller_muon"
       # eps: 1e-5
+    scalar_optim_kwargs:
+      lr: 6.0e-6
+  
+  scheduler:
+    - name: "torch.optim.lr_scheduler.LinearLR"
+      kwargs:
+        start_factor: 1.0e-6
+        end_factor: 1.0
+        total_iters: 1500
+    - name: "torch.optim.lr_scheduler.LinearLR"
+      kwargs:
+        start_factor: 1.0
+        end_factor: 0.7
+        total_iters: 20000
+    - name: "torch.optim.lr_scheduler.LinearLR"
+      kwargs:
+        start_factor: 0.7
+        end_factor: 1.0e-6
+        total_iters: 1430
+    - milestones: [1500, 21500]
     
 data:
-  dataset_name: "arcee-train/AFMoE-SFT-v0.1.8-64k-RLKit"
+  dataset_name: "arcee-train/AFMoE-SFT-v0.1.9-64k-RLKit-Fixed"
   dataset_type: "native"
   on_disk: false
   shuffle: false
@@ -100,5 +121,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 2
+  gpus_per_node: 8
   num_nodes: 1
