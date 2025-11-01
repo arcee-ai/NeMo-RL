@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 from typing import Any, Callable, Optional, Union
 
 import torch
@@ -80,12 +81,48 @@ def preference_collate_fn(
 # Dataset transformation utility
 SFTDataTransformFn = Callable[[PreTrainedTokenizerBase | None, dict], dict]
 
+def transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
+    assert tokenizer is not None, "Tokenizer is required for OpenAI dataset transformation"
+    conversation = x["conversations"]
+    sample_mask = x.get("sample_mask", 1.0)
+    
+    if isinstance(conversation, str):
+        conversation = json.loads(conversation)
+    
+    has_assistant_messages = any(message["role"] == "assistant" for message in conversation)
+    if not has_assistant_messages:
+        raise ValueError("No assistant messages found in the conversation!")
+    
+    oai_tools = x.get("oai_tools", None)
+    if isinstance(oai_tools, str):
+        oai_tools = json.loads(oai_tools)
+    
+    tokenized = tokenizer.apply_chat_template(
+        conversation,
+        tokenize=True,
+        return_dict=True,
+        add_generation_prompt=False,
+        return_assistant_tokens_mask=True,
+        tools=oai_tools
+    )
+        
+    input_ids = tokenized["input_ids"]
+    token_mask = tokenized["assistant_masks"]
+    if 1 not in token_mask:
+        raise ValueError("No assistant tokens found in the tokenized conversation - ensure your chat format marks assistant tokens.")
+    return {
+        "input_ids": torch.tensor(input_ids),
+        "token_mask": torch.tensor(token_mask),
+        "sample_mask": torch.tensor(sample_mask)
+    }
+
 transformations: dict[str, SFTDataTransformFn] = {
     "axolotl": lambda _, x: {
         "input_ids": torch.tensor(x["input_ids"]),
         "token_mask": torch.tensor([a == b for a, b in zip(x["input_ids"], x["labels"])]),
         "sample_mask": torch.tensor(1.0)
-    }
+    },
+    "openai": transform_oai,
 }
 
 def transform_dataset(dataset: Dataset, dataset_type: str, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
