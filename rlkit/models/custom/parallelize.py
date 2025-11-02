@@ -617,6 +617,11 @@ def apply_moe_ep_tp(
                 parallelize_plan=moe_layer_plan,
             )
 
+        # Skip expert parallelization if both tp_mesh and ep_mesh are None
+        # (pure FSDP DP mode - data parallelism will be handled by FSDP)
+        if tp_mesh is None and ep_mesh is None:
+            continue
+
         experts_mesh, experts_plan = None, None
         if ep_mesh is None:
             experts_mesh = tp_mesh
