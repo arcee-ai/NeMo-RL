@@ -229,7 +229,7 @@ def parallelize_model(
     if ep_size > 1 and not hasattr(torch, "_grouped_mm"):
         raise RuntimeError("EP is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")
 
-    if tp_size > 1 or dp_shard > 1:
+    if tp_size > 1 or ep_size > 1:
         apply_moe_ep_tp(
             model,
             tp_mesh=world_mesh["tp"] if tp_size > 1 else None,
@@ -249,7 +249,7 @@ def parallelize_model(
         apply_compile(model)
 
     dp_mesh: DeviceMesh | None = None
-    if dp_replicate > 1 or ep_size > 1:
+    if dp_replicate > 1 or dp_shard > 1 or ep_size > 1:
         # apply FSDP or HSDP, potentially with Context Parallel
         if dp_replicate > 1:
             dp_mesh_dim_names = ("dp_replicate", "dp_shard_cp")
