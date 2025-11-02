@@ -946,6 +946,30 @@ class GRPOTrainer:
             else:
                 metrics[key] = np.sum(value).item()
         metrics.update(rollout_metrics)
+        
+        # Add router statistics if available
+        expert_balance_metrics = {}
+        router_stats_metrics = {}
+        if "router_statistics" in train_results:
+            router_stats = train_results["router_statistics"]
+            # Router statistics are already aggregated across EP and DP ranks
+            # Separate expert balance from other router statistics
+            # All router stats go to expert category, not train
+            for expert_key, count in router_stats.items():
+                if expert_key.startswith("expert_balance_"):
+                    # Extract layer_id from "expert_balance_{layer_id}"
+                    # These will be logged separately in expert category
+                    layer_id = expert_key.replace("expert_balance_", "")
+                    expert_balance_metrics[layer_id] = count
+                else:
+                    # Store other router statistics (expert fractions) for expert category
+                    router_stats_metrics[expert_key] = count
+            
+            # Calculate full-model balance (average across all layers)
+            # This goes to train category
+            if expert_balance_metrics:
+                full_model_balance = np.mean(list(expert_balance_metrics.values()))
+                metrics["expert_balance"] = full_model_balance
 
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore[assignment]
         
@@ -995,6 +1019,24 @@ class GRPOTrainer:
 
         self.logger.log_metrics(metrics, step + 1, prefix="train")
         self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
+        
+        # Log expert balance metrics separately under expert/balance/
+        if expert_balance_metrics:
+            balance_metrics = {
+                f"balance/{layer_id}": val for layer_id, val in expert_balance_metrics.items()
+            }
+            self.logger.log_metrics(
+                balance_metrics, step + 1, prefix="expert"
+            )
+        
+        # Log router statistics (expert fractions) separately under expert/router_stats/
+        if router_stats_metrics:
+            stats_metrics = {
+                f"router_stats/{expert_key}": val for expert_key, val in router_stats_metrics.items()
+            }
+            self.logger.log_metrics(
+                stats_metrics, step + 1, prefix="expert"
+            )
 
     async def _refit_policy_generation(
         self,

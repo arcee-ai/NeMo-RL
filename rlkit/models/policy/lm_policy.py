@@ -467,6 +467,66 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 all_mb_metrics[k].extend(v)
         aggregated_results["all_mb_metrics"] = dict(all_mb_metrics)
 
+        # Aggregate router statistics across DP ranks
+        # Router statistics are already aggregated across EP ranks within each worker
+        # We need to sum absolute counts across DP ranks, then convert to fractions
+        router_stats_all_workers = []
+        for r in results:
+            if "router_statistics" in r:
+                router_stats_all_workers.append(r["router_statistics"])
+        
+        if router_stats_all_workers:
+            # Sum absolute counts across all DP ranks
+            aggregated_router_stats = {}
+            # Get all expert keys from first worker (should be same across all)
+            if router_stats_all_workers:
+                expert_keys = router_stats_all_workers[0].keys()
+                # Group by layer to normalize fractions per layer
+                layer_stats = {}
+                for expert_key in expert_keys:
+                    # Parse layer_id from expert_key (format: "expert_{layer_id}_{expert_idx}")
+                    parts = expert_key.split("_")
+                    if len(parts) >= 3:
+                        layer_id = "_".join(parts[1:-1])  # Handle multi-digit layer IDs
+                        expert_idx = parts[-1]
+                        layer_key = f"layer_{layer_id}"
+                        if layer_key not in layer_stats:
+                            layer_stats[layer_key] = {}
+                        layer_stats[layer_key][expert_idx] = sum(
+                            stats.get(expert_key, 0) for stats in router_stats_all_workers
+                        )
+                
+                # Convert to fractions per layer and calculate expert balance
+                for layer_key, expert_counts in layer_stats.items():
+                    total_counts = sum(expert_counts.values())
+                    layer_id = layer_key.replace("layer_", "")
+                    expert_fractions = []
+                    
+                    if total_counts > 0:
+                        for expert_idx, count in expert_counts.items():
+                            # Reconstruct expert key
+                            expert_key = f"expert_{layer_id}_{expert_idx}"
+                            fraction = count / total_counts
+                            aggregated_router_stats[expert_key] = fraction
+                            expert_fractions.append(fraction)
+                    else:
+                        # If no tokens routed, set all fractions to 0
+                        for expert_idx in expert_counts.keys():
+                            expert_key = f"expert_{layer_id}_{expert_idx}"
+                            aggregated_router_stats[expert_key] = 0.0
+                            expert_fractions.append(0.0)
+                    
+                    # Calculate expert balance metric (standard deviation of expert fractions)
+                    # Lower values indicate better balance (more even distribution)
+                    if len(expert_fractions) > 1:
+                        import numpy as np
+                        expert_balance = np.std(expert_fractions)
+                    else:
+                        # Single expert case - perfect balance by definition
+                        expert_balance = 0.0
+                    aggregated_router_stats[f"expert_balance_{layer_id}"] = expert_balance
+            aggregated_results["router_statistics"] = aggregated_router_stats
+
         return aggregated_results
 
     def generate(

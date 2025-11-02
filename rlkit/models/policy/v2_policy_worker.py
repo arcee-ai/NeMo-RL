@@ -956,6 +956,12 @@ class DTensorV2PolicyWorker:
             # Get data from batch and move to device
             data.to("cuda")
 
+            # Reset router statistics at the start of each training step
+            if hasattr(self.model, "layers"):
+                for layer in self.model.layers.values():
+                    if hasattr(layer, "moe") and layer.moe is not None:
+                        layer.moe.reset_router_statistics()
+
             losses = []
             all_mb_metrics = []
             track_packing_stats = (
@@ -1322,6 +1328,20 @@ class DTensorV2PolicyWorker:
                 metrics["packing_efficiency"] = packing_efficiency
             if tracked_microbatches > 0:
                 metrics["packing_tracked_microbatches"] = tracked_microbatches
+
+            # Collect router statistics from AFMoE model if available
+            # Collect as absolute counts for DP aggregation, convert to fractions later
+            if hasattr(self.model, "collect_router_statistics"):
+                try:
+                    router_stats = self.model.collect_router_statistics(
+                        ep_mesh=self.ep_mesh, as_fractions=False
+                    )
+                    # Add router statistics to metrics (as absolute counts for DP aggregation)
+                    metrics["router_statistics"] = router_stats
+                except Exception as e:
+                    # Log warning but don't fail training if router stats collection fails
+                    import warnings
+                    warnings.warn(f"Failed to collect router statistics: {e}")
 
             return metrics
 

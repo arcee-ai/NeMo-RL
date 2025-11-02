@@ -393,6 +393,16 @@ class MoE(nn.Module):
         else:
             self.expert_bias = None
 
+        # Router statistics tracking for logging
+        # Stores num_tokens_per_expert for each forward pass
+        # Will be aggregated across EP ranks and reset after each training step
+        self.register_buffer(
+            "router_stats",
+            torch.zeros(num_experts, dtype=torch.float32),
+            persistent=False,
+        )
+        self.layer_id: int | None = None  # Set by TransformerBlock
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -420,6 +430,11 @@ class MoE(nn.Module):
         if self.load_balance_coeff is not None:
             with torch.no_grad():
                 self.tokens_per_expert.add_(num_tokens_per_expert)
+
+        # Track router statistics for logging
+        # Accumulate num_tokens_per_expert for router statistics
+        with torch.no_grad():
+            self.router_stats.add_(num_tokens_per_expert.to(self.router_stats.dtype))
 
         # top_scores and token_indices_experts_sorted shape (bs*slen*top_k,)
         # num_tokens_per_expert shape (num_experts,)
@@ -489,3 +504,14 @@ class MoE(nn.Module):
                 self.tokens_per_expert = torch.zeros(
                     self.experts.num_experts, dtype=torch.float32
                 )
+        
+        # Initialize router statistics tracking
+        with torch.device(buffer_device):
+            self.router_stats = torch.zeros(
+                self.experts.num_experts, dtype=torch.float32
+            )
+
+    def reset_router_statistics(self) -> None:
+        """Reset router statistics after collection."""
+        if hasattr(self, "router_stats"):
+            self.router_stats.zero_()

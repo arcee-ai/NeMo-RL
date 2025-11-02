@@ -244,6 +244,7 @@ class TransformerBlock(nn.Module):
         self.attention = Attention(model_args, layer_id)
         if self.moe_enabled:
             self.moe = MoE(model_args)
+            self.moe.layer_id = layer_id
         else:
             self.feed_forward = FeedForward(dim=model_args.dim, hidden_dim=model_args.inter_dim)
         self.attention_norm_a = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
@@ -458,3 +459,68 @@ class AFMoEModel(BaseModel):
         else:
             output = self.output(h) if self.output else h
             return output
+
+    def collect_router_statistics(
+        self, ep_mesh=None, as_fractions: bool = False
+    ) -> dict[str, float]:
+        """
+        Collect router statistics from all MoE layers.
+        
+        Args:
+            ep_mesh: Optional DeviceMesh for expert parallel group. If provided,
+                    statistics will be aggregated across EP ranks.
+            as_fractions: If True, return fractions (0.0-1.0) normalized per layer.
+                         If False, return absolute token counts.
+        
+        Returns:
+            Dictionary mapping "expert_{layer_id}_{expert_idx}" to either token counts
+            or fractions depending on as_fractions parameter.
+        """
+        router_stats = {}
+        
+        for layer_id_str, layer in self.layers.items():
+            if hasattr(layer, "moe") and layer.moe is not None:
+                layer_id = layer.moe.layer_id
+                if layer_id is None:
+                    # Fallback to layer_id_str if layer_id not set
+                    layer_id = int(layer_id_str)
+                
+                # Get router statistics for this layer
+                stats = layer.moe.router_stats.clone()
+                
+                # Aggregate across EP ranks if EP is enabled
+                if ep_mesh is not None and ep_mesh.size() > 1:
+                    import torch.distributed as dist
+                    dist.all_reduce(stats, op=dist.ReduceOp.SUM, group=ep_mesh.get_group())
+                
+                # Convert to fractions if requested
+                if as_fractions:
+                    total_tokens_routed = stats.sum().item()
+                    if total_tokens_routed > 0:
+                        # Normalize each expert's count by total tokens routed
+                        stats = stats / total_tokens_routed
+                    else:
+                        # If no tokens were routed, set all fractions to 0
+                        stats = torch.zeros_like(stats)
+                
+                # Store statistics with expert_{layer}_{idx} naming
+                for expert_idx in range(stats.shape[0]):
+                    key = f"expert_{layer_id}_{expert_idx}"
+                    router_stats[key] = stats[expert_idx].item()
+                
+                # Calculate expert balance metric (standard deviation of expert fractions)
+                # Lower values indicate better balance (more even distribution)
+                # For perfect balance with N experts, each gets 1/N, so std = 0
+                if as_fractions:
+                    if stats.shape[0] > 1:
+                        # Standard deviation of expert fractions
+                        expert_balance = stats.std().item()
+                    else:
+                        # Single expert case - perfect balance by definition
+                        expert_balance = 0.0
+                    router_stats[f"expert_balance_{layer_id}"] = expert_balance
+                
+                # Reset router statistics after collection
+                layer.moe.reset_router_statistics()
+        
+        return router_stats
