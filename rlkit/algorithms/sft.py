@@ -302,7 +302,13 @@ class SFTTrainer:
                         " This is likely because there were no valid samples."
                     )
                 else:
-                    val_metrics["val_loss"] += float(val_results["loss"])
+                    # global_loss is a tensor that may contain losses from multiple batches
+                    # Sum all elements to get total loss for this validation call
+                    loss_tensor = val_results["loss"]
+                    if isinstance(loss_tensor, torch.Tensor):
+                        val_metrics["val_loss"] += loss_tensor.sum().item()
+                    else:
+                        val_metrics["val_loss"] += float(loss_tensor)
                     num_valid_batches += 1
 
                 if (

@@ -1094,7 +1094,7 @@ class DTensorV2PolicyWorker:
                                 hidden,
                                 output_weight,
                                 mb["input_ids"],
-                                ignore_index=self.tokenizer.eos_token_id,
+                                ignore_index=-100,  # Use -100 instead of eos_token_id to avoid ignoring valid EOS tokens
                                 shift=True,
                                 reduction="none"
                             )
