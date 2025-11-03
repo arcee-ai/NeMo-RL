@@ -56,6 +56,7 @@ echo "" > requirements/cuda.txt
 echo "Installing dependencies..."
 uv pip install --upgrade-package pip pip
 uv pip install numpy setuptools setuptools_scm
+uv pip install -P torch torch torchvision torchaudio torchao
 
 # Install vLLM using precompiled wheel
 echo "Installing vLLM with precompiled wheel..."
