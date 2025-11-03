@@ -8,15 +8,8 @@ from fastapi import FastAPI, Request
 from ray import serve
 import torch
 
-# TODO: Remove this once AFMoE is supported natively
-from rlkit.models.generation.vllm_http.hack_patch_afmoe import AfmoeForCausalLM
-from vllm import ModelRegistry
-ModelRegistry.register_model("AfmoeForCausalLM", AfmoeForCausalLM)
-
 # Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
 _serve_app = FastAPI()
-
-
 
 
 _TOKEN_ID_LOGPROB_PATCH_APPLIED = False

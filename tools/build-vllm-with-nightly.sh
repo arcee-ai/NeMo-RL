@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
 GIT_URL="https://github.com/vllm-project/vllm.git"
-BRANCH="v0.10.1.1"
+BRANCH="v0.11.0"
 
 BUILD_DIR=$(realpath "$SCRIPT_DIR/../3rdparty/vllm")
 if [[ -e "$BUILD_DIR" ]]; then
@@ -36,6 +36,8 @@ echo "Cloning repository..."
 git clone "$GIT_URL" "$BUILD_DIR"
 cd "$BUILD_DIR"
 git checkout "$BRANCH"
+
+bash ../../tools/vllm_patcher/patch_vllm.sh
 
 # Create a new Python environment using uv
 echo "Creating Python environment..."
