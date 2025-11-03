@@ -25,7 +25,7 @@ VLLM_HTTP_EXECUTABLE = (
 )
 
 ACTOR_ENVIRONMENT_REGISTRY: dict[str, str] = {
-    "rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe": VLLM_HTTP_EXECUTABLE,
+    "rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe": PY_EXECUTABLES.SYSTEM,
     "rlkit.models.generation.vllm.vllm_worker.VllmGenerationWorker": VLLM_EXECUTABLE,
     "rlkit.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker": VLLM_EXECUTABLE,
     # Temporary workaround for the coupled implementation of DTensorPolicyWorker and vLLM.
