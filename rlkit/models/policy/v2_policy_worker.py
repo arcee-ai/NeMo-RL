@@ -481,6 +481,9 @@ class DTensorV2PolicyWorker:
         self.cp_size = self.cfg["dtensor_v2_cfg"].get("context_parallel_size", 1)
         self.pp_size = self.cfg["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
         self.ep_size = self.cfg["dtensor_v2_cfg"].get("expert_parallel_size", 1)
+        
+        if self.ep_size > 1:
+            raise ValueError("EP is numerically inaccurate and has been disabled for now.")
 
         if self.ep_size > 1 and not hasattr(torch, "_grouped_mm"):
             raise RuntimeError(
