@@ -5,12 +5,14 @@ sft:
   max_num_epochs: 1
   max_num_steps: 9999999
 
-  val_period: 50
+  val_period: 100
   val_batches: 8
-  val_global_batch_size: 8
+  val_global_batch_size: 16
   val_micro_batch_size: 1
   val_at_start: true
   seed: 42
+
+  run_vram_torture_test: false
 
   use_cut_cross_entropy: true
 
@@ -20,17 +22,16 @@ checkpointing:
   metric_name: null
   higher_is_better: false
   keep_top_k: 3
-  save_period: 20
+  save_period: 200
   checkpoint_must_save_by: null
-  hf_checkpoint: false
+  hf_checkpoint: true
 
 policy:
-  # model_name: "Qwen/Qwen3-4B-Base"
   model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v4"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 768
-  train_micro_batch_size: 1
+  train_global_batch_size: 2048
+  train_micro_batch_size: 4
   max_total_sequence_length: 65536
   precision: "bfloat16"
 
@@ -44,7 +45,7 @@ policy:
     activation_checkpointing: true
     tensor_parallel_size: 1
     context_parallel_size: 1
-    expert_parallel_size: 2
+    expert_parallel_size: 1
     custom_parallel_plan: null
 
   dynamic_batching:
@@ -65,36 +66,41 @@ policy:
   max_grad_norm: 1.0
 
   optimizer:
-    name: "dion.Muon"
-    scalar_optim: "adamw"
-    pass_device_mesh: true
     kwargs:
-      lr: 6.0e-5
+      adjust_lr: keller_muon
+      betas:
+        - 0.9
+        - 0.98
+      lr: 6e-05
       weight_decay: 0.0
-      betas: [0.9, 0.98]
-      adjust_lr: "keller_muon"
-      # eps: 1e-5
+    name: dion.Muon
+    pass_device_mesh: true
+    scalar_optim: adamw
     scalar_optim_kwargs:
-      lr: 6.0e-6
-  
+      lr: 6e-06
+      weight_decay: 0.0
+      betas:
+        - 0.9
+        - 0.98
+
   scheduler:
     - name: "torch.optim.lr_scheduler.LinearLR"
       kwargs:
         start_factor: 1.0e-6
         end_factor: 1.0
-        total_iters: 1500
+        total_iters: 100
     - name: "torch.optim.lr_scheduler.LinearLR"
       kwargs:
         start_factor: 1.0
         end_factor: 0.7
-        total_iters: 20000
+        total_iters: 700
     - name: "torch.optim.lr_scheduler.LinearLR"
       kwargs:
         start_factor: 0.7
         end_factor: 1.0e-6
-        total_iters: 1430
-    - milestones: [1500, 21500]
-    
+        total_iters: 633
+    - milestones: [100, 800]
+
 data:
   dataset_name: "arcee-train/AFMoE-SFT-v0.1.9-64k-RLKit-Fixed"
   dataset_type: "native"
@@ -109,17 +115,15 @@ logger:
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   num_val_samples_to_print: 0  # Number of validation samples to pretty print on terminal
   wandb:
-    project: "rlkit-sft-dev"
-    name: "sft-dev-${data.dataset_name}"
+    project: "AFMoE-26b-SFT"
+    name: "${data.dataset_name}"
+    entity: "arcee-ai"
   tensorboard:
-    log_dir: "tb_logs-sft-dev-${data.dataset_name}"
   mlflow:
-    experiment_name: "rlkit-sft-dev"
-    run_name: "sft-dev-${data.dataset_name}"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
   gpus_per_node: 8
-  num_nodes: 1
+  num_nodes: 2
