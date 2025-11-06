@@ -188,7 +188,7 @@ class VLLMOpenAIServe:
             args += extra_cli_args
         
         # We have to import these here so we can import some of these classes in the main process
-        from vllm.utils import FlexibleArgumentParser
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
         from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 
         parser = FlexibleArgumentParser(description="vLLM OAI app for Ray Serve")
