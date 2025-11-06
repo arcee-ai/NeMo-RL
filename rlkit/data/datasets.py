@@ -122,6 +122,13 @@ transformations: dict[str, SFTDataTransformFn] = {
         "token_mask": torch.tensor([a == b for a, b in zip(x["input_ids"], x["labels"])]),
         "sample_mask": torch.tensor(1.0)
     },
+    "openai_prompt_completion": lambda tokenizer, x: transform_oai(
+        tokenizer,
+        {
+            "conversations": x.get("prompt", []) + x.get("completion", []),
+            "oai_tools": x.get("tools", [])
+        }
+    ),
     "openai": transform_oai,
 }
 
