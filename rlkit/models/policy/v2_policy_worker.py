@@ -1785,7 +1785,12 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def broadcast_weights_for_collective(self) -> None:
-        """Broadcast the weights for collective communication."""
+        """Broadcast the weights for collective communication.
+        
+        This uses streaming conversion to avoid OOM: converts and broadcasts
+        one tensor at a time instead of materializing the entire converted
+        state dict, which would double memory usage.
+        """
         # Manually move model to cuda for cpu offload case
         if self.cpu_offload:
             print(
@@ -1794,19 +1799,61 @@ class DTensorV2PolicyWorker:
             )
             self.model = self.move_to_cuda(self.model)
 
-        # Broadcast the weights for collective communication
-        export_state_dict = self._export_state_dict()
-        for name, tensor in export_state_dict.items():
-            if isinstance(tensor, DTensor):
-                tensor = tensor.full_tensor()
-            if self.rank == 0:
-                tensor = tensor.to(self.dtype, non_blocking=True)
-                self.model_update_group.broadcast(tensor.data, src=0)
+        # Stream conversion and broadcast to avoid doubling memory usage
+        state_dict = self.model.state_dict()
+        
+        if self.adapter is not None:
+            # Use adapter's streaming method to convert and broadcast one tensor at a time
+            self._broadcast_with_adapter_streaming(state_dict)
+        else:
+            # No adapter: broadcast native format directly
+            for name, tensor in state_dict.items():
+                if isinstance(tensor, DTensor):
+                    tensor = tensor.full_tensor()
+                if self.rank == 0:
+                    tensor = tensor.to(self.dtype, non_blocking=True)
+                    self.model_update_group.broadcast(tensor.data, src=0)
+                del tensor  # Free memory immediately
 
         # Manually move model to cpu for cpu offload case
         # cpu offload needs model on CPU before model forward
         if self.cpu_offload:
             self.model = self.move_to_cpu(self.model)
+
+    def _broadcast_with_adapter_streaming(self, state_dict: dict[str, Any]) -> None:
+        """Stream conversion and broadcast using adapter to avoid OOM.
+        
+        This method calls the adapter's stream_to_hf method which yields
+        (hf_key, hf_tensor) pairs one at a time. Each tensor is broadcast
+        and immediately freed before converting the next one.
+        """
+        import torch
+        import re
+        
+        # Use the adapter's streaming method if available
+        if hasattr(self.adapter, 'stream_to_hf'):
+            for hf_key, hf_tensor in self.adapter.stream_to_hf(state_dict):
+                if isinstance(hf_tensor, DTensor):
+                    hf_tensor = hf_tensor.full_tensor()
+                if self.rank == 0:
+                    hf_tensor = hf_tensor.to(self.dtype, non_blocking=True)
+                    self.model_update_group.broadcast(hf_tensor.data, src=0)
+                del hf_tensor
+                torch.cuda.empty_cache()
+        else:
+            # Fallback: use to_hf but warn about memory usage
+            logging.warning(
+                "Adapter does not support stream_to_hf, falling back to bulk conversion. "
+                "This may cause OOM on large models."
+            )
+            export_state_dict = self.adapter.to_hf(state_dict)
+            for name, tensor in export_state_dict.items():
+                if isinstance(tensor, DTensor):
+                    tensor = tensor.full_tensor()
+                if self.rank == 0:
+                    tensor = tensor.to(self.dtype, non_blocking=True)
+                    self.model_update_group.broadcast(tensor.data, src=0)
+                del tensor
 
     @wrap_with_nvtx_name("dtensor_policy_worker/prepare_for_lp_inference")
     def prepare_for_lp_inference(self) -> None:

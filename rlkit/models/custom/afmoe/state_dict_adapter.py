@@ -194,6 +194,92 @@ class AFMoEStateDictAdapter(StateDictAdapter):
 
         return hf_metadata
 
+    def stream_to_hf(self, state_dict: dict[str, Any]):
+        """Generator that yields (hf_key, hf_tensor) pairs one at a time.
+        
+        This streaming approach avoids OOM by not holding the entire converted
+        state dict in memory. For grouped MoE expert weights, it yields each
+        expert tensor individually and immediately, allowing it to be freed
+        before the next one is materialized.
+        
+        Yields:
+            Tuple[str, torch.Tensor]: (hf_key, hf_tensor) pairs
+        """
+        from torch.distributed.tensor import DTensor
+        
+        for key, value in state_dict.items():
+            # Split grouped experts to per-expert weights
+            m = re.match(r"layers\.(\d+)\.moe\.experts\.(w[123])$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                which = m.group(2)
+                assert isinstance(value, torch.Tensor) and value.dim() == 3
+                
+                # If this is a sharded DTensor, consolidate it once before indexing
+                # This does ONE all_gather for the grouped tensor, then indexes locally
+                if isinstance(value, DTensor):
+                    value = value.full_tensor()
+                
+                # Now yield each expert tensor one at a time
+                for expert_idx in range(value.shape[0]):
+                    if which == "w1":
+                        hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.gate_proj.weight"
+                    elif which == "w3":
+                        hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.up_proj.weight"
+                    else:  # w2
+                        hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.down_proj.weight"
+                    # Index to get expert tensor, yield it, then it can be freed
+                    expert_tensor = value[expert_idx]
+                    yield hf_key, expert_tensor
+                    del expert_tensor  # Hint to free memory
+                continue
+
+            # Router gate mapping
+            m = re.match(r"layers\.(\d+)\.moe\.router\.gate\.weight$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                yield f"model.layers.{layer_idx}.mlp.router.gate.weight", value
+                continue
+
+            # Expert bias mapping
+            m = re.match(r"layers\.(\d+)\.moe\.expert_bias$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                yield f"model.layers.{layer_idx}.mlp.expert_bias", value
+                continue
+
+            # Shared experts mapping (if exists)
+            m = re.match(r"layers\.(\d+)\.moe\.shared_experts\.(w[123])\.weight$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                which = m.group(2)
+                if which == "w1":
+                    hf_key = f"model.layers.{layer_idx}.mlp.shared_experts.gate_proj.weight"
+                elif which == "w3":
+                    hf_key = f"model.layers.{layer_idx}.mlp.shared_experts.up_proj.weight"
+                else:  # w2
+                    hf_key = f"model.layers.{layer_idx}.mlp.shared_experts.down_proj.weight"
+                yield hf_key, value
+                continue
+
+            # Dense path and common weights via direct map
+            if key in self.to_hf_dense_map:
+                hf_key = self.to_hf_dense_map[key]
+                yield hf_key, value
+                continue
+
+            # Layer-indexed common weights
+            if key.startswith("layers."):
+                # Replace first number with {}
+                abstract_key = re.sub(r"(layers\.)\d+", r"\1{}", key, count=1)
+                if abstract_key in self.to_hf_dense_map:
+                    m2 = re.search(r"layers\.(\d+)", key)
+                    if m2 is None:
+                        continue
+                    layer_idx = m2.group(1)
+                    hf_key = self.to_hf_dense_map[abstract_key].format(layer_idx)
+                    yield hf_key, value
+
     def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
         state_dict: dict[str, Any] = {}
 
