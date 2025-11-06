@@ -32,6 +32,7 @@ echo "  Vllm Git URL: $GIT_URL"
 echo "  Vllm Branch: $BRANCH"
 
 # Clone the repository
+mkdir -p $BUILD_DIR
 echo "Cloning repository..."
 git clone "$GIT_URL" "$BUILD_DIR"
 cd "$BUILD_DIR"

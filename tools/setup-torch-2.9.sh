@@ -2,8 +2,6 @@
 
 set -eoux pipefail
 
-VENV_DIR=venvs/rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe
-
 rm -rf 3rdparty/vllm
 
 uv pip install -P torch torch torchvision torchaudio torchao
