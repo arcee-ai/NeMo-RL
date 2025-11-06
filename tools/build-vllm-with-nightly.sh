@@ -37,7 +37,7 @@ git clone "$GIT_URL" "$BUILD_DIR"
 cd "$BUILD_DIR"
 git checkout "$BRANCH"
 
-bash ../../tools/vllm_patcher/patch_vllm.sh
+# bash ../../tools/vllm_patcher/patch_vllm.sh
 
 # Create a new Python environment using uv
 echo "Creating Python environment..."
