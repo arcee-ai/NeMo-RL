@@ -29,39 +29,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def _get_driver_node_resource_tag(
-    required_gpus: int,
-    require_gpus: bool,
-) -> Optional[str]:
-    """Return the Ray resource label for the driver node if it can host rank 0."""
-    # We only pin rank 0 when the driver node has the necessary resources.
-    try:
-        driver_ip = ray._private.services.get_node_ip_address()
-    except Exception:
-        return None
-
-    for node in ray.nodes():
-        if not node.get("Alive", False):
-            continue
-        if node.get("NodeManagerAddress") != driver_ip:
-            continue
-
-        resources = node.get("Resources", {})
-        if require_gpus and resources.get("GPU", 0) < required_gpus:
-            logger.debug(
-                "Driver node lacks sufficient GPU capacity (%s < %s); skipping rank-0 pinning.",
-                resources.get("GPU", 0),
-                required_gpus,
-            )
-            return None
-        node_id = node.get("NodeID")
-        if not node_id:
-            return None
-        return f"node:{node_id}"
-
-    return None
-
-
 class ClusterConfig(TypedDict):
     gpus_per_node: int
     num_nodes: int
@@ -314,33 +281,12 @@ class RayVirtualCluster:
         num_gpus_per_bundle = 1 if self.use_gpus else 0
 
         placement_groups = []
-        driver_node_resource: Optional[str] = None
-        if self._bundle_ct_per_node_list:
-            driver_node_resource = _get_driver_node_resource_tag(
-                required_gpus=self._bundle_ct_per_node_list[0]
-                if self.use_gpus
-                else 0,
-                require_gpus=self.use_gpus,
-            )
-            if driver_node_resource is None:
-                logger.debug(
-                    "Rank-0 pinning to the driver node is disabled (resource unavailable)."
-                )
-            else:
-                logger.debug(
-                    "Rank-0 placement will target driver resource %s.",
-                    driver_node_resource,
-                )
         if use_unified_pg:
             # Create a single unified placement group for cross-node model parallelism
             all_bundles = []
             for node_idx, bundle_count in enumerate(self._bundle_ct_per_node_list):
                 for _ in range(bundle_count):
                     bundle = {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle}
-                    if driver_node_resource is not None and node_idx == 0:
-                        bundle[driver_node_resource] = max(
-                            bundle.get(driver_node_resource, 0.0), 0.01
-                        )
                     all_bundles.append(bundle)
 
             placement_groups = [
@@ -355,10 +301,6 @@ class RayVirtualCluster:
                     node_bundles = []
                     for _ in range(bundle_count):
                         bundle = {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle}
-                        if driver_node_resource is not None and node_idx == 0:
-                            bundle[driver_node_resource] = max(
-                                bundle.get(driver_node_resource, 0.0), 0.01
-                            )
                         node_bundles.append(bundle)
                     pg = placement_group(
                         bundles=node_bundles,
