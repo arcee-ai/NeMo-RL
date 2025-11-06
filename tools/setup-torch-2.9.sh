@@ -3,6 +3,7 @@
 set -eoux pipefail
 
 rm -rf 3rdparty/vllm
+mkdir -p 3rdparty/
 
 uv pip install -P torch torch torchvision torchaudio torchao
 
