@@ -1704,9 +1704,9 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
-        state_dict_for_refit = self._export_state_dict()
-
         if self.is_generation_colocated:
+            # For colocated inference, we need the actual converted state dict
+            state_dict_for_refit = self._export_state_dict()
             # Collect info for streaming multiple tensors
             self.refit_param_info = []
             for name, tensor in state_dict_for_refit.items():
@@ -1717,10 +1717,15 @@ class DTensorV2PolicyWorker:
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
         else:
-            # Collect info for collective communication
-            state_dict_info = {}
-            for name, tensor in state_dict_for_refit.items():
-                state_dict_info[name] = (tensor.shape, self.dtype)
+            # For non-colocated inference, only need metadata (shape, dtype) in HF format
+            # Use adapter's to_hf_metadata() to compute HF keys and shapes WITHOUT
+            # materializing indexed tensors, avoiding expensive all_gather on sharded DTensors
+            state_dict = self.model.state_dict()
+            if self.adapter is not None:
+                state_dict_info = self.adapter.to_hf_metadata(state_dict)
+            else:
+                # No adapter: use native format metadata
+                state_dict_info = {name: (tensor.shape, tensor.dtype) for name, tensor in state_dict.items()}
 
             return state_dict_info
 

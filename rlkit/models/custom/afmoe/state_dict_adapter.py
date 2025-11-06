@@ -118,6 +118,82 @@ class AFMoEStateDictAdapter(StateDictAdapter):
 
         return hf_state_dict
 
+    def to_hf_metadata(self, state_dict: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+        """Compute HF metadata without materializing indexed tensors.
+        
+        This avoids the expensive all_gather operations that occur when indexing
+        sharded DTensors, which can cause OOM on GPUs near capacity.
+        """
+        hf_metadata: dict[str, tuple[Any, Any]] = {}
+
+        for key, value in state_dict.items():
+            # Split grouped experts to per-expert weights
+            m = re.match(r"layers\.(\d+)\.moe\.experts\.(w[123])$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                which = m.group(2)
+                assert isinstance(value, torch.Tensor) and value.dim() == 3
+                num_experts = value.shape[0]
+                # Compute shape of each expert weight without indexing
+                expert_shape = value.shape[1:]  # Remove the expert dimension
+                for expert_idx in range(num_experts):
+                    if which == "w1":
+                        hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.gate_proj.weight"
+                    elif which == "w3":
+                        hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.up_proj.weight"
+                    else:  # w2
+                        hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.down_proj.weight"
+                    hf_metadata[hf_key] = (expert_shape, value.dtype)
+                continue
+
+            # Router gate mapping
+            m = re.match(r"layers\.(\d+)\.moe\.router\.gate\.weight$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                hf_metadata[f"model.layers.{layer_idx}.mlp.router.gate.weight"] = (value.shape, value.dtype)
+                continue
+
+            # Expert bias mapping
+            m = re.match(r"layers\.(\d+)\.moe\.expert_bias$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                hf_metadata[f"model.layers.{layer_idx}.mlp.expert_bias"] = (value.shape, value.dtype)
+                continue
+
+            # Shared experts mapping (if exists)
+            m = re.match(r"layers\.(\d+)\.moe\.shared_experts\.(w[123])\.weight$", key)
+            if m is not None:
+                layer_idx = m.group(1)
+                which = m.group(2)
+                if which == "w1":
+                    hf_key = f"model.layers.{layer_idx}.mlp.shared_experts.gate_proj.weight"
+                elif which == "w3":
+                    hf_key = f"model.layers.{layer_idx}.mlp.shared_experts.up_proj.weight"
+                else:  # w2
+                    hf_key = f"model.layers.{layer_idx}.mlp.shared_experts.down_proj.weight"
+                hf_metadata[hf_key] = (value.shape, value.dtype)
+                continue
+
+            # Dense path and common weights via direct map
+            if key in self.to_hf_dense_map:
+                hf_key = self.to_hf_dense_map[key]
+                hf_metadata[hf_key] = (value.shape, value.dtype)
+                continue
+
+            # Layer-indexed common weights
+            if key.startswith("layers."):
+                # Replace first number with {}
+                abstract_key = re.sub(r"(layers\.)\d+", r"\1{}", key, count=1)
+                if abstract_key in self.to_hf_dense_map:
+                    m2 = re.search(r"layers\.(\d+)", key)
+                    if m2 is None:
+                        continue
+                    layer_idx = m2.group(1)
+                    hf_key = self.to_hf_dense_map[abstract_key].format(layer_idx)
+                    hf_metadata[hf_key] = (value.shape, value.dtype)
+
+        return hf_metadata
+
     def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
         state_dict: dict[str, Any] = {}
 
