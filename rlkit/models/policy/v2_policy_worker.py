@@ -1904,6 +1904,10 @@ class DTensorV2PolicyWorker:
         torch.cuda.empty_cache()
         return model
 
+    def check_file_visibility(self, path: str) -> bool:
+        """Return True if the given filesystem path exists on this worker."""
+        return os.path.exists(path)
+
     def save_checkpoint(
         self,
         weights_path: str,

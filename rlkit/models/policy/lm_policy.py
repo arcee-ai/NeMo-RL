@@ -13,6 +13,7 @@
 # limitations under the License.
 import asyncio
 import os
+import uuid
 import warnings
 from collections import defaultdict
 from typing import Any, Optional, Union
@@ -233,6 +234,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             self.use_sequence_packing = False
 
         self.cfg = config
+        self.use_hf_checkpoint = use_hf_checkpoint
 
     def init_collective(
         self, ip: str, port: int, world_size: int
@@ -695,6 +697,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         tokenizer_path: Optional[str] = None,
     ) -> None:
         """Save a checkpoint of the model."""
+        if not self.use_hf_checkpoint:
+            self._verify_dcp_checkpoint_dir(weights_path)
+
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
             weights_path=weights_path,
@@ -702,6 +707,40 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             tokenizer_path=tokenizer_path,
         )
         ray.get(futures)
+
+    def _verify_dcp_checkpoint_dir(self, weights_path: str) -> None:
+        """Ensure the checkpoint directory is visible from every worker before DCP save."""
+        if weights_path is None:
+            raise ValueError("weights_path must be provided when using DCP checkpoints.")
+        target_dir = os.path.abspath(weights_path)
+        os.makedirs(target_dir, exist_ok=True)
+        marker_path = os.path.join(
+            target_dir,
+            f".dcp_fs_check_{uuid.uuid4().hex}",
+        )
+        # Create the marker file on the driver/head node
+        with open(marker_path, "wb"):
+            pass
+
+        try:
+            futures = self.worker_group.run_all_workers_single_data(
+                "check_file_visibility",
+                path=marker_path,
+            )
+            visibility = ray.get(futures)
+        finally:
+            try:
+                os.remove(marker_path)
+            except FileNotFoundError:
+                pass
+
+        missing_workers = [idx for idx, seen in enumerate(visibility) if not seen]
+        if missing_workers:
+            raise RuntimeError(
+                "Distributed checkpoint directory is not shared across all workers. "
+                f"Marker file {marker_path} was not visible on worker indices {missing_workers}. "
+                "Ensure the checkpoint directory resides on shared storage or enable HF checkpoints."
+            )
 
     def shutdown(self) -> bool:
         """Shut down all HF workers and clean up resources."""
