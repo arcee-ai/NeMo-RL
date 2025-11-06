@@ -224,8 +224,7 @@ class VLLMOpenAIServe:
 
         vllm_app = build_vllm_app(self._args)
         
-        vllm_config = self._engine_client.vllm_config
-        await init_app_state(self._engine_client, vllm_config, vllm_app.state, self._args)
+        await init_app_state(self._engine_client, vllm_app.state, self._args)
         vllm_app.state.engine_client = self._engine_client
         
         _serve_app.mount("/", vllm_app)
