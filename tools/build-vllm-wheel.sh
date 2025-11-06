@@ -33,6 +33,7 @@ echo "  Vllm Branch: $BRANCH"
 
 # Clone the repository
 echo "Cloning repository..."
+mkdir -p $BUILD_DIR
 git clone "$GIT_URL" "$BUILD_DIR"
 cd "$BUILD_DIR"
 git checkout "$BRANCH"
