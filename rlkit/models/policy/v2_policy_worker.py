@@ -1733,16 +1733,11 @@ class DTensorV2PolicyWorker:
                 metadata[name] = (tensor.shape, tensor.dtype)
             return metadata
 
-        debug_enabled = logger.isEnabledFor(logging.DEBUG)
         for hf_key, hf_tensor in self.adapter.stream_to_hf(state_dict):
             metadata[hf_key] = (hf_tensor.shape, hf_tensor.dtype)
             # Immediately drop tensor to keep peak memory down
             del hf_tensor
 
-        logger.info(
-            "Collected metadata for %d tensors for vLLM streaming (HF)",
-            len(metadata),
-        )
         return metadata
 
     @torch.no_grad()
