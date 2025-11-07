@@ -532,11 +532,12 @@ class GRPOTrainer:
                     with timer.time("generation"):
                         repeated_batch, rollout_metrics = await self._rollout_step(rollout_batch, timer)
                 
-                logging.info("Preparing for logprob inference...")
-                self._prepare_for_logprob_inference(timer)
+                if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
+                    logging.info("Preparing for logprob inference...")
+                    self._prepare_for_logprob_inference(timer)
 
-                logging.info("Computing logprobs...")
-                await self._compute_logprobs(repeated_batch, timer)
+                    logging.info("Computing logprobs...")
+                    await self._compute_logprobs(repeated_batch, timer)
                 
                 logging.info("Preparing for training...")
                 self._prepare_for_training(timer)
@@ -816,11 +817,10 @@ class GRPOTrainer:
         timer: Timer,
     ) -> None:
         with timer.time("reference_logprobs"):
-            if self.master_config["loss_fn"]["reference_policy_kl_penalty"] != 0:
-                reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
-                    "reference_logprobs"
-                ]
-                train_data["reference_policy_logprobs"] = reference_logprobs
+            reference_logprobs = self.policy.get_reference_policy_logprobs(train_data)[
+                "reference_logprobs"
+            ]
+            train_data["reference_policy_logprobs"] = reference_logprobs
         
         return train_data
 
