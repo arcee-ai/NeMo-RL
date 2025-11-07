@@ -738,6 +738,9 @@ class DTensorV2PolicyWorker:
             None
         )
         self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
+        self._streaming_refit_metadata: Optional[
+            dict[str, tuple[torch.Size, torch.dtype]]
+        ] = None
 
     def _load_reference_full_state_dict(
         self,
@@ -1717,10 +1720,15 @@ class DTensorV2PolicyWorker:
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
         else:
-            # For non-colocated inference, derive metadata by streaming the HF conversion
-            state_dict = self.model.state_dict()
-            state_dict_info = self._collect_hf_stream_metadata(state_dict)
-            return state_dict_info
+            if self._streaming_refit_metadata is None:
+                # For non-colocated inference, derive metadata by streaming the HF conversion
+                state_dict = self.model.state_dict()
+                try:
+                    state_dict_info = self._collect_hf_stream_metadata(state_dict)
+                finally:
+                    del state_dict
+                self._streaming_refit_metadata = state_dict_info
+            return self._streaming_refit_metadata
 
     def _collect_hf_stream_metadata(
         self, state_dict: dict[str, Any]
