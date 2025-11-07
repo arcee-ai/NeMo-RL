@@ -1717,17 +1717,33 @@ class DTensorV2PolicyWorker:
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
         else:
-            # For non-colocated inference, only need metadata (shape, dtype) in HF format
-            # Use adapter's to_hf_metadata() to compute HF keys and shapes WITHOUT
-            # materializing indexed tensors, avoiding expensive all_gather on sharded DTensors
+            # For non-colocated inference, derive metadata by streaming the HF conversion
             state_dict = self.model.state_dict()
-            if self.adapter is not None:
-                state_dict_info = self.adapter.to_hf_metadata(state_dict)
-            else:
-                # No adapter: use native format metadata
-                state_dict_info = {name: (tensor.shape, tensor.dtype) for name, tensor in state_dict.items()}
-
+            state_dict_info = self._collect_hf_stream_metadata(state_dict)
             return state_dict_info
+
+    def _collect_hf_stream_metadata(
+        self, state_dict: dict[str, Any]
+    ) -> dict[str, tuple[torch.Size, torch.dtype]]:
+        """Stream HF-converted tensors and log metadata before dropping buffers."""
+        metadata: dict[str, tuple[torch.Size, torch.dtype]] = {}
+
+        if self.adapter is None:
+            for name, tensor in state_dict.items():
+                metadata[name] = (tensor.shape, tensor.dtype)
+            return metadata
+
+        debug_enabled = logger.isEnabledFor(logging.DEBUG)
+        for hf_key, hf_tensor in self.adapter.stream_to_hf(state_dict):
+            metadata[hf_key] = (hf_tensor.shape, hf_tensor.dtype)
+            # Immediately drop tensor to keep peak memory down
+            del hf_tensor
+
+        logger.info(
+            "Collected metadata for %d tensors for vLLM streaming (HF)",
+            len(metadata),
+        )
+        return metadata
 
     @torch.no_grad()
     def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:

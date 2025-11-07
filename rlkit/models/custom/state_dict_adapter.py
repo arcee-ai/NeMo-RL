@@ -42,26 +42,6 @@ class BaseStateDictAdapter(ABC):
         """
         pass
 
-    def to_hf_metadata(self, state_dict: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
-        """Convert from native model state dict to HuggingFace format metadata only.
-
-        This method computes the HF key names and tensor shapes/dtypes WITHOUT
-        materializing indexed tensors, avoiding expensive operations like all_gather
-        on sharded DTensors.
-
-        Args:
-            state_dict: The native model state dict
-
-        Returns:
-            Dictionary mapping HF key names to (shape, dtype) tuples
-
-        Default implementation calls to_hf() and extracts metadata.
-        Subclasses can override for more efficient metadata-only conversion.
-        """
-        import torch
-        hf_state_dict = self.to_hf(state_dict)
-        return {name: (tensor.shape, tensor.dtype) for name, tensor in hf_state_dict.items()}
-
     @abstractmethod
     def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
         """Obtain native model state dict from HuggingFace format.
@@ -73,6 +53,17 @@ class BaseStateDictAdapter(ABC):
             The converted native model state dict
         """
         pass
+
+    def stream_to_hf(self, state_dict: dict[str, Any]):
+        """Yield converted HuggingFace tensors one at a time.
+
+        Default implementation materializes the HF state dict via to_hf before
+        yielding each (key, tensor) pair. Custom adapters are encouraged to
+        override this for true streaming behavior that limits peak memory.
+        """
+        hf_state_dict = self.to_hf(state_dict)
+        for name, tensor in hf_state_dict.items():
+            yield name, tensor
 
 
 class StateDictAdapter(BaseStateDictAdapter):
