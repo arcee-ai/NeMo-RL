@@ -1822,7 +1822,7 @@ class DTensorV2PolicyWorker:
                 if isinstance(tensor, DTensor):
                     tensor = tensor.full_tensor()
                 if self.rank == 0:
-                    tensor = tensor.to(self.dtype, non_blocking=True)
+                    # Preserve original dtype so it matches state_dict_info used by vLLM workers.
                     self.model_update_group.broadcast(tensor.data, src=0)
                 del tensor  # Free memory immediately
 
@@ -1847,7 +1847,7 @@ class DTensorV2PolicyWorker:
                 if isinstance(hf_tensor, DTensor):
                     hf_tensor = hf_tensor.full_tensor()
                 if self.rank == 0:
-                    hf_tensor = hf_tensor.to(self.dtype, non_blocking=True)
+                    # Preserve adapter-provided dtype to stay in sync with metadata sent to vLLM.
                     self.model_update_group.broadcast(hf_tensor.data, src=0)
                 del hf_tensor
                 torch.cuda.empty_cache()
@@ -1862,7 +1862,7 @@ class DTensorV2PolicyWorker:
                 if isinstance(tensor, DTensor):
                     tensor = tensor.full_tensor()
                 if self.rank == 0:
-                    tensor = tensor.to(self.dtype, non_blocking=True)
+                    # Keep dtype aligned with the metadata shared during prepare_refit_info.
                     self.model_update_group.broadcast(tensor.data, src=0)
                 del tensor
 
