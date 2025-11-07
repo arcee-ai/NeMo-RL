@@ -1733,12 +1733,7 @@ class DTensorV2PolicyWorker:
                 metadata[name] = (tensor.shape, tensor.dtype)
             return metadata
 
-        for hf_key, hf_tensor in self.adapter.stream_to_hf(state_dict):
-            metadata[hf_key] = (hf_tensor.shape, hf_tensor.dtype)
-            # Immediately drop tensor to keep peak memory down
-            del hf_tensor
-
-        return metadata
+        return self.adapter.get_hf_metadata(state_dict)
 
     @torch.no_grad()
     def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
@@ -1849,8 +1844,8 @@ class DTensorV2PolicyWorker:
                 if self.rank == 0:
                     # Preserve adapter-provided dtype to stay in sync with metadata sent to vLLM.
                     self.model_update_group.broadcast(hf_tensor.data, src=0)
-                del hf_tensor
-                torch.cuda.empty_cache()
+                # del hf_tensor
+                # torch.cuda.empty_cache()
         else:
             # Fallback: use to_hf but warn about memory usage
             logging.warning(

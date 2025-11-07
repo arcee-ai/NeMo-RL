@@ -65,6 +65,18 @@ class BaseStateDictAdapter(ABC):
         for name, tensor in hf_state_dict.items():
             yield name, tensor
 
+    def get_hf_metadata(self, state_dict: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+        """Return HF metadata as {name: (shape, dtype)}.
+
+        Default implementation materializes the converted state dict. Adapters
+        with expensive streaming conversions should override this.
+        """
+        hf_state_dict = self.to_hf(state_dict)
+        metadata = {}
+        for name, tensor in hf_state_dict.items():
+            metadata[name] = (tensor.shape, tensor.dtype)
+        return metadata
+
 
 class StateDictAdapter(BaseStateDictAdapter):
     """State dict adapter base class which provides convenient default behavior to build fqn_to_index_mapping"""
