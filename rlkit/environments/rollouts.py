@@ -238,26 +238,46 @@ def run_vf_rollouts(
     # Aggregate rollout metrics
     denom = max(batch_size, 1)
     
-    # Take the mean across all groups for each per-group metric
-    group_means = {}
-    for group_metrics in per_group_metrics:
-        for key, value in group_metrics.items():
-            if key not in group_means:
-                group_means[key] = []
-            group_means[key].append(value)
-    group_means = {k: sum(v) / len(per_group_metrics) for k, v in group_means.items()}
+    # Compute per-task metrics
+    task_metrics = {}
+    for i, task_name in enumerate(current_batch["task"]):
+        if task_name not in task_metrics:
+            task_metrics[task_name] = {"group_metrics": [], "rollout_metrics": []}
     
-    # Take the mean across all rollouts for each per-rollout metric
-    rollout_means = {}
-    for rollout_metrics in per_rollout_metrics:
-        for key, value in rollout_metrics.items():
-            # Only get mean of this metric if it is a number.
-            # It will still appear in the HTML rollout log, but won't be graphed.
-            if isinstance(value, (int, float)):
-                if key not in rollout_means:
-                    rollout_means[key] = []
-                rollout_means[key].append(value)
-    rollout_means = {k: sum(v) / len(per_rollout_metrics) for k, v in rollout_means.items()}
+    # Collect per-group metrics by task
+    for g_i, group in enumerate(by_group.values()):
+        # Get task name from first rollout in group (all rollouts in a group should have same task)
+        task_name = group[0][3]
+        task_metrics[task_name]["group_metrics"].append(per_group_metrics[g_i])
+    
+    # Collect per-rollout metrics by task
+    for i, task_name in enumerate(current_batch["task"]):
+        task_metrics[task_name]["rollout_metrics"].append(per_rollout_metrics[i])
+    
+    # Compute means per task
+    task_means = {}
+    for task_name, metrics in task_metrics.items():
+        task_means[task_name] = {}
+        
+        # Aggregate group metrics for this task
+        for group_metrics in metrics["group_metrics"]:
+            for key, value in group_metrics.items():
+                if key not in task_means[task_name]:
+                    task_means[task_name][key] = []
+                task_means[task_name][key].append(value)
+        
+        # Aggregate rollout metrics for this task
+        for rollout_metrics in metrics["rollout_metrics"]:
+            for key, value in rollout_metrics.items():
+                if isinstance(value, (int, float)):
+                    if key not in task_means[task_name]:
+                        task_means[task_name][key] = []
+                    task_means[task_name][key].append(value)
+        
+        # Compute means
+        task_means[task_name] = {
+            k: sum(v) / len(v) for k, v in task_means[task_name].items()
+        }
     
     rollout_metrics = {
         "total_turns": batch_size,
@@ -269,10 +289,7 @@ def run_vf_rollouts(
         "mean_total_tokens_per_sample": float(sum(sample_total_tokens) / denom),
         "mean_gen_tokens_per_sample": float(sum(sample_assistant_tokens) / denom),
         "mean_env_tokens_per_sample": 0.0,
-        "env": {
-            **group_means,
-            **rollout_means,
-        },
+        **task_means,
     }
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
