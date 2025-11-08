@@ -54,17 +54,6 @@ class BaseStateDictAdapter(ABC):
         """
         pass
 
-    def stream_to_hf(self, state_dict: dict[str, Any]):
-        """Yield converted HuggingFace tensors one at a time.
-
-        Default implementation materializes the HF state dict via to_hf before
-        yielding each (key, tensor) pair. Custom adapters are encouraged to
-        override this for true streaming behavior that limits peak memory.
-        """
-        hf_state_dict = self.to_hf(state_dict)
-        for name, tensor in hf_state_dict.items():
-            yield name, tensor
-
     def get_hf_metadata(self, state_dict: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
         """Return HF metadata as {name: (shape, dtype)}.
 
