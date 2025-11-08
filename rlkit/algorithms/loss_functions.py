@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Any, Optional, TypedDict, TypeVar
+import math
 
 import torch
 
@@ -315,6 +316,248 @@ class ClippedPGLossFn(LossFunction):
                 "kl_penalty": kl.item() / self.reference_policy_kl_penalty if kl else 0,
                 "token_mult_prob_error": mult_prob_error,
                 "sampling_importance_ratio": sample_importance_ratio.item(),
+                "num_valid_samples": sample_mask.sum().item(),
+                "approx_entropy": seq_entropy_approx.item(),
+            },
+        )
+
+
+class CISPOLossConfig(TypedDict):
+    epsilon_max: float
+    reference_policy_kl_penalty: float
+    use_on_policy_kl_approximation: bool
+    token_level_loss: bool
+
+
+class CISPOLossDataDict(TypedDict):
+    """Required keys for the CISPO loss function."""
+
+    input_ids: torch.Tensor
+    advantages: torch.Tensor
+    generation_logprobs: torch.Tensor
+    reference_policy_logprobs: torch.Tensor
+    token_mask: torch.Tensor
+    sample_mask: torch.Tensor
+    __extra__: Any
+
+
+class CISPOLossFn(LossFunction):
+    """CISPO (Clipped Importance Sampling Policy Optimization) loss function.
+
+    CISPO uses token-level importance sampling with clipping and stop-gradient
+    on the IS weights to stabilize training.
+
+    Formula:
+    L(θ) = E_t [ sg(min(ρ_t, ε_max)) * A_t * log π_θ(a_t|s_t) ] - β * KL(π_θ || π_ref)
+
+    where:
+    - ρ_t = π_θ(a_t|s_t) / π_gen(a_t|s_t) is the token-level importance ratio
+    - sg(·) is the stop-gradient operator (no gradient flows through the weight)
+    - ε_max is the clip cap for IS weights (typical 2-10)
+    - A_t is the advantage estimate (sequence-level, broadcast to tokens)
+    - β is the KL penalty coefficient (reference_policy_kl_penalty)
+    - KL(π_θ || π_ref) is the KL divergence between current and reference policy
+
+    Reference: Based on truncated importance sampling (Ionides, 2008) with
+    stop-gradient on weights for stable policy gradient estimation.
+    """
+
+    def __init__(self, cfg: CISPOLossConfig):
+        self.epsilon_max = cfg["epsilon_max"]
+        self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
+        self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
+        self.loss_type = (
+            LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
+        )
+
+    @torch.no_grad()
+    def _safe_is_weight(
+        self,
+        train_logprobs: torch.Tensor,
+        behavior_logprobs: torch.Tensor,
+        epsilon_max: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute importance sampling weights in log-space for numerical stability.
+
+        Args:
+            train_logprobs: Log probabilities from current policy (B, T)
+            behavior_logprobs: Log probabilities from behavior/generation policy (B, T)
+            epsilon_max: Maximum clipping value for IS weights
+
+        Returns:
+            w: Clipped importance weights (B, T)
+            clipped: Boolean mask indicating which weights were clipped (B, T)
+            log_ratio: Unclipped log importance ratios (B, T)
+        """
+        # Work in log-space for stability, then exponentiate
+        log_ratio = train_logprobs - behavior_logprobs
+        log_cap = math.log(epsilon_max)
+        log_w = torch.clamp(log_ratio, max=log_cap)
+        w = torch.exp(log_w)
+        clipped = log_ratio > log_cap
+        return w, clipped, log_ratio
+
+    def __call__(
+        self,
+        next_token_logits: Tensor,
+        data: BatchedDataDict[CISPOLossDataDict],
+        global_valid_seqs: torch.Tensor,
+        global_valid_toks: torch.Tensor,
+        vocab_parallel_rank: Optional[int] = None,
+        vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
+        context_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
+    ) -> tuple[torch.Tensor, dict]:
+        """CISPO loss function with token-level importance sampling."""
+        token_mask = data["token_mask"][:, 1:]
+        sample_mask = data["sample_mask"]
+        advantages = data["advantages"][:, 1:]
+        generation_logprobs = data["generation_logprobs"][:, 1:]
+        if "reference_policy_logprobs" in data:
+            reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
+        else:
+            reference_policy_logprobs = None
+        seq_index = data.get("seq_index", None)
+
+        mask = token_mask * sample_mask.unsqueeze(-1)
+
+        # Get current policy logprobs
+        if vocab_parallel_group is not None:
+            assert vocab_parallel_rank is not None, (
+                "vocab_parallel_rank must be provided when vocab_parallel_group is provided"
+            )
+            curr_logprobs = from_parallel_logits_to_logprobs(
+                next_token_logits,
+                data["input_ids"],
+                vocab_start_index=vocab_parallel_rank * next_token_logits.shape[-1],
+                vocab_end_index=(vocab_parallel_rank + 1) * next_token_logits.shape[-1],
+                tp_group=vocab_parallel_group,
+                inference_only=False,
+                cp_group=context_parallel_group,
+            )
+            # slice off to the correct length to remove potential CP padding
+            curr_logprobs = curr_logprobs[:, : data["input_ids"].shape[1] - 1]
+        elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
+                next_token_logits, data["input_ids"], seq_index=seq_index
+            )
+        else:
+            next_token_logits = next_token_logits.to(torch.float32)
+            next_token_logits_wo_last = next_token_logits[:, :-1]
+            next_token_logprobs = torch.nn.functional.log_softmax(
+                next_token_logits_wo_last, dim=-1
+            )
+            next_tokens = data["input_ids"][:, 1:].cuda()
+            if next_tokens.dtype != torch.int64:
+                raise ValueError(
+                    "next_tokens must be of type int64, got "
+                    + str(next_tokens.dtype)
+                    + " with shape "
+                    + str(next_tokens.shape)
+                    + " and "
+                    + str(next_tokens)
+                )
+            curr_logprobs = next_token_logprobs.gather(
+                dim=-1, index=next_tokens.unsqueeze(-1)
+            ).squeeze(-1)
+
+        # Calculate KL regularization
+        if self.reference_policy_kl_penalty != 0:
+            if reference_policy_logprobs is None:
+                raise ValueError(
+                    "reference_policy_logprobs is required when reference_policy_kl_penalty is nonzero"
+                )
+
+            if self.use_on_policy_kl_approximation:
+                kl_importance_weights = torch.exp(
+                    curr_logprobs - generation_logprobs
+                ).detach()
+                kl_importance_weights = torch.nan_to_num(
+                    kl_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
+                )
+            else:
+                kl_importance_weights = torch.ones_like(curr_logprobs)
+            kl = (
+                kl_importance_weights
+                * self.reference_policy_kl_penalty
+                * calculate_kl_penalty_joschu2020(
+                    logprobs_policy=curr_logprobs,
+                    logprobs_reference=reference_policy_logprobs,
+                )
+            )
+            if self.loss_type == LossType.TOKEN_LEVEL:
+                kl = masked_mean(
+                    kl, mask, global_normalization_factor=global_valid_toks
+                )
+            else:
+                kl = masked_mean(
+                    masked_mean(kl, token_mask, dim=-1),
+                    sample_mask,
+                    global_normalization_factor=global_valid_seqs,
+                )
+        else:
+            kl = torch.tensor(0.0)
+
+        # Compute importance weights with stop-gradient
+        w, clipped, log_ratio = self._safe_is_weight(
+            curr_logprobs, generation_logprobs, self.epsilon_max
+        )
+        # Stop-gradient: treat weights as constants
+        w = w.detach()
+
+        # CISPO policy gradient: -w * A * log π_train
+        token_loss = -w * advantages * curr_logprobs
+
+        # Apply mask and normalize
+        if self.loss_type == LossType.TOKEN_LEVEL:
+            actor_loss = masked_mean(
+                token_loss,
+                mask,
+                global_normalization_factor=global_valid_toks,
+            )
+        else:
+            actor_loss = masked_mean(
+                masked_mean(token_loss, token_mask, dim=-1),
+                sample_mask,
+                global_normalization_factor=global_valid_seqs,
+            )
+
+        loss = actor_loss + kl
+
+        # Compute statistics
+        with torch.no_grad():
+            ratio = torch.exp(log_ratio)
+            ratio_mean = masked_mean(
+                ratio, mask, global_normalization_factor=global_valid_toks
+            ).item()
+            ratio_clipped_mean = masked_mean(
+                w, mask, global_normalization_factor=global_valid_toks
+            ).item()
+            clip_frac = masked_mean(
+                clipped.float(), mask, global_normalization_factor=global_valid_toks
+            ).item()
+            adv_mean = masked_mean(
+                advantages, mask, global_normalization_factor=global_valid_toks
+            ).item()
+
+            # Approximate entropy
+            curr_logprobs_masked = curr_logprobs.masked_fill(mask == 0, 0.0)
+            generation_logprobs_masked = generation_logprobs.masked_fill(mask == 0, 0.0)
+            seq_entropy_approx = -masked_mean(
+                torch.exp(curr_logprobs_masked - generation_logprobs_masked)
+                * curr_logprobs_masked,
+                mask,
+                global_normalization_factor=global_valid_toks,
+            )
+
+        return (
+            loss,
+            {
+                "loss": loss.item(),
+                "ratio_mean": ratio_mean,
+                "ratio_clipped_mean": ratio_clipped_mean,
+                "clip_frac": clip_frac,
+                "adv_mean": adv_mean,
+                "kl_penalty": kl.item() / self.reference_policy_kl_penalty if kl else 0,
                 "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
             },
