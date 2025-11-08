@@ -21,11 +21,12 @@ loss_fn:
   # Set to "clipped_pg" (default) to use the standard ClippedPG/PPO/GRPO loss
   loss_type: "cispo"
   
-  # CISPO-specific parameters
-  epsilon_max: 5.0  # Clip cap for importance sampling weights (typical range: 2-10)
+  # CISPO uses one-sided clipping on the IS weight (truncated importance sampling)
+  # Clips ratios to [0, epsilon_max] - only upper bound is clipped
+  epsilon_max: 5.0  # Typical range: 2-10. Higher = less conservative
   
   # Shared parameters
-  reference_policy_kl_penalty: 0.01  # KL penalty coefficient (β)
+  reference_policy_kl_penalty: 0.0  # KL penalty coefficient (set to 0 to disable ref model)
   use_on_policy_kl_approximation: true  # Use on-policy KL approximation
   token_level_loss: true  # Use token-level loss (recommended for CISPO)
 

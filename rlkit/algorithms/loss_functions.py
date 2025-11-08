@@ -323,8 +323,10 @@ class ClippedPGLossFn(LossFunction):
 
 
 class CISPOLossConfig(TypedDict):
-    epsilon_max: float
+    """Configuration for CISPO (Clipped IS-weight Policy Optimization) loss."""
     reference_policy_kl_penalty: float
+    ratio_clip_min: float
+    ratio_clip_max: float
     use_on_policy_kl_approximation: bool
     token_level_loss: bool
 
@@ -334,6 +336,7 @@ class CISPOLossDataDict(TypedDict):
 
     input_ids: torch.Tensor
     advantages: torch.Tensor
+    prev_logprobs: torch.Tensor
     generation_logprobs: torch.Tensor
     reference_policy_logprobs: torch.Tensor
     token_mask: torch.Tensor
@@ -342,61 +345,46 @@ class CISPOLossDataDict(TypedDict):
 
 
 class CISPOLossFn(LossFunction):
-    """CISPO (Clipped Importance Sampling Policy Optimization) loss function.
-
-    CISPO uses token-level importance sampling with clipping and stop-gradient
-    on the IS weights to stabilize training.
-
+    """CISPO (Clipped IS-weight Policy Optimization) loss function.
+    
+    CISPO implements truncated importance-sampling REINFORCE by clipping the IS weight
+    and stopping its gradient. Unlike PPO/GRPO/DAPO which clip the token update
+    (potentially zeroing gradients on clipped tokens), CISPO clips the weight that
+    scales the REINFORCE term, keeping gradients for all tokens while bounding their
+    magnitude.
+    
     Formula:
-    L(θ) = E_t [ sg(min(ρ_t, ε_max)) * A_t * log π_θ(a_t|s_t) ] - β * KL(π_θ || π_ref)
-
+        L(θ) = -E_t [ sg(clip(r_t, r_min, r_max)) * A_t * log π_θ(a_t|s_t) ] - β * KL(π_θ || π_ref)
+    
     where:
-    - ρ_t = π_θ(a_t|s_t) / π_gen(a_t|s_t) is the token-level importance ratio
-    - sg(·) is the stop-gradient operator (no gradient flows through the weight)
-    - ε_max is the clip cap for IS weights (typical 2-10)
-    - A_t is the advantage estimate (sequence-level, broadcast to tokens)
-    - β is the KL penalty coefficient (reference_policy_kl_penalty)
-    - KL(π_θ || π_ref) is the KL divergence between current and reference policy
-
-    Reference: Based on truncated importance sampling (Ionides, 2008) with
-    stop-gradient on weights for stable policy gradient estimation.
+        - r_t = π_θ(a_t|s_t) / π_old(a_t|s_t) is the importance-sampling ratio
+        - sg() denotes stop-gradient (detach)
+        - clip(r_t, r_min, r_max) bounds the IS weight
+        - A_t is the advantage estimate
+        - β is the KL penalty coefficient
+    
+    Key differences from PPO/GRPO/DAPO:
+        1. Clips the IS weight, not the token update (rA)
+        2. Stop-gradient on the clipped weight is mandatory
+        3. All tokens contribute gradients (no gradient suppression on high-ratio tokens)
+        4. More robust to clipping-ratio hyperparameter choices
+        5. Helps prevent entropy collapse by keeping rare-token gradients
+    
+    References:
+        - ScaleRL (Oct 2025): https://arxiv.org/abs/2510.08475
+        - MiniMax-M1 (Jun 2025): https://arxiv.org/abs/2506.09419
+        - Ionides (2008): Classical Truncated Importance Sampling theory
     """
-
+    
     def __init__(self, cfg: CISPOLossConfig):
         self.epsilon_max = cfg["epsilon_max"]
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
         self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
+        
         self.loss_type = (
             LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
         )
-
-    @torch.no_grad()
-    def _safe_is_weight(
-        self,
-        train_logprobs: torch.Tensor,
-        behavior_logprobs: torch.Tensor,
-        epsilon_max: float,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute importance sampling weights in log-space for numerical stability.
-
-        Args:
-            train_logprobs: Log probabilities from current policy (B, T)
-            behavior_logprobs: Log probabilities from behavior/generation policy (B, T)
-            epsilon_max: Maximum clipping value for IS weights
-
-        Returns:
-            w: Clipped importance weights (B, T)
-            clipped: Boolean mask indicating which weights were clipped (B, T)
-            log_ratio: Unclipped log importance ratios (B, T)
-        """
-        # Work in log-space for stability, then exponentiate
-        log_ratio = train_logprobs - behavior_logprobs
-        log_cap = math.log(epsilon_max)
-        log_w = torch.clamp(log_ratio, max=log_cap)
-        w = torch.exp(log_w)
-        clipped = log_ratio > log_cap
-        return w, clipped, log_ratio
-
+    
     def __call__(
         self,
         next_token_logits: Tensor,
@@ -407,19 +395,23 @@ class CISPOLossFn(LossFunction):
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
         context_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
     ) -> tuple[torch.Tensor, dict]:
-        """CISPO loss function with token-level importance sampling."""
+        """CISPO loss computation with clipped, stop-gradient IS weights."""
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
         advantages = data["advantages"][:, 1:]
+        if "prev_logprobs" in data:
+            prev_logprobs = data["prev_logprobs"][:, 1:]
+        else:
+            prev_logprobs = None
         generation_logprobs = data["generation_logprobs"][:, 1:]
         if "reference_policy_logprobs" in data:
             reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
         else:
             reference_policy_logprobs = None
         seq_index = data.get("seq_index", None)
-
+        
         mask = token_mask * sample_mask.unsqueeze(-1)
-
+        
         # Get current policy logprobs
         if vocab_parallel_group is not None:
             assert vocab_parallel_rank is not None, (
@@ -434,7 +426,6 @@ class CISPOLossFn(LossFunction):
                 inference_only=False,
                 cp_group=context_parallel_group,
             )
-            # slice off to the correct length to remove potential CP padding
             curr_logprobs = curr_logprobs[:, : data["input_ids"].shape[1] - 1]
         elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
@@ -449,25 +440,22 @@ class CISPOLossFn(LossFunction):
             next_tokens = data["input_ids"][:, 1:].cuda()
             if next_tokens.dtype != torch.int64:
                 raise ValueError(
-                    "next_tokens must be of type int64, got "
-                    + str(next_tokens.dtype)
-                    + " with shape "
-                    + str(next_tokens.shape)
-                    + " and "
-                    + str(next_tokens)
+                    f"next_tokens must be of type int64, got {next_tokens.dtype} "
+                    f"with shape {next_tokens.shape}"
                 )
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
-
+        
         # Calculate KL regularization
         if self.reference_policy_kl_penalty != 0:
             if reference_policy_logprobs is None:
                 raise ValueError(
                     "reference_policy_logprobs is required when reference_policy_kl_penalty is nonzero"
                 )
-
+            
             if self.use_on_policy_kl_approximation:
+                # Importance-weight the KL for on-policy approximation
                 kl_importance_weights = torch.exp(
                     curr_logprobs - generation_logprobs
                 ).detach()
@@ -476,6 +464,7 @@ class CISPOLossFn(LossFunction):
                 )
             else:
                 kl_importance_weights = torch.ones_like(curr_logprobs)
+            
             kl = (
                 kl_importance_weights
                 * self.reference_policy_kl_penalty
@@ -484,6 +473,7 @@ class CISPOLossFn(LossFunction):
                     logprobs_reference=reference_policy_logprobs,
                 )
             )
+            
             if self.loss_type == LossType.TOKEN_LEVEL:
                 kl = masked_mean(
                     kl, mask, global_normalization_factor=global_valid_toks
@@ -496,50 +486,57 @@ class CISPOLossFn(LossFunction):
                 )
         else:
             kl = torch.tensor(0.0)
-
-        # Compute importance weights with stop-gradient
-        w, clipped, log_ratio = self._safe_is_weight(
-            curr_logprobs, generation_logprobs, self.epsilon_max
-        )
-        # Stop-gradient: treat weights as constants
-        w = w.detach()
-
-        # CISPO policy gradient: -w * A * log π_train
-        token_loss = -w * advantages * curr_logprobs
-
-        # Apply mask and normalize
+        
+        # If we are only doing one step per batch, we can just use the same logprobs detached for the ratio
+        if prev_logprobs is None:
+            prev_logprobs = curr_logprobs.detach()
+        
+        # CISPO core: compute IS ratio, clip it, and stop gradient
+        ratios = (curr_logprobs - prev_logprobs).exp()
+        # One-sided clipping: only clip the upper bound (truncated IS)
+        ratios_clipped = ratios.clamp(max=self.epsilon_max)
+        # Critical: stop gradient on the clipped weight
+        weight = ratios_clipped.detach()
+        
+        # CISPO loss: -E[weight * A * log π_θ]
+        # The weight is detached, so gradients only flow through curr_logprobs
+        cispo_loss = -weight * advantages * curr_logprobs
+        
+        # Aggregate loss
         if self.loss_type == LossType.TOKEN_LEVEL:
             actor_loss = masked_mean(
-                token_loss,
+                cispo_loss,
                 mask,
                 global_normalization_factor=global_valid_toks,
             )
         else:
             actor_loss = masked_mean(
-                masked_mean(token_loss, token_mask, dim=-1),
+                masked_mean(cispo_loss, token_mask, dim=-1),
                 sample_mask,
                 global_normalization_factor=global_valid_seqs,
             )
-
-        loss = actor_loss + kl
-
-        # Compute statistics
+        
+        # Compute sampling importance ratio for diagnostics
+        actor_importance_weights = torch.exp(prev_logprobs - generation_logprobs)
+        actor_importance_weights = torch.nan_to_num(
+            actor_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
+        )
+        sample_importance_ratio = masked_mean(
+            actor_importance_weights,
+            mask,
+            global_normalization_factor=global_valid_toks,
+        )
+        
+        # Compute multiplicative probability error for diagnostics
+        lp_error = torch.abs(generation_logprobs - prev_logprobs)
+        mult_prob_error = masked_mean(
+            torch.exp(lp_error * mask),
+            mask,
+            global_normalization_factor=global_valid_toks,
+        ).item()
+        
+        # Approximate entropy
         with torch.no_grad():
-            ratio = torch.exp(log_ratio)
-            ratio_mean = masked_mean(
-                ratio, mask, global_normalization_factor=global_valid_toks
-            ).item()
-            ratio_clipped_mean = masked_mean(
-                w, mask, global_normalization_factor=global_valid_toks
-            ).item()
-            clip_frac = masked_mean(
-                clipped.float(), mask, global_normalization_factor=global_valid_toks
-            ).item()
-            adv_mean = masked_mean(
-                advantages, mask, global_normalization_factor=global_valid_toks
-            ).item()
-
-            # Approximate entropy
             curr_logprobs_masked = curr_logprobs.masked_fill(mask == 0, 0.0)
             generation_logprobs_masked = generation_logprobs.masked_fill(mask == 0, 0.0)
             seq_entropy_approx = -masked_mean(
@@ -548,16 +545,42 @@ class CISPOLossFn(LossFunction):
                 mask,
                 global_normalization_factor=global_valid_toks,
             )
-
+        
+        loss = actor_loss + kl
+        
+        # Compute diagnostic metrics
+        with torch.no_grad():
+            probs_ratio = masked_mean(
+                ratios.detach(),
+                mask,
+                global_normalization_factor=global_valid_toks,
+            ).item()
+            probs_ratio_clipped = masked_mean(
+                ratios_clipped.detach(),
+                mask,
+                global_normalization_factor=global_valid_toks,
+            ).item()
+            # Fraction of tokens where IS ratio was clipped (one-sided: only upper bound)
+            clipped_mask = (ratios > self.epsilon_max).float()
+            fraction_clipped = masked_mean(
+                clipped_mask,
+                mask,
+                global_normalization_factor=global_valid_toks,
+            ).item()
+            # Max IS ratio (useful for monitoring off-policy drift)
+            max_ratio = (ratios * mask).max().item()
+        
         return (
             loss,
             {
                 "loss": loss.item(),
-                "ratio_mean": ratio_mean,
-                "ratio_clipped_mean": ratio_clipped_mean,
-                "clip_frac": clip_frac,
-                "adv_mean": adv_mean,
+                "probs_ratio": probs_ratio,
+                "probs_ratio_clipped": probs_ratio_clipped,
+                "fraction_clipped": fraction_clipped,
+                "max_ratio": max_ratio,
                 "kl_penalty": kl.item() / self.reference_policy_kl_penalty if kl else 0,
+                "token_mult_prob_error": mult_prob_error,
+                "sampling_importance_ratio": sample_importance_ratio.item(),
                 "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
             },
