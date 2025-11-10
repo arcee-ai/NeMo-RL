@@ -1724,30 +1724,31 @@ class DTensorV2PolicyWorker:
                     state_dict_info = self._collect_hf_stream_metadata(state_dict)
                 finally:
                     del state_dict
-                self._streaming_refit_metadata = state_dict_info
             
-            # Find all same-size (and same dtype) tensors
-            similar_tensors = {}
-            for name, refit_info in self._streaming_refit_metadata.items():
-                if refit_info[0] not in similar_tensors:
-                    similar_tensors[refit_info] = []
-                similar_tensors[refit_info].append(name)
-            
-            TENSOR_PACK_MAX = 1000
-            
-            new_metadata = {}
-            
-            for refit_info, tensors in similar_tensors.items():
-                for i in range(0, len(tensors), TENSOR_PACK_MAX):
-                    chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
-                    key = "packed_tensor_" + refit_info + "_" + str(i)
-                    new_metadata[key] = {
-                        "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
-                        "dtype": refit_info[1], 
-                        "packed_tensors": chunk_tensors
-                    }
-            
-            return new_metadata
+                # Find all same-size (and same dtype) tensors
+                similar_tensors = {}
+                for name, refit_info in state_dict_info.items():
+                    if refit_info[0] not in similar_tensors:
+                        similar_tensors[refit_info] = []
+                    similar_tensors[refit_info].append(name)
+                
+                TENSOR_PACK_MAX = 10000
+                
+                new_metadata = {}
+                
+                for refit_info, tensors in similar_tensors.items():
+                    for i in range(0, len(tensors), TENSOR_PACK_MAX):
+                        chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
+                        key = "packed_tensor_" + str(refit_info) + "_" + str(i)
+                        new_metadata[key] = {
+                            "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
+                            "dtype": refit_info[1], 
+                            "packed_tensors": chunk_tensors
+                        }
+                
+                self._streaming_refit_metadata = new_metadata
+
+            return self._streaming_refit_metadata
 
     def _collect_hf_stream_metadata(
         self, state_dict: dict[str, Any]
@@ -1867,8 +1868,9 @@ class DTensorV2PolicyWorker:
             else:
                 collected_tensors = [state_dict[hf_key] for hf_key in chunk_info["packed_tensors"]]
             
-            chunk_tensor = torch.stack(collected_tensors)
-            self.model_update_group.broadcast(chunk_tensor, src=0)
+            if self.rank == 0:
+                chunk_tensor = torch.stack(collected_tensors)
+                self.model_update_group.broadcast(chunk_tensor, src=0)
 
         # Manually move model to cpu for cpu offload case
         # cpu offload needs model on CPU before model forward
