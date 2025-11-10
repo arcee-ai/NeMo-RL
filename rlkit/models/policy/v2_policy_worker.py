@@ -835,6 +835,7 @@ class DTensorV2PolicyWorker:
         return state_dict
 
     def _group_state_dict_by_shape_and_dtype(
+        self,
         metadata: dict[str, tuple[torch.Size, torch.dtype]],
     ) -> dict[tuple[torch.Size, torch.dtype], list[str]]:
         """Bucket parameter names that share identical shape+dtype metadata."""
@@ -1735,7 +1736,7 @@ class DTensorV2PolicyWorker:
                     del state_dict
             
                 # Find all same-size (and same dtype) tensors
-                similar_tensors = _group_state_dict_by_shape_and_dtype(state_dict_info)
+                similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
                 
                 TENSOR_PACK_MAX = 10000
                 
