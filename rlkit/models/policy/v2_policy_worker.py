@@ -1713,9 +1713,6 @@ class DTensorV2PolicyWorker:
             # Collect info for streaming multiple tensors
             self.refit_param_info = []
             for name, tensor in state_dict_for_refit.items():
-                print(
-                    f"Preparing refit info for {name} with shape {tensor.shape} and dtype {tensor.dtype}"
-                )
                 # dtensor's numel will return complete tensor instead of only local tensor
                 size_in_bytes = tensor.element_size() * tensor.numel()
                 self.refit_param_info.append((name, size_in_bytes))
@@ -1728,7 +1725,29 @@ class DTensorV2PolicyWorker:
                 finally:
                     del state_dict
                 self._streaming_refit_metadata = state_dict_info
-            return self._streaming_refit_metadata
+            
+            # Find all same-size (and same dtype) tensors
+            similar_tensors = {}
+            for name, refit_info in self._streaming_refit_metadata.items():
+                if refit_info[0] not in similar_tensors:
+                    similar_tensors[refit_info] = []
+                similar_tensors[refit_info].append(name)
+            
+            TENSOR_PACK_MAX = 1000
+            
+            new_metadata = {}
+            
+            for refit_info, tensors in similar_tensors.items():
+                for i in range(0, len(tensors), TENSOR_PACK_MAX):
+                    chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
+                    key = "packed_tensor_" + refit_info + "_" + str(i)
+                    new_metadata[key] = {
+                        "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
+                        "dtype": refit_info[1], 
+                        "packed_tensors": chunk_tensors
+                    }
+            
+            return new_metadata
 
     def _collect_hf_stream_metadata(
         self, state_dict: dict[str, Any]
@@ -1812,24 +1831,44 @@ class DTensorV2PolicyWorker:
                 "using non-colocated generation since it will have an extra onload and offload at refit stage."
             )
             self.model = self.move_to_cuda(self.model)
-
-        # Stream conversion and broadcast to avoid doubling memory usage
+        
         state_dict = self.model.state_dict()
         
-        # No adapter: broadcast native format directly
-        for name, tensor in state_dict.items():
-            if isinstance(tensor, DTensor):
-                tensor = tensor.full_tensor()
+        # First, build a mapping from hf keys to real state dict keys if necessary
+        # TODO: We assume TT -> HF is always 1 -> [1, inf). This may be incorrect on some future models.
+        hf_key_to_native_key = {}
+        if self.adapter is not None:
+            for native_key, native_tensor in state_dict.items():
+                hf_minidict = self.adapter.to_hf({native_key: native_tensor})
+                for hf_key in hf_minidict:
+                    hf_key_to_native_key[hf_key] = native_key
+                del hf_minidict
+        else:
+            # No adapter, map hf keys to native keys directly
+            hf_key_to_native_key = {k: k for k in state_dict.keys()}
+        
+        for _, chunk_info in self._streaming_refit_metadata.items():
+            # Collect all of the necessary tensors for this chunk
+            if self.adapter is not None:
+                minidict_to_convert = {}
+                for hf_key in chunk_info["packed_tensors"]:
+                    native_key = hf_key_to_native_key[hf_key]
+                    
+                    native_tensor = state_dict[native_key]
+                    if isinstance(native_tensor, DTensor):
+                        native_tensor = native_tensor.full_tensor()
+                    minidict_to_convert[native_key] = native_tensor
+                
+                converted_minidict = self.adapter.to_hf(minidict_to_convert)
+                
+                collected_tensors = []
+                for hf_key in chunk_info["packed_tensors"]:
+                    collected_tensors.append(converted_minidict[hf_key])
+            else:
+                collected_tensors = [state_dict[hf_key] for hf_key in chunk_info["packed_tensors"]]
             
-            # If we have a state dict adapter, use it to convert the tensor to HF format
-            if self.rank == 0:
-                if self.adapter is not None:
-                    for name, hf_tensor in self.adapter.to_hf({name: tensor}).items():
-                        self.model_update_group.broadcast(hf_tensor.data, src=0)
-                else:
-                    # Preserve original dtype so it matches state_dict_info used by vLLM workers.
-                    self.model_update_group.broadcast(tensor.data, src=0)
-            del tensor  # Free memory immediately
+            chunk_tensor = torch.stack(collected_tensors)
+            self.model_update_group.broadcast(chunk_tensor, src=0)
 
         # Manually move model to cpu for cpu offload case
         # cpu offload needs model on CPU before model forward

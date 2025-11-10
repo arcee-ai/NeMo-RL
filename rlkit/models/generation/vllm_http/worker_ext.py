@@ -186,10 +186,17 @@ class VllmHttpWorkerExtension:
         )
 
         try:
-            for name, (shape, dtype) in self.state_dict_info.items():
-                weight = torch.empty(shape, dtype=dtype, device="cuda")
-                self.model_update_group.broadcast(weight, src=0)
-                self.model_runner.model.load_weights(weights=[(name, weight)])
+            for _, chunk_info in self.state_dict_info.items():
+                chunk_shape = chunk_info["shape"]
+                chunk_dtype = chunk_info["dtype"]
+                chunk_tensors = chunk_info["packed_tensors"]
+                
+                chunk = torch.empty(chunk_shape, dtype=chunk_dtype, device="cuda")
+                self.model_update_group.broadcast(chunk, src=0)
+                
+                for i, weight_name in enumerate(chunk_tensors):
+                    weight_tensor = chunk[i]
+                    self.model_runner.model.load_weights(weights=[(weight_name, weight_tensor)])
         except Exception as e:
             print(
                 f"Error in VllmInternalWorkerExtension.update_weights_from_collective: {e}"
