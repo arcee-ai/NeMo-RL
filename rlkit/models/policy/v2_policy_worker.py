@@ -834,6 +834,15 @@ class DTensorV2PolicyWorker:
             return self.adapter.to_hf(state_dict)
         return state_dict
 
+    def _group_state_dict_by_shape_and_dtype(
+        metadata: dict[str, tuple[torch.Size, torch.dtype]],
+    ) -> dict[tuple[torch.Size, torch.dtype], list[str]]:
+        """Bucket parameter names that share identical shape+dtype metadata."""
+        grouped: dict[tuple[torch.Size, torch.dtype], list[str]] = defaultdict(list)
+        for name, refit_info in metadata.items():
+            grouped[refit_info].append(name)
+        return grouped
+
     # Refer to nemo impl. Below is original comment.
     # based on https://github.com/pytorch/torchtitan/blob/main/torchtitan/distributed/utils.py#L113
     @staticmethod
@@ -1726,11 +1735,7 @@ class DTensorV2PolicyWorker:
                     del state_dict
             
                 # Find all same-size (and same dtype) tensors
-                similar_tensors = {}
-                for name, refit_info in state_dict_info.items():
-                    if refit_info[0] not in similar_tensors:
-                        similar_tensors[refit_info] = []
-                    similar_tensors[refit_info].append(name)
+                similar_tensors = _group_state_dict_by_shape_and_dtype(state_dict_info)
                 
                 TENSOR_PACK_MAX = 10000
                 
