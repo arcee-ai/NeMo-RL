@@ -67,8 +67,8 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, pu
         output_dir = os.path.abspath(output_dir)
         os.makedirs(output_dir, exist_ok=True)
     else:
-        # Use output_dir as the repo name (extract basename if it's a path)
-        repo_name = os.path.basename(output_dir.rstrip('/'))
+        # Use output_dir as the full repo name (e.g., "org/model-name")
+        repo_name = output_dir
 
     # Load native model and state
     print("Loading native model and state")
