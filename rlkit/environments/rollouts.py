@@ -18,8 +18,7 @@ def split_rollouts_by_group(
     tasks: list[str],
     grpo_gids: list[int],
 ) -> dict[int, list[tuple[vf.Messages, str, vf.Info, str, int]]]:
-    """
-    Split rollouts by GRPO group.
+    """Split rollouts by GRPO group.
 
     Args:
         prompts: List of prompts.
@@ -47,7 +46,6 @@ def build_rollouts_log(
     env_metrics: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Construct rich per-sample rollout logs for metrics dashboards."""
-
     rollout_log: list[dict[str, Any]] = []
     for i in range(len(message_logs)):
         metrics = sample_metrics[i]
@@ -76,9 +74,11 @@ def run_vf_rollouts(
     assert isinstance(policy_generation, VllmHttpGeneration), "Verifiers environments require a vLLM client."
     
     prompt = input_batch["prompt"]
-    info = input_batch["info"]
-    answer = input_batch["answer"]
+    info = input_batch.get("info", None)
+    answer = input_batch.get("answer", None)
     task = input_batch["task"]
+    
+    assert info is not None or answer is not None, "At least one of 'info' or 'answer' must be provided."
 
     by_group = split_rollouts_by_group(prompt, answer, info, task, grpo_gids)
 
