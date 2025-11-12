@@ -76,7 +76,7 @@ def run_vf_rollouts(
     prompt = input_batch["prompt"]
     info = input_batch.get("info", None)
     answer = input_batch.get("answer", None)
-    task = input_batch["task"]
+    task = input_batch.get("task", None)
     
     assert info is not None or answer is not None, "At least one of 'info' or 'answer' must be provided."
 
