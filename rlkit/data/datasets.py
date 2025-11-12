@@ -116,6 +116,20 @@ def transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
         "sample_mask": torch.tensor(sample_mask)
     }
 
+def sharegpt_to_oai(x: dict) -> dict:
+    convo = []
+    for message in x.get("conversations", []):
+        if message.get("from") == "human":
+            convo.append({"role": "user", "content": message.get("value")})
+        elif message.get("from") == "gpt":
+            convo.append({"role": "assistant", "content": message.get("value")})
+        else:
+            raise ValueError(f"Unknown message role: {message.get('from')}")
+    return {
+        "conversations": convo,
+        "oai_tools": [],
+    }
+
 transformations: dict[str, SFTDataTransformFn] = {
     "axolotl": lambda _, x: {
         "input_ids": torch.tensor(x["input_ids"]),
@@ -128,6 +142,10 @@ transformations: dict[str, SFTDataTransformFn] = {
             "conversations": x.get("prompt", []) + x.get("completion", []),
             "oai_tools": x.get("tools", [])
         }
+    ),
+    "sharegpt": lambda tokenizer, x: transform_oai(
+        tokenizer,
+        sharegpt_to_oai(x)
     ),
     "openai": transform_oai,
 }
