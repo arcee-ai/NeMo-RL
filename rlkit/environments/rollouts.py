@@ -74,9 +74,9 @@ def run_vf_rollouts(
     assert isinstance(policy_generation, VllmHttpGeneration), "Verifiers environments require a vLLM client."
     
     prompt = input_batch["prompt"]
-    info = input_batch.get("info", None)
-    answer = input_batch.get("answer", None)
-    task = input_batch.get("task", None)
+    info = input_batch.get("info", [None]*len(prompt))
+    answer = input_batch.get("answer", [None]*len(prompt))
+    task = input_batch.get("task", [None]*len(prompt))
     
     assert info is not None or answer is not None, "At least one of 'info' or 'answer' must be provided."
 
