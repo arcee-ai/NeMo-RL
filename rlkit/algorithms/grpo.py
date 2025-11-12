@@ -1119,6 +1119,19 @@ class GRPOTrainer:
                 continue
             percent = (value / total_time * 100) if total_time > 0 else 0
             print(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
+        
+        # Display per-rollout timing statistics if available
+        if "generation_time_min" in rollout_metrics:
+            print(f"\n  Generation Timing (per rollout):")
+            print(f"    • Min: {rollout_metrics['generation_time_min']:.2f}s")
+            print(f"    • Max: {rollout_metrics['generation_time_max']:.2f}s")
+            print(f"    • Avg: {rollout_metrics['generation_time_avg']:.2f}s")
+        
+        if "scoring_time_min" in rollout_metrics:
+            print(f"\n  Scoring Timing (per rollout):")
+            print(f"    • Min: {rollout_metrics['scoring_time_min']:.2f}s")
+            print(f"    • Max: {rollout_metrics['scoring_time_max']:.2f}s")
+            print(f"    • Avg: {rollout_metrics['scoring_time_avg']:.2f}s")
 
         self.logger.log_metrics(metrics, step + 1, prefix="train")
         self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")

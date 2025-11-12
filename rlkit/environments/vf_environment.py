@@ -1,4 +1,5 @@
 from typing import Any, Optional, TypedDict, NotRequired
+import time
 
 import ray
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
@@ -59,7 +60,7 @@ class VfEnvironment(EnvironmentInterface):
         score_rollouts: bool = True,
         max_concurrent: int = -1,
         **kwargs,
-    ) -> tuple[vf.GenerateOutputs, vf.ProcessedOutputs]:
+    ) -> vf.GenerateOutputs:
         if self.client is None:
             # Get timeout settings from config or use defaults.
             # Default timeout is 600 seconds (10 minutes) for large batch processing.
@@ -80,14 +81,117 @@ class VfEnvironment(EnvironmentInterface):
                 http_client=httpxClient,
             )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
-        results = await self.env.a_generate(
-            inputs=inputs,
-            client=self.client,
-            model="policy",
-            sampling_args=sampling_args,
-            score_rollouts=score_rollouts,
-            max_concurrent=max_concurrent,
-            **kwargs,
+        
+        # Manually call generation and scoring separately to track timing
+        if isinstance(inputs, vf.GenerateInputs):
+            inputs_dict = inputs.model_dump()
+        elif isinstance(inputs, Dataset):
+            inputs_dict = {col: inputs[col] for col in inputs.column_names}
+        else:
+            inputs_dict = inputs
+        
+        # Prepare inputs
+        from copy import deepcopy
+        import json
+        results_dict = {col: deepcopy(inputs_dict[col]) for col in inputs_dict}
+        if "prompt" not in results_dict:
+            raise ValueError("prompt column not found in inputs")
+        if "answer" not in results_dict:
+            results_dict["answer"] = [""] * len(results_dict["prompt"])
+        if "task" not in results_dict:
+            results_dict["task"] = ["default"] * len(results_dict["prompt"])
+        if "info" not in results_dict:
+            results_dict["info"] = [{}] * len(results_dict["prompt"])
+        
+        # Deserialize info if it's a JSON string (for compatibility with dataset storage)
+        for i, info in enumerate(results_dict["info"]):
+            if isinstance(info, str):
+                results_dict["info"][i] = json.loads(info)
+        
+        import asyncio
+        
+        # Process rollouts in parallel while tracking individual timings
+        num_rollouts = len(results_dict["prompt"])
+        
+        async def generate_single_rollout(i):
+            """Generate a single rollout and return its timing + results"""
+            gen_start = time.perf_counter()
+            rollout_result = await self.env.run_rollouts(
+                prompts=[results_dict["prompt"][i]],
+                answers=[results_dict["answer"][i]],
+                tasks=[results_dict["task"][i]],
+                infos=[results_dict["info"][i]],
+                client=self.client,
+                model="policy",
+                sampling_args=sampling_args,
+                max_concurrent=1,  # Each task handles 1 rollout
+                **kwargs,
+            )
+            gen_time = time.perf_counter() - gen_start
+            
+            completion = rollout_result[0][0]
+            state = rollout_result[0][1]
+            
+            return {
+                "index": i,
+                "completion": completion,
+                "state": state,
+                "gen_time": gen_time,
+            }
+        
+        # PHASE 1: Generate all rollouts in parallel
+        gen_tasks = [generate_single_rollout(i) for i in range(num_rollouts)]
+        gen_results = await asyncio.gather(*gen_tasks)
+        
+        # Sort by index to maintain order
+        gen_results.sort(key=lambda x: x["index"])
+        
+        # Extract generation results
+        completions = [r["completion"] for r in gen_results]
+        states = [r["state"] for r in gen_results]
+        generation_times = [r["gen_time"] for r in gen_results]
+        
+        # PHASE 2: Score all rollouts together as a batch (they need to see each other for relative scoring)
+        scoring_times = []
+        rewards = []
+        
+        if score_rollouts:
+            # Score all rollouts together in one batch call
+            score_start = time.perf_counter()
+            rollout_scores = await self.env.rubric.score_rollouts(
+                prompts=results_dict["prompt"],
+                completions=completions,
+                answers=results_dict["answer"],
+                states=states,
+                tasks=results_dict["task"],
+                infos=results_dict["info"],
+                apply_weights=True,
+            )
+            score_end = time.perf_counter()
+            total_score_time = score_end - score_start
+            
+            rewards = rollout_scores.reward
+            
+            # All rollouts scored together - report the total batch time for each
+            # (this is the wall-clock time, which equals per-rollout time if they run in parallel)
+            scoring_times = [total_score_time] * num_rollouts
+        else:
+            rewards = [0.0] * num_rollouts
+            scoring_times = [0.0] * num_rollouts
+        
+        results = vf.GenerateOutputs(
+            prompt=results_dict["prompt"],
+            answer=results_dict["answer"],
+            task=results_dict["task"],
+            info=results_dict["info"],
+            completion=completions,
+            state=states,
+            reward=rewards,
+            metrics={},
         )
-
+        
+        # Store per-rollout timing
+        results.metrics["generation_time"] = generation_times
+        results.metrics["scoring_time"] = scoring_times
+        
         return results

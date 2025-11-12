@@ -2,6 +2,7 @@ import verifiers as vf
 from typing import Dict, List, Tuple, Union
 from datasets import concatenate_datasets
 from openai import AsyncOpenAI
+import json
 
 class _MtEnvGroupRubric(vf.Rubric):
     def __init__(self, env_map: Dict[str, vf.MultiTurnEnv]):
@@ -133,6 +134,10 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         sampling_args: vf.SamplingArgs = {},
         **kwargs,
     ) -> Tuple[Union[str, List[vf.ChatMessage]], vf.State]:
+        # Deserialize info if it's a JSON string (for compatibility with dataset storage)
+        if isinstance(info, str):
+            info = json.loads(info)
+        
         env = self.env_map.get(task, self.envs[0])
         return await env.rollout(
             client, model, prompt, answer, task, info, sampling_args, **kwargs

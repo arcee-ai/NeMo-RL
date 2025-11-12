@@ -351,6 +351,23 @@ class WandbLogger(LoggerInterface):
                         tool_results[message["tool_call_id"]] = message["content"]
                 
                 content += f"<h3>Rollout {i}</h3>"
+                
+                # Display available tools if present
+                if "info" in rollout:
+                    info = rollout["info"]
+                    # Handle both dict and JSON string
+                    if isinstance(info, str):
+                        try:
+                            info = json.loads(info)
+                        except json.JSONDecodeError:
+                            info = {}
+                    
+                    if isinstance(info, dict) and "oai_tools" in info:
+                        tools = info["oai_tools"]
+                        tool_names = [t["function"]["name"] for t in tools if "function" in t]
+                        if tool_names:
+                            content += f"<p style='color: #666; font-size: 0.9em;'><i>Available tools: {', '.join(tool_names)}</i></p>"
+                
                 for message in rollout["messages"]:
                     if message["role"] == "tool":
                         continue
@@ -368,16 +385,21 @@ class WandbLogger(LoggerInterface):
                             call_id = tool_call.id
                             func_obj = tool_call.function
                             try:
-                                args_formatted = json.dumps(json.loads(func_obj.arguments), indent=2)
+                                args_dict = json.loads(func_obj.arguments)
+                                args_formatted = json.dumps(args_dict, indent=2)
                             except json.JSONDecodeError:
                                 args_formatted = func_obj.arguments
                             response = tool_results.get(call_id, "[N/A]")
-                            content += f"<p><b>{func_obj.name}:</b> <pre>{args_formatted}</pre>Response: <pre>{response}</pre></p>"
+                            
+                            # Format as clean function call
+                            content += f"<p><b>{func_obj.name}:</b></p>"
+                            content += f"<pre>{args_formatted}</pre>"
+                            content += f"<p>Response:</p><pre>{response}</pre>"
                         content += "</div>"
                 
                 content += "<p><b>Metrics:</b></p>"
                 content += self.render_html_table(
-                    {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
+                    {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics", "info"]}
                 )
                 
                 # If any group metrics are group-wise, index them here.
@@ -890,6 +912,9 @@ class Logger(LoggerInterface):
                 return [fix_sample_recursive(v) for v in sample]
             elif isinstance(sample, dict):
                 return {k: fix_sample_recursive(v) for k, v in sample.items()}
+            elif hasattr(sample, "model_dump"):
+                # Handle Pydantic models (e.g., OpenAI tool calls)
+                return fix_sample_recursive(sample.model_dump())
             else:
                 return sample
 

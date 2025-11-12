@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any
 
 from openai.types.chat import ChatCompletion
@@ -45,21 +46,23 @@ def build_rollouts_log(
     total_rewards: list[float],
     sample_metrics: list[dict[str, Any]],
     env_metrics: list[dict[str, Any]],
+    infos: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Construct rich per-sample rollout logs for metrics dashboards."""
 
     rollout_log: list[dict[str, Any]] = []
     for i in range(len(message_logs)):
         metrics = sample_metrics[i]
-        rollout_log.append(
-            {
-                "messages": message_logs[i],
-                "grpo_group_id": grpo_group_ids[i],
-                "total_reward": float(total_rewards[i]),
-                **metrics,
-                "env_metrics": env_metrics[i],
-            }
-        )
+        log_entry = {
+            "messages": message_logs[i],
+            "grpo_group_id": grpo_group_ids[i],
+            "total_reward": float(total_rewards[i]),
+            **metrics,
+            "env_metrics": env_metrics[i],
+        }
+        if infos is not None:
+            log_entry["info"] = infos[i]
+        rollout_log.append(log_entry)
 
     return rollout_log
 
@@ -291,6 +294,29 @@ def run_vf_rollouts(
         "mean_env_tokens_per_sample": 0.0,
         **task_means,
     }
+    
+    # Collect per-rollout timing statistics from all groups
+    all_generation_times = []
+    all_scoring_times = []
+    
+    for g_i, rollouts in enumerate(generate_results):
+        if "generation_time" in rollouts.metrics:
+            all_generation_times.extend(rollouts.metrics["generation_time"])
+        if "scoring_time" in rollouts.metrics:
+            all_scoring_times.extend(rollouts.metrics["scoring_time"])
+    
+    # Add timing statistics - min/max/avg across ALL individual rollouts
+    if all_generation_times:
+        rollout_metrics["generation_time_min"] = float(min(all_generation_times))
+        rollout_metrics["generation_time_max"] = float(max(all_generation_times))
+        rollout_metrics["generation_time_avg"] = float(sum(all_generation_times) / len(all_generation_times))
+        rollout_metrics["generation_time_total"] = float(sum(all_generation_times))
+    
+    if all_scoring_times:
+        rollout_metrics["scoring_time_min"] = float(min(all_scoring_times))
+        rollout_metrics["scoring_time_max"] = float(max(all_scoring_times))
+        rollout_metrics["scoring_time_avg"] = float(sum(all_scoring_times) / len(all_scoring_times))
+        rollout_metrics["scoring_time_total"] = float(sum(all_scoring_times))
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
         message_logs=[prompt + completion for prompt, completion in zip(current_batch["prompt"], current_batch["completion"])],
@@ -298,6 +324,7 @@ def run_vf_rollouts(
         total_rewards=[current_batch["reward"][i].item() for i in range(len(current_batch["reward"]))],
         sample_metrics=sync_sample_metrics,
         env_metrics=per_rollout_metrics,
+        infos=current_batch.get("info"),
     )
 
     return current_batch, rollout_metrics

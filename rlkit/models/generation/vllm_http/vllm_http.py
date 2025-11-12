@@ -159,7 +159,8 @@ class VLLMOpenAIServe:
             "uvicorn.error",
             "ray.serve",
             "ray.serve.deployment",
-            "ray.serve.request_summary"
+            "ray.serve.request_summary",
+            "vllm.entrypoints.openai.tool_parsers.hermes_tool_parser"
         ]:
             try:
                 if _name == "uvicorn.access":
