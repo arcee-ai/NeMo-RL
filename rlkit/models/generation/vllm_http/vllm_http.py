@@ -163,7 +163,7 @@ class VLLMOpenAIServe:
             "vllm.entrypoints.openai.tool_parsers.hermes_tool_parser"
         ]:
             try:
-                if _name == "uvicorn.access":
+                if _name in ("uvicorn.access", "vllm.entrypoints.openai.tool_parsers.hermes_tool_parser"):
                     logging.getLogger(_name).disabled = True
                 else:
                     logging.getLogger(_name).setLevel(logging.ERROR)
