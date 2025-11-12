@@ -1051,7 +1051,8 @@ class GRPOTrainer:
         # Extract timing metrics from rollout_metrics (they should go to timing/train, not train)
         rollout_timing_keys = [
             "generation_time_min", "generation_time_max", "generation_time_avg", "generation_time_total",
-            "scoring_time_min", "scoring_time_max", "scoring_time_avg", "scoring_time_total"
+            "scoring_time_min", "scoring_time_max", "scoring_time_avg", "scoring_time_total",
+            "per_rollout_timing"
         ]
         rollout_timing_metrics = {}
         for key in rollout_timing_keys:
