@@ -1048,6 +1048,16 @@ class GRPOTrainer:
                 metrics[key] = np.mean(value).item()
             else:
                 metrics[key] = np.sum(value).item()
+        # Extract timing metrics from rollout_metrics (they should go to timing/train, not train)
+        rollout_timing_keys = [
+            "generation_time_min", "generation_time_max", "generation_time_avg", "generation_time_total",
+            "scoring_time_min", "scoring_time_max", "scoring_time_avg", "scoring_time_total"
+        ]
+        rollout_timing_metrics = {}
+        for key in rollout_timing_keys:
+            if key in rollout_metrics:
+                rollout_timing_metrics[key] = rollout_metrics.pop(key)
+        
         metrics.update(rollout_metrics)
         
         # Add router statistics if available
@@ -1121,19 +1131,22 @@ class GRPOTrainer:
             print(f"  • {key}: {value:.2f}s ({percent:.1f}%)")
         
         # Display per-rollout timing statistics if available
-        if "generation_time_min" in rollout_metrics:
+        if "generation_time_min" in rollout_timing_metrics:
             print(f"\n  Generation Timing (per rollout):")
-            print(f"    • Min: {rollout_metrics['generation_time_min']:.2f}s")
-            print(f"    • Max: {rollout_metrics['generation_time_max']:.2f}s")
-            print(f"    • Avg: {rollout_metrics['generation_time_avg']:.2f}s")
+            print(f"    • Min: {rollout_timing_metrics['generation_time_min']:.2f}s")
+            print(f"    • Max: {rollout_timing_metrics['generation_time_max']:.2f}s")
+            print(f"    • Avg: {rollout_timing_metrics['generation_time_avg']:.2f}s")
         
-        if "scoring_time_min" in rollout_metrics:
+        if "scoring_time_min" in rollout_timing_metrics:
             print(f"\n  Scoring Timing (per rollout):")
-            print(f"    • Min: {rollout_metrics['scoring_time_min']:.2f}s")
-            print(f"    • Max: {rollout_metrics['scoring_time_max']:.2f}s")
-            print(f"    • Avg: {rollout_metrics['scoring_time_avg']:.2f}s")
+            print(f"    • Min: {rollout_timing_metrics['scoring_time_min']:.2f}s")
+            print(f"    • Max: {rollout_timing_metrics['scoring_time_max']:.2f}s")
+            print(f"    • Avg: {rollout_timing_metrics['scoring_time_avg']:.2f}s")
 
         self.logger.log_metrics(metrics, step + 1, prefix="train")
+        
+        # Merge rollout timing metrics with other timing metrics
+        timing_metrics.update(rollout_timing_metrics)
         self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
         
         # Log expert balance metrics separately under expert/balance/

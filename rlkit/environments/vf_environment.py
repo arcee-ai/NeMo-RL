@@ -171,6 +171,7 @@ class VfEnvironment(EnvironmentInterface):
             total_score_time = score_end - score_start
             
             rewards = rollout_scores.reward
+            existing_metrics = rollout_scores.metrics
             
             # All rollouts scored together - report the total batch time for each
             # (this is the wall-clock time, which equals per-rollout time if they run in parallel)
@@ -178,6 +179,7 @@ class VfEnvironment(EnvironmentInterface):
         else:
             rewards = [0.0] * num_rollouts
             scoring_times = [0.0] * num_rollouts
+            existing_metrics = {}
         
         results = vf.GenerateOutputs(
             prompt=results_dict["prompt"],
@@ -187,10 +189,10 @@ class VfEnvironment(EnvironmentInterface):
             completion=completions,
             state=states,
             reward=rewards,
-            metrics={},
+            metrics=existing_metrics,  # Preserve metrics from rubric
         )
         
-        # Store per-rollout timing
+        # Add timing metrics
         results.metrics["generation_time"] = generation_times
         results.metrics["scoring_time"] = scoring_times
         
