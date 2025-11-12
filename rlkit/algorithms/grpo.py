@@ -1051,16 +1051,25 @@ class GRPOTrainer:
         # Extract timing metrics from rollout_metrics (they should go to timing/train, not train)
         rollout_timing_keys = [
             "generation_time_min", "generation_time_max", "generation_time_avg", "generation_time_total",
-            "scoring_time_min", "scoring_time_max", "scoring_time_avg", "scoring_time_total",
-            "per_rollout_timing"
+            "scoring_time_min", "scoring_time_max", "scoring_time_avg", "scoring_time_total"
         ]
         rollout_timing_metrics = {}
         for key in rollout_timing_keys:
             if key in rollout_metrics:
                 rollout_timing_metrics[key] = rollout_metrics.pop(key)
         
+        # Also extract per-environment timing metrics from nested task dicts
+        # rollout_metrics contains task dicts like: {"taskname": {"scoring_time": ..., "generation_time": ...}}
+        for task_name, task_metrics in list(rollout_metrics.items()):
+            if isinstance(task_metrics, dict):
+                # Check if this task dict has timing metrics
+                timing_keys_in_task = [k for k in task_metrics.keys() if k in ['scoring_time', 'generation_time']]
+                for timing_key in timing_keys_in_task:
+                    # Move to rollout_timing_metrics with flattened key
+                    rollout_timing_metrics[f"{task_name}.{timing_key}"] = task_metrics.pop(timing_key)
+
         metrics.update(rollout_metrics)
-        
+
         # Add router statistics if available
         expert_balance_metrics = {}
         router_stats_metrics = {}

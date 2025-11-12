@@ -298,24 +298,12 @@ def run_vf_rollouts(
     # Collect per-rollout timing statistics from all groups
     all_generation_times = []
     all_scoring_times = []
-    per_rollout_timing_metrics = [{} for _ in current_batch["prompt"]]
     
     for g_i, rollouts in enumerate(generate_results):
         if "generation_time" in rollouts.metrics:
-            gen_times = rollouts.metrics["generation_time"]
-            all_generation_times.extend(gen_times)
-            # Store per-rollout timing
-            for i, gen_time in enumerate(gen_times):
-                orig_idx = list(by_group.values())[g_i][i][-1]
-                per_rollout_timing_metrics[orig_idx]["generation_time"] = gen_time
-                
+            all_generation_times.extend(rollouts.metrics["generation_time"])
         if "scoring_time" in rollouts.metrics:
-            score_times = rollouts.metrics["scoring_time"]
-            all_scoring_times.extend(score_times)
-            # Store per-rollout timing
-            for i, score_time in enumerate(score_times):
-                orig_idx = list(by_group.values())[g_i][i][-1]
-                per_rollout_timing_metrics[orig_idx]["scoring_time"] = score_time
+            all_scoring_times.extend(rollouts.metrics["scoring_time"])
     
     # Add timing statistics - min/max/avg across ALL individual rollouts
     if all_generation_times:
@@ -329,9 +317,6 @@ def run_vf_rollouts(
         rollout_metrics["scoring_time_max"] = float(max(all_scoring_times))
         rollout_metrics["scoring_time_avg"] = float(sum(all_scoring_times) / len(all_scoring_times))
         rollout_metrics["scoring_time_total"] = float(sum(all_scoring_times))
-    
-    # Store per-rollout timing as a separate entry for timing/train logging
-    rollout_metrics["per_rollout_timing"] = per_rollout_timing_metrics
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
         message_logs=[prompt + completion for prompt, completion in zip(current_batch["prompt"], current_batch["completion"])],
