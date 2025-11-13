@@ -1,8 +1,38 @@
 import verifiers as vf
 from typing import Dict, List, Tuple, Union
-from datasets import concatenate_datasets
+from datasets import concatenate_datasets, Features, Value
 from openai import AsyncOpenAI
 import json
+
+def _normalize_dataset_schema(dataset):
+    """
+    Normalize dataset schema to ensure 'info' field is consistently typed as a string.
+    This allows concatenation of datasets from different environments that may have
+    different info schemas.
+    """
+    if dataset is None:
+        return None
+    
+    # Check if 'info' column exists and needs normalization
+    if 'info' in dataset.column_names:
+        # Cast info to string to ensure consistent schema across all datasets
+        # The info will be deserialized back to dict during rollout
+        def serialize_info(example):
+            if example['info'] is None:
+                example['info'] = '{}'
+            elif not isinstance(example['info'], str):
+                example['info'] = json.dumps(example['info'])
+            return example
+        
+        dataset = dataset.map(serialize_info)
+        
+        # Explicitly cast the feature to string type
+        new_features = dataset.features.copy()
+        new_features['info'] = Value('string')
+        dataset = dataset.cast(new_features)
+    
+    return dataset
+
 
 class _MtEnvGroupRubric(vf.Rubric):
     def __init__(self, env_map: Dict[str, vf.MultiTurnEnv]):
@@ -66,6 +96,8 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
             if (env_dataset is not None and "task" not in env_dataset.column_names) or force_overwrite_task:
                 env_dataset = env_dataset.map(add_task)
             if env_dataset is not None:
+                # Normalize schema before adding to list
+                env_dataset = _normalize_dataset_schema(env_dataset)
                 datasets.append(env_dataset)
 
             env_eval_dataset = (
@@ -77,6 +109,8 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
             ):
                 env_eval_dataset = env_eval_dataset.map(add_task)
             if env_eval_dataset is not None:
+                # Normalize schema before adding to list
+                env_eval_dataset = _normalize_dataset_schema(env_eval_dataset)
                 eval_datasets.append(env_eval_dataset)
 
         dataset = concatenate_datasets(datasets) if datasets else None
