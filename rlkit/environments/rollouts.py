@@ -121,10 +121,8 @@ def run_vf_rollouts(
     if greedy:
         sampling_args["temperature"] = 0.0
 
-    if vf_semaphore is not None:
-        batch_semaphore = max(1, vf_semaphore // len(verifiers_input_batches))
-    else:
-        batch_semaphore = -1
+    # Disable concurrency limit - let all rollouts run in parallel
+    batch_semaphore = -1
 
     refs = [
         env.a_generate.remote(
@@ -294,29 +292,6 @@ def run_vf_rollouts(
         "mean_env_tokens_per_sample": 0.0,
         **task_means,
     }
-    
-    # Collect per-rollout timing statistics from all groups
-    all_generation_times = []
-    all_scoring_times = []
-    
-    for g_i, rollouts in enumerate(generate_results):
-        if "generation_time" in rollouts.metrics:
-            all_generation_times.extend(rollouts.metrics["generation_time"])
-        if "scoring_time" in rollouts.metrics:
-            all_scoring_times.extend(rollouts.metrics["scoring_time"])
-    
-    # Add timing statistics - min/max/avg across ALL individual rollouts
-    if all_generation_times:
-        rollout_metrics["generation_time_min"] = float(min(all_generation_times))
-        rollout_metrics["generation_time_max"] = float(max(all_generation_times))
-        rollout_metrics["generation_time_avg"] = float(sum(all_generation_times) / len(all_generation_times))
-        rollout_metrics["generation_time_total"] = float(sum(all_generation_times))
-    
-    if all_scoring_times:
-        rollout_metrics["scoring_time_min"] = float(min(all_scoring_times))
-        rollout_metrics["scoring_time_max"] = float(max(all_scoring_times))
-        rollout_metrics["scoring_time_avg"] = float(sum(all_scoring_times) / len(all_scoring_times))
-        rollout_metrics["scoring_time_total"] = float(sum(all_scoring_times))
 
     rollout_metrics["rollouts/text"] = build_rollouts_log(
         message_logs=[prompt + completion for prompt, completion in zip(current_batch["prompt"], current_batch["completion"])],
