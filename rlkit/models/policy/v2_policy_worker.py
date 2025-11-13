@@ -1738,7 +1738,7 @@ class DTensorV2PolicyWorker:
                 # Find all same-size (and same dtype) tensors
                 similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
                 
-                TENSOR_PACK_MAX = 10000
+                TENSOR_PACK_MAX = 1000
                 
                 new_metadata = {}
                 
