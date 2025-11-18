@@ -92,6 +92,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             cp_size = config["dtensor_v2_cfg"].get("context_parallel_size", 1)
             pp_size = config["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
             ep_size = config["dtensor_v2_cfg"].get("expert_parallel_size", 1)
+            dp_replicate = config["dtensor_v2_cfg"].get("dp_replicate", 1)
             env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
         else:
             assert dtensor_enable, (
@@ -103,6 +104,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             )
             tp_size = dtensor_cfg.get("tensor_parallel_size", 1)
             cp_size = dtensor_cfg.get("context_parallel_size", 1)
+            dp_replicate = 1
             env_vars = dtensor_cfg.get("env_vars", {})
 
         if dtv2_enable:
@@ -114,6 +116,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 cp_size,
                 ep_size,
                 pp_size,
+                dp_replicate,
                 always_include_all=True,
             )
 

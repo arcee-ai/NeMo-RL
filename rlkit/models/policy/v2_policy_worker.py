@@ -181,11 +181,10 @@ def get_device_mesh_info(
     cp_size: int,
     ep_size: int,
     pp_size: int,
+    dp_replicate: int,
     always_include_all: bool = False,
 ):
-    # Define DP as dp = dp_replicate * dp_shard, without dividing by EP.
-    dp_replicate = 1
-    dp_shard = max(1, world_size // max(1, (dp_replicate * cp_size * tp_size * pp_size)))
+    dp_shard = max(1, world_size // max(1, (cp_size * tp_size * pp_size * dp_replicate)))
 
     # Derive dp_shard_mod_ep and dp_shard_in_ep for non-ETP: ep = dp_shard_in_ep * cp * tp
     if ep_size > 1:
@@ -481,6 +480,7 @@ class DTensorV2PolicyWorker:
         self.cp_size = self.cfg["dtensor_v2_cfg"].get("context_parallel_size", 1)
         self.pp_size = self.cfg["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
         self.ep_size = self.cfg["dtensor_v2_cfg"].get("expert_parallel_size", 1)
+        self.dp_replicate = self.cfg["dtensor_v2_cfg"].get("dp_replicate", 1)
         
         if self.ep_size > 1:
             raise ValueError("EP is numerically inaccurate and has been disabled for now.")
@@ -521,6 +521,7 @@ class DTensorV2PolicyWorker:
             self.cp_size,
             self.ep_size,
             self.pp_size,
+            self.dp_replicate,
             always_include_all=True,
         )
 
