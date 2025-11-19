@@ -17,6 +17,9 @@ class GRPOConfig(TypedDict):
     val_at_start: bool
     max_val_samples: int
     seed: int
+    
     interleave_rollouts: bool
+    skip_long_prompts: bool
+    max_prompt_length_ratio: float
     
     run_vram_torture_test: bool  # Ignore environments and run all training on a full context window of nonsense.

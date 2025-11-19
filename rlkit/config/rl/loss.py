@@ -8,3 +8,8 @@ class ClippedPGLossConfig(TypedDict):
     use_on_policy_kl_approximation: bool
     use_importance_sampling_correction: bool
     token_level_loss: bool
+
+class CISPOLossConfig(TypedDict):
+    epsilon_max: float
+    reference_policy_kl_penalty: float
+    use_on_policy_kl_approximation: bool

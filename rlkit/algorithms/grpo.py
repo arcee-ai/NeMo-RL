@@ -30,6 +30,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from rlkit.algorithms.interfaces import LossFunction
 from rlkit.algorithms.loss_functions import (
+    CISPOLossFn,
     ClippedPGLossDataDict,
     ClippedPGLossFn,
 )
@@ -135,6 +136,10 @@ class GRPOTrainer:
         checkpointer, grpo_save_state, last_checkpoint_path = self._setup_checkpointing(
             self.master_config["checkpointing"]
         )
+        
+        dataset = self._filter_dataset_by_prompt_length(dataset, grpo_config, policy_config)
+        if val_dataset is not None:
+            val_dataset = self._filter_dataset_by_prompt_length(val_dataset, grpo_config, policy_config)
 
         dataloader, val_dataloader = self._setup_dataloaders(
             dataset,
@@ -196,7 +201,14 @@ class GRPOTrainer:
         if self.policy_generation is not None:
             self.policy_generation.prepare_refit_info(state_dict_info)
 
-        loss_fn = ClippedPGLossFn(loss_config)
+        # Instantiate the appropriate loss function based on loss_type
+        loss_type = loss_config.get("loss_type", "clipped_pg")
+        if loss_type == "cispo":
+            loss_fn = CISPOLossFn(loss_config)
+        elif loss_type == "clipped_pg":
+            loss_fn = ClippedPGLossFn(loss_config)
+        else:
+            raise ValueError(f"Unknown loss_type: {loss_type}. Must be 'clipped_pg' or 'cispo'.")
         
         self.interleave_rollouts = self.master_config["grpo"].get("interleave_rollouts", False)
         
@@ -272,6 +284,97 @@ class GRPOTrainer:
             )
 
         return dataloader, val_dataloader
+    
+    def _filter_dataset_by_prompt_length(
+        self,
+        dataset: "Dataset",
+        grpo_config: "GRPOConfig",
+        policy_config: "PolicyConfig",
+    ) -> "Dataset":
+        def _cfg(config, name, default=None):
+            if hasattr(config, name):
+                return getattr(config, name)
+            if isinstance(config, dict):
+                return config.get(name, default)
+            return default
+
+        skipLongPrompts = _cfg(grpo_config, "skip_long_prompts", False)
+        if not skipLongPrompts:
+            return dataset
+
+        promptKey = _cfg(grpo_config, "prompt_key", "prompt")
+        maxTotalSequenceLength = _cfg(policy_config, "max_total_sequence_length", None)
+        if maxTotalSequenceLength is None:
+            raise ValueError("policy_config.max_total_sequence_length must be set")
+
+
+        maxPromptLengthRatio = float(_cfg(grpo_config, "max_prompt_length_ratio", 1.0))
+        maxPromptTokens = int(maxTotalSequenceLength * maxPromptLengthRatio)
+
+        numProc = _cfg(grpo_config, "num_proc", os.cpu_count() or 1)
+        batchSize = int(_cfg(grpo_config, "prompt_filter_batch_size", 256))
+        writerBatchSize = _cfg(grpo_config, "prompt_filter_writer_batch_size", None)
+        if writerBatchSize is not None:
+            writerBatchSize = int(writerBatchSize)
+
+        tokenizer = getattr(self, "tokenizer", None)
+        if tokenizer is None:
+            raise ValueError("self.tokenizer must be provided as a PreTrainedTokenizerBase")
+
+        if numProc and numProc > 1:
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+        def keepBatch(batch):
+            texts = batch.get(promptKey)
+            if texts is None:
+                raise KeyError(f"Prompt key '{promptKey}' not found in dataset batch")
+
+            normTexts = []
+            for t in texts:
+                if t is None:
+                    normTexts.append("")
+                elif isinstance(t, str):
+                    normTexts.append(t)
+                elif isinstance(t, bytes):
+                    try:
+                        normTexts.append(t.decode("utf-8", errors="ignore"))
+                    except Exception:
+                        normTexts.append("")
+                elif isinstance(t, list):
+                    try:
+                        normTexts.append(" ".join(s if isinstance(s, str) else str(s) for s in t))
+                    except Exception:
+                        normTexts.append(str(t))
+                else:
+                    normTexts.append(str(t))
+
+            enc = tokenizer(
+                normTexts,
+                add_special_tokens=False,
+                padding=False,
+                truncation=True,
+                max_length=maxPromptTokens + 1,
+                return_length=True,
+            )
+
+            if "length" in enc:
+                lengths = enc["length"]
+            else:
+                inputIdsList = enc["input_ids"]
+                lengths = [len(ids) for ids in inputIdsList]
+
+            return [l <= maxPromptTokens for l in lengths]
+
+        filtered = dataset.filter(
+            keepBatch,
+            batched=True,
+            batch_size=batchSize,
+            num_proc=int(numProc) if numProc else None,
+            writer_batch_size=writerBatchSize,
+        )
+        return filtered
+
+
 
     def _setup_clusters(
         self,
