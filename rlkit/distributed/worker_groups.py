@@ -907,7 +907,7 @@ class RayWorkerGroup:
                 self.get_all_worker_results, future_bundle
             )
 
-        all_results = await asyncio.gather(*future_bundle.futures)
+        all_results = ray.get(list(future_bundle.futures))
         return self._select_results_from_future_bundle(
             future_bundle=future_bundle, all_results=all_results
         )
