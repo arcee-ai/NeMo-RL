@@ -575,6 +575,7 @@ class DTensorV2PolicyWorker:
                 self.ep_mesh,
                 self.pp_mesh,
                 self.cp_mesh,
+                self.dp_replicate,
                 param_dtype=self.dtype,
                 sequence_parallel=sequence_parallel_enabled,
                 cpu_offload=self.cpu_offload,
