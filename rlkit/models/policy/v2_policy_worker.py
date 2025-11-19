@@ -595,7 +595,7 @@ class DTensorV2PolicyWorker:
                 ),
             )
 
-        print(f"[Rank {self.rank}] Loading state dict from rank 0...")
+        logging.info(f"[Rank {self.rank}] Loading state dict from rank 0...")
         # This will broadcast the state dict from rank 0 to all other ranks
         # and load it into the FSDP model.
         set_model_state_dict(
