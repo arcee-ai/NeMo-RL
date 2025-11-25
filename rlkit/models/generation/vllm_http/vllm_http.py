@@ -241,6 +241,9 @@ class VLLMOpenAIServe:
     async def admin_check(self) -> bool:
         return True
     
+    async def admin_get_ip(self) -> str:
+        return ray.get_runtime_context().get_node_ip_address()
+    
     async def admin_reset_prefix_cache(self) -> bool:
         await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
         return True

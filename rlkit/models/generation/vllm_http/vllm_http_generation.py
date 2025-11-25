@@ -110,6 +110,9 @@ class VllmHttpGeneration(GenerationInterface):
         self.client = openai.OpenAI(api_key="n/a", base_url="http://127.0.0.1:8000/v1")
         # The served model name from VLLMOpenAIServe defaults to "policy"
         self.served_model_name = "policy"
+        
+    def get_ips(self) -> str:
+        return ray.get([actor.admin_get_ip.remote() for actor in self.actors])
 
     def generate(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool

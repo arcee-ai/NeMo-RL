@@ -168,6 +168,16 @@ class GRPOTrainer:
             policy_config=policy_config,
         )
 
+        if isinstance(self.policy_generation, VllmHttpGeneration):
+            ips = self.policy_generation.get_ips()
+            if hasattr(self.env, "set_api_ips"):
+                f = getattr(self.env, "set_api_ips")
+                if hasattr(f, "remote"):
+                    ray.get(f.remote(ips))
+                else:
+                    f(ips)
+            logging.info(f"  ✓ Configured environment with {len(ips)} vLLM HTTP IPs")
+
         if last_checkpoint_path:
             weights_path = Path(last_checkpoint_path) / "policy" / "weights"
             optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"

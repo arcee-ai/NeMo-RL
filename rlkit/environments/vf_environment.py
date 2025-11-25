@@ -46,7 +46,23 @@ class VfEnvironment(EnvironmentInterface):
         # The only default verifiers environment type that isn't compatible with MultiTurnEnv is EnvGroup, which we have a multi-turn replacement for.
         if not isinstance(self.env, vf.MultiTurnEnv):
             raise TypeError("VfEnvironment only supports MultiTurnEnv environments (this includes SingleTurnEnv and ToolEnv but not EnvGroup).")
+
+        self.api_ips = []
+        self.clients = []
+        self.current_client_index = 0
+    
+    def set_api_ips(self, api_ips: list[str]):
+        self.api_ips = api_ips
+        self.clients = [AsyncOpenAI(
+            api_key="n/a",
+            base_url=f"http://{ip}:8000/v1"
+        ) for ip in api_ips]
         
+    def get_next_client(self) -> AsyncOpenAI:
+        client = self.clients[self.current_client_index]
+        self.current_client_index = (self.current_client_index + 1) % len(self.clients)
+        return client
+    
     async def a_generate(
         self,
         inputs: vf.GenerateInputs | Dataset | dict,
@@ -55,15 +71,11 @@ class VfEnvironment(EnvironmentInterface):
         max_concurrent: int = -1,
         **kwargs,
     ) -> tuple[vf.GenerateOutputs, vf.ProcessedOutputs]:
-        if self.client is None:
-            self.client = AsyncOpenAI(
-                api_key="n/a",
-                base_url="http://127.0.0.1:8000/v1"
-            )
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
+        client = self.get_next_client()
         results = await self.env.a_generate(
             inputs=inputs,
-            client=self.client,
+            client=client,
             model="policy",
             sampling_args=sampling_args,
             score_rollouts=score_rollouts,
