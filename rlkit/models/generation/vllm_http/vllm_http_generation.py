@@ -23,6 +23,7 @@ from rlkit.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
 
 from ray import serve
 from ray.serve.handle import DeploymentHandle
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 
 class VllmHttpGeneration(GenerationInterface):
@@ -67,45 +68,83 @@ class VllmHttpGeneration(GenerationInterface):
         
         # Calculate DP size from total GPUs and TP/PP size
         num_nodes = config["colocated"]["resources"].get("num_nodes", 1)
-        num_nodes = 1 if num_nodes is None else int(num_nodes)
+        self.num_nodes = 1 if num_nodes is None else int(num_nodes)
         gpus_per_node = config["colocated"]["resources"].get("gpus_per_node", 1)
         gpus_per_node = 1 if gpus_per_node is None else int(gpus_per_node)
         self.dp_size = gpus_per_node // (self.tp_size * self.pp_size)
 
         self.actors = []
         
-        for i in range(num_nodes):
-            self.actors.append(VLLMOpenAIServe.options(name=f"vllm_http_generation_{i}", runtime_env=runtime_env).remote(
+        # Get list of available Ray nodes to schedule actors on different nodes
+        # Filter to only alive nodes with GPUs
+        all_nodes = ray.nodes()
+        available_nodes = [
+            n for n in all_nodes 
+            if n.get("Alive", False) and n.get("Resources", {}).get("GPU", 0) > 0
+        ]
+        
+        if len(available_nodes) < self.num_nodes:
+            raise RuntimeError(
+                f"Not enough nodes with GPUs available. Need {self.num_nodes} nodes, "
+                f"but only {len(available_nodes)} nodes with GPUs are available."
+            )
+        
+        # Get node IDs for scheduling
+        node_ids = [n["NodeID"] for n in available_nodes[:num_nodes]]
+        print(f"Scheduling {self.num_nodes} vLLM actors across nodes: {node_ids}")
+        
+        # Create all actors in parallel - each is on a different node so no GPU competition
+        server_timeout = config.get("server_timeout", 60)
+        
+        for i in range(self.num_nodes):
+            # Use NodeAffinitySchedulingStrategy to force this actor to a specific node
+            scheduling_strategy = NodeAffinitySchedulingStrategy(
+                node_id=node_ids[i],
+                soft=False,  # Hard constraint - must be on this node
+            )
+            
+            actor = VLLMOpenAIServe.options(
+                name=f"vllm_http_generation_{i}",
+                runtime_env=runtime_env,
+                scheduling_strategy=scheduling_strategy,
+            ).remote(
                 model=config["model_name"],
                 tensor_parallel_size=self.tp_size,
                 pipeline_parallel_size=self.pp_size,
                 max_model_len=config["vllm_cfg"]["max_model_len"],
                 gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
                 data_parallel_size=self.dp_size,
-            ))
+            )
+            self.actors.append(actor)
         
-        # serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
+        print(f"Created {self.num_nodes} vLLM actors, waiting for engines to initialize...")
         
-        # Poll vLLM server until it's ready to avoid race condition
-        print("Waiting for vLLM server to come online...")
+        # Wait for all actors to finish initializing in parallel
         polling_start = time.time()
-        success = False
+        initialized = [False] * self.num_nodes
         
-        server_timeout = config.get("server_timeout", 60)
         while time.time() - polling_start < server_timeout:
-            try:
-                response = requests.get("http://127.0.0.1:8000/v1/models")
-                if response.status_code == 200:
-                    success = True
-                    break
-                time.sleep(1)
-            except RequestException:
-                pass
+            # Check all uninitialized actors
+            for i, actor in enumerate(self.actors):
+                if initialized[i]:
+                    continue
+                try:
+                    engine_ready = ray.get(actor.admin_engine_ready.remote(), timeout=2.0)
+                    if engine_ready:
+                        initialized[i] = True
+                        print(f"vLLM actor {i+1}/{self.num_nodes} initialized")
+                except Exception:
+                    pass
+            
+            if all(initialized):
+                break
+            time.sleep(1)
         
-        if not success:
-            raise RuntimeError("vLLM server did not come online in time (waited {} seconds)".format(server_timeout))
-
-        print(f"vLLM server is online at http://127.0.0.1:8000/v1")
+        if not all(initialized):
+            failed = [i+1 for i, ok in enumerate(initialized) if not ok]
+            raise RuntimeError(f"vLLM actors {failed} did not initialize in time (waited {server_timeout} seconds)")
+        
+        print(f"All {self.num_nodes} vLLM actors initialized successfully")
 
         self.client = openai.OpenAI(api_key="n/a", base_url="http://127.0.0.1:8000/v1")
         # The served model name from VLLMOpenAIServe defaults to "policy"
@@ -128,7 +167,7 @@ class VllmHttpGeneration(GenerationInterface):
         serve.shutdown()
 
     def init_collective(self, ip: str, port: int, world_size: int):
-        return [actor.admin_init_collective.remote(0, ip, port, world_size) for actor in self.actors]
+        return [actor.admin_init_collective.remote(i * self.dp_size * self.tp_size * self.pp_size, ip, port, world_size) for i, actor in enumerate(self.actors)]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True

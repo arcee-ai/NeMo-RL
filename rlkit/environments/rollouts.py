@@ -121,7 +121,7 @@ def run_vf_rollouts(
     if vf_semaphore is not None:
         batch_semaphore = max(1, vf_semaphore // len(verifiers_input_batches))
     else:
-        batch_semaphore = -1
+        batch_semaphore = 100
 
     refs = [
         env.a_generate.remote(

@@ -544,6 +544,7 @@ class GRPOTrainer:
                 self.policy_generation.tp_size
                 * self.policy_generation.dp_size
                 * self.policy_generation.pp_size
+                * self.policy_generation.num_nodes
                 + 1
             )
         logging.info(

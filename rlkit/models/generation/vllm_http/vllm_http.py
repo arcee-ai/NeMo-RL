@@ -197,6 +197,8 @@ class VLLMOpenAIServe:
         self._args = parser.parse_args(args=args)
         validate_parsed_serve_args(self._args)
         
+        # Track engine initialization status
+        self._engine_initialized = False
         asyncio.create_task(self._init_app(worker_extension_cls))
     
     async def _init_app(self, worker_extension_cls: str):
@@ -221,6 +223,9 @@ class VLLMOpenAIServe:
         )
         self._engine_client = await self._engine_client_ctx.__aenter__()
         
+        # Mark engine as initialized
+        self._engine_initialized = True
+        
         self._tokenizer = await self._engine_client.get_tokenizer()
 
         vllm_app = build_vllm_app(self._args)
@@ -241,8 +246,12 @@ class VLLMOpenAIServe:
     async def admin_check(self) -> bool:
         return True
     
+    async def admin_engine_ready(self) -> bool:
+        """Check if vLLM engine has finished initializing."""
+        return getattr(self, '_engine_initialized', False)
+    
     async def admin_get_ip(self) -> str:
-        return ray.get_runtime_context().get_node_ip_address()
+        return ray.util.get_node_ip_address()
     
     async def admin_reset_prefix_cache(self) -> bool:
         await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
