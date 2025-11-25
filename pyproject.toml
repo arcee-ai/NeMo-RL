@@ -47,7 +47,7 @@ dependencies = [
     "verifiers==0.1.3",
     "vf-exts",
     "flash-attn==2.8.3",
-    "vllm>=0.11.1",
+    "vllm==0.11.2",
     "torchao",
     "dion @ https://github.com/samsja/dion.git",
     "cut-cross-entropy @ git+https://github.com/apple/ml-cross-entropy.git",
@@ -102,9 +102,6 @@ torchvision = [
 triton = [
   { index = "pytorch-cu128" },
 ]
-vllm = [
-  { index = "vllm-nightly" },
-]
 causal-conv1d = { git = "https://github.com/Dao-AILab/causal-conv1d", tag = "v1.5.0.post8" }
 mamba-ssm = { git = "https://github.com/state-spaces/mamba.git", rev = "2e16fc3062cdcd4ebef27a9aa4442676e1c7edf4" }
 vf-exts = { workspace = true }
@@ -117,11 +114,6 @@ members = [
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-
-[[tool.uv.index]]
-name = "vllm-nightly"
-url = "https://wheels.vllm.ai/nightly"
 explicit = true
 
 [tool.uv]
