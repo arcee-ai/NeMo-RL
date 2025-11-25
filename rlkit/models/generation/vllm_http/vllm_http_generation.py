@@ -32,7 +32,7 @@ class VllmHttpGeneration(GenerationInterface):
         # Save config for later use
         self.cfg = config
 
-        serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode", "access_log": False})
+        # serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode", "access_log": False})
     
         py_exec = get_actor_python_env("rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
 
@@ -70,26 +70,21 @@ class VllmHttpGeneration(GenerationInterface):
         num_nodes = 1 if num_nodes is None else int(num_nodes)
         gpus_per_node = config["colocated"]["resources"].get("gpus_per_node", 1)
         gpus_per_node = 1 if gpus_per_node is None else int(gpus_per_node)
-        total_gpus = num_nodes * gpus_per_node
-        self.dp_size = total_gpus // (self.tp_size * self.pp_size)
+        self.dp_size = gpus_per_node // (self.tp_size * self.pp_size)
 
-        vllm_app = VLLMOpenAIServe.options( # type: ignore
-            ray_actor_options={
-                "num_cpus": 1,
-                "runtime_env": runtime_env,
-            },
-        ).bind(
-            model=config["model_name"],
-            tensor_parallel_size=self.tp_size,
-            pipeline_parallel_size=self.pp_size,
-            max_model_len=config["vllm_cfg"]["max_model_len"],
-            gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
-            data_parallel_size=self.dp_size,
-            extra_cli_args=config["vllm_cfg"].get("extra_cli_args", []),
-            tool_call_parser=config["vllm_cfg"].get("tool_parser", None),
-        )
+        self.actors = []
         
-        serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
+        for i in range(num_nodes):
+            self.actors.append(VLLMOpenAIServe.options(name=f"vllm_http_generation_{i}", runtime_env=runtime_env).remote(
+                model=config["model_name"],
+                tensor_parallel_size=self.tp_size,
+                pipeline_parallel_size=self.pp_size,
+                max_model_len=config["vllm_cfg"]["max_model_len"],
+                gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
+                data_parallel_size=self.dp_size,
+            ))
+        
+        # serve.run(vllm_app, route_prefix="/", name="vllm_http_generation")
         
         # Poll vLLM server until it's ready to avoid race condition
         print("Waiting for vLLM server to come online...")
@@ -115,14 +110,6 @@ class VllmHttpGeneration(GenerationInterface):
         self.client = openai.OpenAI(api_key="n/a", base_url="http://127.0.0.1:8000/v1")
         # The served model name from VLLMOpenAIServe defaults to "policy"
         self.served_model_name = "policy"
-    
-    def _maybe_parse_tool_calls(self, texts: list[str]) -> list[dict[str, Any]]:
-        """Parse tool calls from generated texts if a parser is configured.
-        
-        Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
-        """
-        
-        return self.get_deployment_handle().maybe_parse_tool_calls.remote(self.cfg["vllm_cfg"].get("tool_parser", None), texts).result()
 
     def generate(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
@@ -137,26 +124,23 @@ class VllmHttpGeneration(GenerationInterface):
     def shutdown(self):
         serve.shutdown()
 
-    def get_deployment_handle(self) -> DeploymentHandle:
-        return serve.get_deployment_handle("VLLMOpenAIServe", app_name="vllm_http_generation")
-
     def init_collective(self, ip: str, port: int, world_size: int):
-        return [self.get_deployment_handle().admin_init_collective.remote(0, ip, port, world_size)]
+        return [actor.admin_init_collective.remote(0, ip, port, world_size) for actor in self.actors]
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         return True
 
     async def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         # Wait for the reset to complete across replicas
-        await self.get_deployment_handle().admin_reset_prefix_cache.remote()
+        ray.get([actor.admin_reset_prefix_cache.remote() for actor in self.actors])
         return True
 
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         # Wait for refit prep to complete across replicas.
-        self.get_deployment_handle().admin_prepare_refit_info.remote(state_dict_info).result()
+        ray.get([actor.admin_prepare_refit_info.remote(state_dict_info) for actor in self.actors])
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
-        return [self.get_deployment_handle().admin_update_from_collective.remote()]
+        return [actor.admin_update_from_collective.remote() for actor in self.actors]

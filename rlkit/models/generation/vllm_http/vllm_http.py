@@ -6,7 +6,9 @@ from weakref import WeakValueDictionary
 
 from fastapi import FastAPI, Request
 from ray import serve
+import ray
 import torch
+import uvicorn
 
 # Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
 _serve_app = FastAPI()
@@ -138,8 +140,7 @@ def _ensure_full_sequence_logprob_patch() -> None:
     _TOKEN_ID_LOGPROB_PATCH_APPLIED = True
 
 
-@serve.deployment(max_ongoing_requests=10000)
-@serve.ingress(_serve_app)
+@ray.remote(num_cpus=1)
 class VLLMOpenAIServe:
     def __init__(
         self,
@@ -228,6 +229,10 @@ class VLLMOpenAIServe:
         vllm_app.state.engine_client = self._engine_client
         
         _serve_app.mount("/", vllm_app)
+        
+        config = uvicorn.Config(_serve_app, host="0.0.0.0", port=8000)
+        server = uvicorn.Server(config)
+        await server.serve()
     
     @_serve_app.get("/sanity_check")
     async def _sanity_check(self):
