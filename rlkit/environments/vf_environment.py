@@ -1,5 +1,8 @@
 from typing import Any, Optional, TypedDict
+import asyncio
+import random
 
+import httpx
 import ray
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
@@ -7,6 +10,13 @@ import verifiers as vf
 
 from openai import AsyncOpenAI
 from datasets import Dataset
+
+# Increase connection limits to avoid throttling at high concurrency
+HTTPX_TIMEOUT = httpx.Timeout(600.0)
+HTTPX_LIMITS = httpx.Limits(
+    max_connections=32768,
+    max_keepalive_connections=32768,
+)
 
 from rlkit.environments.interfaces import EnvironmentInterface
 
@@ -17,7 +27,7 @@ class VfEnvironmentConfig(TypedDict):
     # Passed to vf.load_environment as kwargs - make sure this is serializable.
     environment_config: dict[str, Any] | None
 
-@ray.remote(max_restarts=-1, max_task_retries=-1)
+@ray.remote(max_restarts=-1, max_task_retries=-1, max_concurrency=64)
 class VfEnvironment(EnvironmentInterface):
     """Wraps a verifiers environment in a Ray worker."""
     cfg: VfEnvironmentConfig
@@ -53,10 +63,14 @@ class VfEnvironment(EnvironmentInterface):
     
     def set_api_ips(self, api_ips: list[str]):
         self.api_ips = api_ips
-        self.clients = [AsyncOpenAI(
-            api_key="n/a",
-            base_url=f"http://{ip}:8000/v1"
-        ) for ip in api_ips]
+        self.clients = [
+            AsyncOpenAI(
+                api_key="n/a",
+                base_url=f"http://{ip}:8000/v1",
+                http_client=httpx.AsyncClient(timeout=HTTPX_TIMEOUT, limits=HTTPX_LIMITS),
+            )
+            for ip in api_ips
+        ]
         
     def get_next_client(self) -> AsyncOpenAI:
         client = self.clients[self.current_client_index]
@@ -73,14 +87,27 @@ class VfEnvironment(EnvironmentInterface):
     ) -> tuple[vf.GenerateOutputs, vf.ProcessedOutputs]:
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         client = self.get_next_client()
-        results = await self.env.a_generate(
-            inputs=inputs,
-            client=client,
-            model="policy",
-            sampling_args=sampling_args,
-            score_rollouts=score_rollouts,
-            max_concurrent=max_concurrent,
-            **kwargs,
-        )
-
-        return results
+        
+        max_retries = 1000
+        base_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                results = await self.env.a_generate(
+                    inputs=inputs,
+                    client=client,
+                    model="policy",
+                    sampling_args=sampling_args,
+                    score_rollouts=score_rollouts,
+                    max_concurrent=max_concurrent,
+                    **kwargs,
+                )
+                return results
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    print(f"Error in a_generate after {max_retries} retries: {e}")
+                    raise
+                # Exponential backoff with jitter
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                print(f"Error in a_generate (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay:.2f}s...")
+                await asyncio.sleep(delay)

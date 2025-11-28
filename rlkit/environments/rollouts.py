@@ -118,10 +118,11 @@ def run_vf_rollouts(
     if greedy:
         sampling_args["temperature"] = 0.0
 
+    # Use semaphore as per-batch limit (actor max_concurrency controls total parallelism)
     if vf_semaphore is not None:
-        batch_semaphore = max(1, vf_semaphore // len(verifiers_input_batches))
+        batch_semaphore = vf_semaphore
     else:
-        batch_semaphore = 100
+        batch_semaphore = 200
 
     refs = [
         env.a_generate.remote(

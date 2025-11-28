@@ -180,7 +180,10 @@ class VLLMOpenAIServe:
             "--logprobs-mode", "processed_logprobs",
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--data-parallel-size", str(data_parallel_size),
-            "--trust-remote-code"
+            "--trust-remote-code",
+            # Performance optimizations
+            "--max-num-seqs", "2048",  # Allow more concurrent sequences for better batching
+            "--enable-chunked-prefill",  # Prevent long prefills from blocking decode
         ]
         if tool_call_parser:
             args += ["--tool-call-parser", tool_call_parser]
@@ -235,7 +238,15 @@ class VLLMOpenAIServe:
         
         _serve_app.mount("/", vllm_app)
         
-        config = uvicorn.Config(_serve_app, host="0.0.0.0", port=8000)
+        config = uvicorn.Config(
+            _serve_app,
+            host="0.0.0.0",
+            port=8000,
+            limit_concurrency=None,  # No limit on concurrent connections
+            limit_max_requests=None,  # No limit on total requests
+            backlog=8192,  # Increase connection backlog
+            timeout_keep_alive=120,  # Keep connections alive longer
+        )
         server = uvicorn.Server(config)
         await server.serve()
     
