@@ -34,7 +34,7 @@ from rlkit.algorithms.loss_functions import (
     ClippedPGLossDataDict,
     ClippedPGLossFn,
 )
-from rlkit.algorithms.utils import set_seed, vector_subseq_starts, _pad_tensor
+from rlkit.algorithms.utils import set_seed, _pad_tensor
 from rlkit.config import (
     CheckpointingConfig,
     ClippedPGLossConfig,

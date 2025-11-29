@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Optional, TypedDict
 import asyncio
 import random
@@ -88,10 +89,7 @@ class VfEnvironment(EnvironmentInterface):
         assert isinstance(sampling_args, dict), "sampling_args must be a dictionary."
         client = self.get_next_client()
         
-        max_retries = 1000
-        base_delay = 0.5
-        
-        for attempt in range(max_retries):
+        while True:
             try:
                 results = await self.env.a_generate(
                     inputs=inputs,
@@ -102,12 +100,8 @@ class VfEnvironment(EnvironmentInterface):
                     max_concurrent=max_concurrent,
                     **kwargs,
                 )
+
                 return results
             except Exception as e:
-                if attempt == max_retries - 1:
-                    print(f"Error in a_generate after {max_retries} retries: {e}")
-                    raise
-                # Exponential backoff with jitter
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                print(f"Error in a_generate (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay:.2f}s...")
-                await asyncio.sleep(delay)
+                print(f"Error generating rollouts: {e}")
+                await asyncio.sleep(1)

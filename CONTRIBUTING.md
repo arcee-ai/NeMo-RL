@@ -1,1 +1,0 @@
-Arcee RLKit is not currently accepting outside contributions.

@@ -23,28 +23,6 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from rlkit.data import hf_datasets
 from rlkit.config import TokenizerConfig
 
-def vector_subseq_starts(start_index: int, a: torch.Tensor, b: torch.Tensor) -> int:
-    """
-    Return a list of the indices of the occurrences of b in a after start_index.
-    """
-    n, m = a.numel(), b.numel()
-    if m == 0 or m > n: 
-        print("returning -1 because m == 0 or m > n")
-        return -1
-    
-    start_index = max(0, min(start_index, n))  # clamp
-    rem = n - start_index
-    if rem < m:
-        print("returning -1 because rem < m")
-        return -1
-
-    # search in a[start:] and offset the result by 'start'
-    windows = a.narrow(0, start_index, rem).unfold(0, m, 1)   # (rem-m+1, m)
-    matches = (windows == b).all(dim=1)
-    indices = torch.nonzero(matches, as_tuple=False)
-    return [start_index + idx.item() for idx in indices]
-
-
 def _pad_tensor(
     tensor: torch.Tensor,
     max_len: int,

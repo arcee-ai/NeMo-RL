@@ -1,7 +1,0 @@
-########
-# GRPO #
-########
-
-#######
-# (no suites currently registered)
-#######
