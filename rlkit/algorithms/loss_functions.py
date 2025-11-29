@@ -101,6 +101,9 @@ class ClippedPGLossFn(LossFunction):
         self.use_importance_sampling_correction = cfg[
             "use_importance_sampling_correction"
         ]
+        self.icepop_enabled = cfg.get("icepop_enabled", False)
+        self.icepop_alpha = cfg.get("icepop_alpha", 0.5)
+        self.icepop_beta = cfg.get("icepop_beta", 2.0)
 
         self.loss_type = (
             LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
@@ -238,6 +241,19 @@ class ClippedPGLossFn(LossFunction):
         actor_importance_weights = torch.nan_to_num(
             actor_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
         )
+
+        # IcePop: mask tokens where engine mismatch ratio is outside [alpha, beta]
+        # See: Ring-1T paper (arXiv:2510.18855) for details on IcePop stabilization
+        if self.icepop_enabled:
+            original_mask = mask.clone()
+            icepop_mask = (
+                (actor_importance_weights >= self.icepop_alpha)
+                & (actor_importance_weights <= self.icepop_beta)
+            ).float()
+            mask = mask * icepop_mask
+        else:
+            original_mask = None
+
         if self.use_importance_sampling_correction:
             importance_weights_to_use = actor_importance_weights
         else:
@@ -303,6 +319,17 @@ class ClippedPGLossFn(LossFunction):
             global_normalization_factor=global_valid_toks,
         ).item()
 
+        # Compute IcePop diagnostic: fraction of tokens masked due to engine mismatch
+        if self.icepop_enabled and original_mask is not None:
+            with torch.no_grad():
+                icepop_fraction_masked = 1.0 - masked_mean(
+                    icepop_mask,
+                    original_mask,
+                    global_normalization_factor=global_valid_toks,
+                ).item()
+        else:
+            icepop_fraction_masked = 0.0
+
         # If you provided a global_valid_{seqs/toks}, all metrics here are globally normalized
         # by either sequence or token count, depending on particular metric.
         # To get the true metric, you'll need to sum over the microbatch.
@@ -317,6 +344,7 @@ class ClippedPGLossFn(LossFunction):
                 "sampling_importance_ratio": sample_importance_ratio.item(),
                 "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
+                "icepop_fraction_masked": icepop_fraction_masked,
             },
         )
 
@@ -377,6 +405,9 @@ class CISPOLossFn(LossFunction):
         self.epsilon_max = cfg["epsilon_max"]
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
         self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
+        self.icepop_enabled = cfg.get("icepop_enabled", False)
+        self.icepop_alpha = cfg.get("icepop_alpha", 0.5)
+        self.icepop_beta = cfg.get("icepop_beta", 2.0)
 
         self.loss_type = (
             LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
@@ -488,6 +519,23 @@ class CISPOLossFn(LossFunction):
         if prev_logprobs is None:
             prev_logprobs = curr_logprobs.detach()
 
+        # IcePop: mask tokens where engine mismatch ratio is outside [alpha, beta]
+        # See: Ring-1T paper (arXiv:2510.18855) for details on IcePop stabilization
+        # Compute engine mismatch ratio early for IcePop masking
+        engine_mismatch_ratio = torch.exp(prev_logprobs - generation_logprobs)
+        engine_mismatch_ratio = torch.nan_to_num(
+            engine_mismatch_ratio, nan=0.0, posinf=0.0, neginf=0.0
+        )
+        if self.icepop_enabled:
+            original_mask = mask.clone()
+            icepop_mask = (
+                (engine_mismatch_ratio >= self.icepop_alpha)
+                & (engine_mismatch_ratio <= self.icepop_beta)
+            ).float()
+            mask = mask * icepop_mask
+        else:
+            original_mask = None
+
         # CISPO core: compute IS ratio, clip it, and stop gradient
         ratios = (curr_logprobs - prev_logprobs).exp()
         # One-sided clipping: only clip the upper bound (truncated IS)
@@ -513,13 +561,9 @@ class CISPOLossFn(LossFunction):
                 global_normalization_factor=global_valid_seqs,
             )
 
-        # Compute sampling importance ratio for diagnostics
-        actor_importance_weights = torch.exp(prev_logprobs - generation_logprobs)
-        actor_importance_weights = torch.nan_to_num(
-            actor_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
-        )
+        # Compute sampling importance ratio for diagnostics (reuse engine_mismatch_ratio)
         sample_importance_ratio = masked_mean(
-            actor_importance_weights,
+            engine_mismatch_ratio,
             mask,
             global_normalization_factor=global_valid_toks,
         )
@@ -544,6 +588,17 @@ class CISPOLossFn(LossFunction):
             )
 
         loss = actor_loss + kl
+
+        # Compute IcePop diagnostic: fraction of tokens masked due to engine mismatch
+        if self.icepop_enabled and original_mask is not None:
+            with torch.no_grad():
+                icepop_fraction_masked = 1.0 - masked_mean(
+                    icepop_mask,
+                    original_mask,
+                    global_normalization_factor=global_valid_toks,
+                ).item()
+        else:
+            icepop_fraction_masked = 0.0
 
         # Compute diagnostic metrics
         with torch.no_grad():
@@ -580,6 +635,7 @@ class CISPOLossFn(LossFunction):
                 "sampling_importance_ratio": sample_importance_ratio.item(),
                 "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
+                "icepop_fraction_masked": icepop_fraction_masked,
             },
         )
 
