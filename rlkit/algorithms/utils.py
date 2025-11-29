@@ -166,10 +166,7 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> PreTrainedTokenizerBase:
         tokenizer.pad_token = tokenizer.eos_token
     if "chat_template" in tokenizer_config:
         if tokenizer_config["chat_template"] is None:
-            print("Using passthrough chat template")
-            tokenizer.chat_template = (
-                hf_datasets.COMMON_CHAT_TEMPLATES.passthrough_prompt_response
-            )
+            raise ValueError("Chat template cannot be None")
         elif tokenizer_config["chat_template"].lower() == "default":
             print("Using tokenizer's default chat template")
         else:
