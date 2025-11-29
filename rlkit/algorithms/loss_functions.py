@@ -251,8 +251,10 @@ class ClippedPGLossFn(LossFunction):
                 & (actor_importance_weights <= self.icepop_beta)
             ).float()
             mask = mask * icepop_mask
+            token_mask_for_loss = token_mask * icepop_mask
         else:
             original_mask = None
+            token_mask_for_loss = token_mask
 
         if self.use_importance_sampling_correction:
             importance_weights_to_use = actor_importance_weights
@@ -269,7 +271,7 @@ class ClippedPGLossFn(LossFunction):
             actor_loss = masked_mean(
                 masked_mean(
                     importance_weights_to_use * clip_loss,
-                    token_mask,
+                    token_mask_for_loss,
                     dim=-1,
                 ),
                 sample_mask,
@@ -533,8 +535,10 @@ class CISPOLossFn(LossFunction):
                 & (engine_mismatch_ratio <= self.icepop_beta)
             ).float()
             mask = mask * icepop_mask
+            token_mask_for_loss = token_mask * icepop_mask
         else:
             original_mask = None
+            token_mask_for_loss = token_mask
 
         # CISPO core: compute IS ratio, clip it, and stop gradient
         ratios = (curr_logprobs - prev_logprobs).exp()
@@ -556,7 +560,7 @@ class CISPOLossFn(LossFunction):
             )
         else:
             actor_loss = masked_mean(
-                masked_mean(cispo_loss, token_mask, dim=-1),
+                masked_mean(cispo_loss, token_mask_for_loss, dim=-1),
                 sample_mask,
                 global_normalization_factor=global_valid_seqs,
             )
