@@ -1,18 +1,16 @@
 import os
+import sys
 import time
 from typing import Any
 
 import openai
 import ray
-from rlkit.distributed.ray_actor_environment_registry import get_actor_python_env
-from rlkit.utils.venvs import create_local_venv_on_each_node
 
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.models.generation.vllm_http.config import HttpVllmConfig
 from rlkit.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
 
 from ray import serve
-from ray.serve.handle import DeploymentHandle
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 
@@ -25,26 +23,10 @@ class VllmHttpGeneration:
 
         # serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode", "access_log": False})
     
-        py_exec = get_actor_python_env("rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe")
-
-        # Resolve uv-based executables to a concrete venv python under venvs/
-        if isinstance(py_exec, str) and py_exec.startswith("uv"):
-            py_exec = create_local_venv_on_each_node(
-                py_executable=py_exec,
-                venv_name="rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe",
-            )
-
-        # Prepare runtime_env to ensure Serve replicas use the managed venv
-        runtime_env = {"py_executable": py_exec, "env_vars": {}}
-        try:
-            venv_dir = os.path.dirname(os.path.dirname(py_exec)) if isinstance(py_exec, str) else None
-            if venv_dir:
-                runtime_env["env_vars"] = {
-                    "VIRTUAL_ENV": venv_dir,
-                    "UV_PROJECT_ENVIRONMENT": venv_dir,
-                }
-        except Exception:
-            pass
+        runtime_env = {
+            "py_executable": sys.executable,
+            "env_vars": dict(os.environ),
+        }
         
         # TODO: find better place for this, force V1 engine
         runtime_env["env_vars"]["VLLM_USE_V1"] = "1"

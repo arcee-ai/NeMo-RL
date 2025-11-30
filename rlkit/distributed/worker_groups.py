@@ -14,6 +14,7 @@
 import asyncio
 import importlib
 import os
+import sys
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -23,12 +24,8 @@ from ray.util.placement_group import PlacementGroup
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from rlkit.distributed.named_sharding import NamedSharding
-from rlkit.distributed.ray_actor_environment_registry import (
-    get_actor_python_env,
-)
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_group_utils import recursive_merge_options
-from rlkit.utils.venvs import create_local_venv_on_each_node
 
 
 @dataclass
@@ -415,22 +412,6 @@ class RayWorkerGroup:
             if k not in env_vars:
                 env_vars[k] = v
 
-        # Get the python environment for the actor
-        actor_python_env = get_actor_python_env(
-            remote_worker_builder.ray_actor_class_fqn
-        )
-        if actor_python_env.startswith("uv"):
-            # If the py_executable begins with uv it signals that we need to create a
-            #  local venv first and then replace the py_executable with the local venv's python.
-            #  The directory the venv will be created in is controlled by the env var
-            #  RLKIT_VENV_DIR and defaults to $GIT_ROOT/venvs/.
-            py_executable = create_local_venv_on_each_node(
-                py_executable=actor_python_env,
-                venv_name=remote_worker_builder.ray_actor_class_fqn,
-            )
-        else:
-            py_executable = actor_python_env
-
         # Count total workers
         self.world_size = sum(len(indices) for _, indices in bundle_indices_list)
         global_rank = 0
@@ -491,10 +472,8 @@ class RayWorkerGroup:
                 # Pass these options to the remote_worker_builder
                 runtime_env = {
                     "env_vars": worker_env_vars,
-                    "py_executable": py_executable,
+                    "py_executable": sys.executable,
                 }
-                runtime_env["env_vars"]["VIRTUAL_ENV"] = py_executable
-                runtime_env["env_vars"]["UV_PROJECT_ENVIRONMENT"] = py_executable
 
                 extra_options = {"runtime_env": runtime_env, "name": name}
 

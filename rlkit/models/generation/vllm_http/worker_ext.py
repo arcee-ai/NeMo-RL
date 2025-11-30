@@ -7,16 +7,6 @@ from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
 from rlkit.utils.nsys import wrap_with_nvtx_name
 
-try:
-    import vllm  # noqa: F401
-except ImportError:
-    raise ImportError(
-        "vLLM is not installed. Please check that the py_executable in the runtime_env of VLLMOpenAIServe "
-        "covers the vllm dependency. You may have to update rlkit/distributed/ray_actor_environment_registry.py. "
-        "This error can also happen if the venv creation was aborted or errored out in the middle. In that case, "
-        "please run at least once with the environment variable RLKIT_FORCE_REBUILD_VENVS=true set to force the rebuild of the environment."
-    )
-
 
 class VllmHttpWorkerExtension:
     def init_collective(

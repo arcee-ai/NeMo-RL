@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from copy import deepcopy
 import os
+import sys
 
 from datasets import Dataset
 from openai.types.chat import ChatCompletionMessageToolCallUnion
@@ -23,15 +23,12 @@ os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
 os.environ["TQDM_DISABLE"] = "1"
 
 import argparse
-import os
 import pprint
-from collections import defaultdict
 import asyncio
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from omegaconf import OmegaConf
 import ray
-from ray import serve
 from transformers import PreTrainedTokenizerBase
 import torch
 
@@ -43,9 +40,6 @@ from rlkit.data.interfaces import (
     DatumSpec,
     APIMessage,
     TaskDataSpec,
-)
-from rlkit.distributed.ray_actor_environment_registry import (
-    get_actor_python_env,
 )
 from rlkit.distributed.virtual_cluster import init_ray
 from rlkit.environments.interfaces import EnvironmentInterface
@@ -108,9 +102,7 @@ def setup_data(
     # This is the Ray worker that actually runs the environment.
     vf_env = VfEnvironment.options(  # type: ignore # it's wrapped with ray.remote
         runtime_env={
-            "py_executable": get_actor_python_env(
-                "rlkit.environments.vf_environment.VfEnvironment"
-            ),
+            "py_executable": sys.executable,
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }
     ).remote(env_config["vf"], model_name)

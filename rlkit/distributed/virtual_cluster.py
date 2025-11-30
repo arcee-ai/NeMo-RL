@@ -13,7 +13,6 @@
 # limitations under the License.
 import logging
 import os
-import sys
 import time
 from typing import Optional, TypedDict
 
@@ -38,18 +37,6 @@ class ClusterConfig(TypedDict):
 dir_path = os.path.dirname(os.path.abspath(__file__))
 git_root = os.path.abspath(os.path.join(dir_path, "../.."))
 
-
-class PY_EXECUTABLES:
-    SYSTEM = sys.executable
-
-    # Use RLKit direct dependencies.
-    BASE = "uv run --locked"
-
-    # Use RLKit direct dependencies.
-    AUTOMODEL = "uv run --locked --extra automodel"
-
-    # Use RLKit direct dependencies and the HTTP vLLM stack.
-    VLLM_HTTP = "uv run --locked --extra vllm_http"
 
 
 @ray.remote  # pragma: no cover
