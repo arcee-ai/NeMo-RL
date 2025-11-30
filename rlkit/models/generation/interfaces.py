@@ -11,92 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from abc import ABC, abstractmethod
-from typing import Any, NotRequired, TypedDict, Union
+from typing import Any, NotRequired, TypedDict
 
-import ray
 import torch
-
-from rlkit.distributed.batched_data_dict import BatchedDataDict
-
-
-def verify_right_padding(
-    data: Union[
-        BatchedDataDict["GenerationDatumSpec"], BatchedDataDict["GenerationOutputSpec"]
-    ],
-    pad_value: int = 0,
-    raise_error: bool = True,
-) -> tuple[bool, Union[str, None]]:
-    """Verify that a tensor is right-padded according to the provided lengths.
-
-    Arguments:
-        data: The BatchedDataDict to check, containing either:
-            - For GenerationDatumSpec: input_ids and input_lengths
-            - For GenerationOutputSpec: output_ids and unpadded_sequence_lengths
-        pad_value: The expected padding value (default: 0)
-        raise_error: Whether to raise an error if wrong padding is detected
-
-    Returns:
-        Tuple of (is_right_padded, error_message)
-        - is_right_padded: True if right padding confirmed, False otherwise
-        - error_message: None if properly padded, otherwise a description of the issue
-    """
-    # Extract tensors from the BatchedDataDict
-    assert isinstance(data, BatchedDataDict), (
-        f"data must be a BatchedDataDict, got type: {type(data)}"
-    )
-
-    assert pad_value is not None, (
-        "Tokenizer does not have a pad_token_id. \n"
-        "Please use the rlkit.algorithms.utils.get_tokenizer(...) API which sets pad_token_id if absent."
-    )
-
-    # Determine which type of data we're dealing with
-    if "input_ids" in data and "input_lengths" in data:
-        # GenerationDatumSpec
-        tensor = data["input_ids"]
-        lengths = data["input_lengths"]
-    elif "output_ids" in data and "unpadded_sequence_lengths" in data:
-        # GenerationOutputSpec
-        tensor = data["output_ids"]
-        lengths = data["unpadded_sequence_lengths"]
-    else:
-        msg = f"Could not find the required pairs of fields. Expected either (input_ids, input_lengths) or (output_ids, unpadded_sequence_lengths). Got keys: {data.keys()}"
-        if raise_error:
-            raise ValueError(msg)
-        return False, msg
-
-    if tensor.ndim != 2:
-        msg = f"Expected 2D tensor for padding check, got shape {tensor.shape}"
-        if raise_error:
-            raise ValueError(msg)
-        return False, msg
-
-    batch_size, seq_len = tensor.shape
-    if lengths.shape[0] != batch_size:
-        msg = f"Mismatch between tensor batch size ({batch_size}) and lengths tensor size ({lengths.shape[0]})"
-        if raise_error:
-            raise ValueError(msg)
-        return False, msg
-
-    # Check each sequence to verify zero padding on the right
-    for i in range(batch_size):
-        length = lengths[i].item()
-        if length > seq_len:
-            msg = f"Length {length} at index {i} exceeds tensor sequence dimension {seq_len}"
-            if raise_error:
-                raise ValueError(msg)
-            return False, msg
-
-        # Check that all positions after length are pad_value
-        if length < seq_len and not torch.all(tensor[i, length:] == pad_value):
-            non_pad_indices = torch.where(tensor[i, length:] != pad_value)[0] + length
-            msg = f"Non-padding values found after specified length at index {i}: positions {non_pad_indices.tolist()}"
-            if raise_error:
-                raise ValueError(msg)
-            return False, msg
-
-    return True, None
 
 
 class ResourcesConfig(TypedDict):
@@ -112,14 +29,14 @@ class ColocationConfig(TypedDict):
 class GenerationConfig(TypedDict):
     """Configuration for generation."""
 
-    backend: str
     max_new_tokens: int
     temperature: float
     top_p: float
     top_k: int
+    min_p: NotRequired[float]
     model_name: str
-    stop_token_ids: list[int]
-    stop_strings: NotRequired[list[str]]
+    stop_token_ids: list[int] | None
+    stop_strings: NotRequired[list[str] | None]
     pad_token_id: NotRequired[int]
     colocated: NotRequired[ColocationConfig]
 
@@ -149,7 +66,7 @@ class GenerationDatumSpec(TypedDict):
     ```
 
     All functions receiving or returning GenerationDatumSpec should ensure
-    right padding is maintained. Use verify_right_padding() to check.
+    right padding is maintained.
     """
 
     input_ids: torch.Tensor
@@ -193,7 +110,7 @@ class GenerationOutputSpec(TypedDict):
     ```
 
     All functions receiving or returning GenerationOutputSpec should ensure
-    right padding is maintained. Use verify_right_padding() to check.
+    right padding is maintained.
     """
 
     output_ids: torch.Tensor
@@ -203,40 +120,3 @@ class GenerationOutputSpec(TypedDict):
     )  # Length of full valid sequence (input + generated response)
     logprobs: torch.Tensor
     __extra__: Any
-
-
-class GenerationInterface(ABC):
-    """Abstract base class defining the interface for RL policies."""
-
-    @abstractmethod
-    def init_collective(
-        self, ip: str, port: int, world_size: int
-    ) -> list[ray.ObjectRef]:
-        """Initialize the collective communication."""
-        pass
-
-    @abstractmethod
-    def generate(
-        self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
-    ) -> BatchedDataDict["GenerationOutputSpec"]:
-        pass
-
-    @abstractmethod
-    def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
-        pass
-
-    @abstractmethod
-    def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
-        pass
-
-    def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
-        """Prepare the info for refit."""
-        raise NotImplementedError
-
-    def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
-        """Update the model weights from the given IPC handles."""
-        raise NotImplementedError
-
-    def update_weights_from_collective(self) -> list[ray.ObjectRef]:
-        """Update the model weights from collective communication."""
-        raise NotImplementedError

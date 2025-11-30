@@ -52,10 +52,6 @@ from rlkit.data.messages import APIMessage
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.environments.interfaces import EnvironmentInterface
-from rlkit.models.generation.interfaces import (
-    GenerationInterface,
-)
-from rlkit.models.generation.vllm import VllmConfig, VllmGeneration
 from rlkit.models.generation.vllm_http.config import HttpVllmConfig
 from rlkit.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
 from rlkit.models.policy.interfaces import ColocatablePolicyInterface
@@ -158,11 +154,9 @@ class GRPOTrainer:
             inference_gpus_per_node,
         ) = self._setup_clusters(generation_config, cluster_config)
 
-        backend = generation_config["backend"]
         generation_config["model_name"] = policy_config["model_name"]
 
-        self.policy_generation = self._initialize_generation_interface(
-            backend=backend,
+        self.policy_generation: VllmHttpGeneration = self._initialize_generation_interface(
             generation_config=generation_config,
             inference_cluster=inference_cluster,
             policy_config=policy_config,
@@ -204,7 +198,6 @@ class GRPOTrainer:
                 inference_cluster,
                 inference_nodes,
                 inference_gpus_per_node,
-                backend,
             )
 
         state_dict_info = self.policy.prepare_refit_info()
@@ -488,15 +481,10 @@ class GRPOTrainer:
 
     def _initialize_generation_interface(
         self,
-        backend: str,
         generation_config: dict[str, Any],
         inference_cluster: RayVirtualCluster,
         policy_config: PolicyConfig,
-    ) -> Optional[GenerationInterface]:
-        # Temporary until full deprecation of this config option
-        if backend != "vllm_http":
-            raise ValueError(f"Unsupported generation backend: {backend}")
-        
+    ) -> VllmHttpGeneration:
         generation_config = cast(HttpVllmConfig, generation_config)
         policy_generation = VllmHttpGeneration(
             cluster=inference_cluster, config=generation_config
@@ -532,21 +520,19 @@ class GRPOTrainer:
         inference_cluster: RayVirtualCluster,
         inference_nodes: int,
         inference_gpus_per_node: int,
-        backend: str,
     ) -> None:
         assert self.policy_generation is not None, (
             "policy_generation should not be None when collective communication is required"
         )
         ip, port = train_cluster.get_master_address_and_port()
         world_size = inference_nodes * inference_gpus_per_node + 1
-        if backend == "vllm_http":
-            world_size = (
-                self.policy_generation.tp_size
-                * self.policy_generation.dp_size
-                * self.policy_generation.pp_size
-                * self.policy_generation.num_nodes
-                + 1
-            )
+        world_size = (
+            self.policy_generation.tp_size
+            * self.policy_generation.dp_size
+            * self.policy_generation.pp_size
+            * self.policy_generation.num_nodes
+            + 1
+        )
         logging.info(
             f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})"
         )
@@ -573,10 +559,6 @@ class GRPOTrainer:
             fit_last_save_time=True,
         )
         timeout.start_iterations()
-
-        if self.policy_generation is None:
-            self.policy_generation = self.policy  # type: ignore[assignment]
-        assert self.policy_generation is not None
 
         step = self.grpo_save_state["step"]
         consumed_samples = self.grpo_save_state["consumed_samples"]

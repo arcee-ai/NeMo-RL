@@ -11,7 +11,7 @@ try:
     import vllm  # noqa: F401
 except ImportError:
     raise ImportError(
-        "vLLM is not installed. Please check that the py_executable in the runtime_env of VllmGenerationWorker "
+        "vLLM is not installed. Please check that the py_executable in the runtime_env of VLLMOpenAIServe "
         "covers the vllm dependency. You may have to update rlkit/distributed/ray_actor_environment_registry.py. "
         "This error can also happen if the venv creation was aborted or errored out in the middle. In that case, "
         "please run at least once with the environment variable RLKIT_FORCE_REBUILD_VENVS=true set to force the rebuild of the environment."

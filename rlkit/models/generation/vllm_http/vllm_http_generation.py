@@ -1,21 +1,11 @@
-import time
 import os
-import asyncio
-from typing import Any, Optional, cast, AsyncGenerator
+import time
+from typing import Any
 
 import openai
 import ray
-import requests
-from requests.exceptions import RequestException
-import torch
-from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.distributed.ray_actor_environment_registry import get_actor_python_env
 from rlkit.utils.venvs import create_local_venv_on_each_node
-from rlkit.models.generation.interfaces import (
-    GenerationDatumSpec,
-    GenerationInterface,
-    GenerationOutputSpec,
-)
 
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.models.generation.vllm_http.config import HttpVllmConfig
@@ -26,7 +16,7 @@ from ray.serve.handle import DeploymentHandle
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 
-class VllmHttpGeneration(GenerationInterface):
+class VllmHttpGeneration:
     client: openai.OpenAI | openai.AsyncOpenAI
     
     def __init__(self, cluster: RayVirtualCluster, config: HttpVllmConfig):
@@ -152,16 +142,6 @@ class VllmHttpGeneration(GenerationInterface):
         
     def get_ips(self) -> str:
         return ray.get([actor.admin_get_ip.remote() for actor in self.actors])
-
-    def generate(
-        self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
-    ) -> BatchedDataDict["GenerationOutputSpec"]:
-        raise NotImplementedError("The vLLM HTTP generation backend is only for use with verifiers environments.")
-
-    async def generate_async(
-        self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool = False
-    ) -> AsyncGenerator[tuple[int, BatchedDataDict["GenerationOutputSpec"]], None]:
-        raise NotImplementedError("The vLLM HTTP generation backend is only for use with verifiers environments.")
 
     def shutdown(self):
         serve.shutdown()

@@ -18,13 +18,13 @@ class ColocationConfig(TypedDict):
 
 
 class GenerationConfig(TypedDict):
-    backend: str
     max_new_tokens: int
     temperature: float
     top_p: float
     top_k: int
+    min_p: NotRequired[float | None]
     model_name: str
-    stop_token_ids: list[int]
+    stop_token_ids: list[int] | None
     stop_strings: NotRequired[list[str] | None]
     pad_token_id: NotRequired[int | None]
     colocated: NotRequired[ColocationConfig | None]

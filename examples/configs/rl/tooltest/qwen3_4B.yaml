@@ -95,7 +95,6 @@ policy:
     - milestones: [50]
 
   generation:
-    backend: "vllm_http"
     max_new_tokens: 512
     temperature: 0.7
     top_p: 0.8

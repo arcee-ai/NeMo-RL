@@ -17,17 +17,9 @@ import os
 from rlkit.distributed.virtual_cluster import PY_EXECUTABLES
 
 USE_SYSTEM_EXECUTABLE = os.environ.get("RLKIT_PY_EXECUTABLES_SYSTEM", "0") == "1"
-VLLM_EXECUTABLE = (
-    PY_EXECUTABLES.SYSTEM if USE_SYSTEM_EXECUTABLE else PY_EXECUTABLES.VLLM
-)
-VLLM_HTTP_EXECUTABLE = (
-    PY_EXECUTABLES.SYSTEM if USE_SYSTEM_EXECUTABLE else PY_EXECUTABLES.VLLM_HTTP
-)
 
 ACTOR_ENVIRONMENT_REGISTRY: dict[str, str] = {
     "rlkit.models.generation.vllm_http.vllm_http.VLLMOpenAIServe": PY_EXECUTABLES.SYSTEM,
-    "rlkit.models.generation.vllm.vllm_worker.VllmGenerationWorker": VLLM_EXECUTABLE,
-    "rlkit.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker": VLLM_EXECUTABLE,
     "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker": PY_EXECUTABLES.SYSTEM,
     "rlkit.environments.vf_environment.VfEnvironment": PY_EXECUTABLES.SYSTEM,
 }

@@ -48,10 +48,7 @@ class PY_EXECUTABLES:
     # Use RLKit direct dependencies.
     AUTOMODEL = "uv run --locked --extra automodel"
 
-    # Use RLKit direct dependencies and vllm.
-    VLLM = "uv run --locked --extra vllm"
-    
-    # For the newer vllm_http backend, we use the latest vllm
+    # Use RLKit direct dependencies and the HTTP vLLM stack.
     VLLM_HTTP = "uv run --locked --extra vllm_http"
 
 

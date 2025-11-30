@@ -50,7 +50,6 @@ from rlkit.distributed.ray_actor_environment_registry import (
 from rlkit.distributed.virtual_cluster import init_ray
 from rlkit.environments.interfaces import EnvironmentInterface
 from rlkit.models.generation import configure_generation_config
-from rlkit.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
 from rlkit.utils.config import load_config, parse_hydra_overrides
 from rlkit.utils.logger import get_next_experiment_dir
 from rlkit.config import RLConfig
@@ -146,8 +145,6 @@ def main() -> None:
         logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
         if not config["checkpointing"].get("hf_checkpoint", False):
             raise ValueError("Running on a system configuration with bugged DCP checkpointing. Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints.")
-
-    assert config["policy"]["generation"]["backend"] == "vllm_http", "Verifiers environments only support the \"vllm_http\" generation backend."
 
     # Get the next experiment directory with incremented ID
     config["logger"]["log_dir"] = get_next_experiment_dir(config["logger"]["log_dir"])

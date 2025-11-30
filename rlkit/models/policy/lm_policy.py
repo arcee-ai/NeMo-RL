@@ -36,7 +36,6 @@ from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 from rlkit.models.generation.interfaces import (
     GenerationDatumSpec,
-    GenerationInterface,
     GenerationOutputSpec,
 )
 from rlkit.config import PolicyConfig
@@ -55,7 +54,7 @@ from rlkit.models.policy.v2_policy_worker import get_device_mesh_info
 PathLike = Union[str, "os.PathLike[Any]"]
 
 
-class Policy(ColocatablePolicyInterface, GenerationInterface):
+class Policy(ColocatablePolicyInterface):
     def __init__(
         self,
         cluster: RayVirtualCluster,

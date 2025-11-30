@@ -11,44 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import cast
-
 from transformers import PreTrainedTokenizerBase
 
-from rlkit.models.generation.interfaces import GenerationConfig
-from rlkit.models.generation.vllm import VllmConfig
 from rlkit.models.generation.vllm_http.config import HttpVllmConfig
 
 TokenizerType = PreTrainedTokenizerBase
 
 
 def configure_generation_config(
-    config: GenerationConfig, tokenizer: TokenizerType, is_eval=False
-) -> GenerationConfig:
+    config: HttpVllmConfig, tokenizer: TokenizerType, is_eval: bool = False
+) -> HttpVllmConfig:
     """Apply specific configurations to generation config."""
     # tokenizer setting
     config["pad_token_id"] = tokenizer.pad_token_id
-    if config["stop_token_ids"] is None:
+    if config.get("stop_token_ids") is None:
         config["stop_token_ids"] = [tokenizer.eos_token_id]
 
-    # vllm setting
-    if config["backend"] == "vllm":
-        config = cast(VllmConfig, config)
-        # set load_format
-        config["vllm_cfg"]["load_format"] = "auto" if is_eval else "dummy"
-
-        # set skip_tokenizer_init
-        if is_eval or config["stop_strings"] is not None:
-            config["vllm_cfg"]["skip_tokenizer_init"] = False
-        else:
-            config["vllm_cfg"]["skip_tokenizer_init"] = True
-    elif config["backend"] == "vllm_http":
-        config = cast(HttpVllmConfig, config)
-        
-        # set skip_tokenizer_init
-        if is_eval or config["stop_strings"] is not None:
-            config["vllm_cfg"]["skip_tokenizer_init"] = False
-        else:
-            config["vllm_cfg"]["skip_tokenizer_init"] = True
+    # Set skip_tokenizer_init for the HTTP backend
+    should_init_tokenizer = is_eval or config.get("stop_strings") is not None
+    config["vllm_cfg"]["skip_tokenizer_init"] = not should_init_tokenizer
 
     return config
