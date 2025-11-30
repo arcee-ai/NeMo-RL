@@ -60,7 +60,6 @@ from rlkit.models.policy.utils import (
     configure_expandable_segments,
     get_flash_attention_kwargs,
     get_gpu_info,
-    get_handle_from_tensor,
     get_runtime_env_for_policy_worker,
     import_class_from_path,
     is_vllm_v1_engine_enabled,
@@ -285,7 +284,6 @@ class DTensorV2PolicyWorker:
         tokenizer: AutoTokenizer,
         weights_path: Optional[str] = None,
         optimizer_path: Optional[str] = None,
-        init_optimizer: bool = True,
         init_reference_model: bool = True,
         use_hf_checkpoint: bool = False,
         use_cut_cross_entropy: bool = False,
@@ -500,72 +498,72 @@ class DTensorV2PolicyWorker:
                     self.model.state_dict().items(), pin_memory=True
                 )
 
-        if init_optimizer:
-            optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
+        optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
+        
+        # Set up optimizer - if we are using the Muon optimizer, we need to gather the params by tensor type
+        # Otherwise, just init the optimizer as normal
+        if self.cfg["optimizer"].get("scalar_optim") is not None:
+            scalar_param_optim = self.cfg["optimizer"]["scalar_optim"]
             
-            if self.cfg["optimizer"].get("scalar_optim") is not None:
-                scalar_param_optim = self.cfg["optimizer"]["scalar_optim"]
-                
-                # Gather all params by tensor type
-                muon_params = []
-                non_muon_params = []
-                
-                # For convenience, include a sensible default.
-                default_extra_params = ["output.weight", "tok_embeddings.weight"]
-                
-                scalar_optim_extra_params = self.cfg["optimizer"].get("non_muon_params", default_extra_params)
-                
-                found_extra_params = []
-                
-                for name, param in self.model.named_parameters():
-                    if param.ndim == 2:
-                        found = False
-                        for extra_param in scalar_optim_extra_params:
-                            if re.match(extra_param, name):
-                                non_muon_params.append(param)
-                                found_extra_params.append(extra_param)
-                                found = True
-                                break
-                        if not found:
-                            muon_params.append(param)
-                    else:
-                        non_muon_params.append(param)
-                
-                for extra_param in scalar_optim_extra_params:
-                    if extra_param not in found_extra_params:
-                        raise ValueError(f"Did not find '{extra_param}' in model parameters, but it was specified for exclusion from Muon. Please specify your own non_muon_params in the config.")
-                
-                param_groups = [dict(params=muon_params)]
-                param_groups.append(
-                    dict(
-                        params=non_muon_params,
-                        algorithm=scalar_param_optim,
-                        **self.cfg["optimizer"].get("scalar_optim_kwargs", {})
-                    )
-                )
-                
-                # Create optimizer
-                if self.cfg["optimizer"]["pass_device_mesh"]:
-                    self.optimizer = optimizer_cls(
-                        param_groups,
-                        self.device_mesh["dp"],
-                        **self.cfg["optimizer"]["kwargs"],
-                    )
+            # Gather all params by tensor type
+            muon_params = []
+            non_muon_params = []
+            
+            # For convenience, include a sensible default.
+            default_extra_params = ["output.weight", "tok_embeddings.weight"]
+            
+            scalar_optim_extra_params = self.cfg["optimizer"].get("non_muon_params", default_extra_params)
+            
+            found_extra_params = []
+            
+            for name, param in self.model.named_parameters():
+                if param.ndim == 2:
+                    found = False
+                    for extra_param in scalar_optim_extra_params:
+                        if re.match(extra_param, name):
+                            non_muon_params.append(param)
+                            found_extra_params.append(extra_param)
+                            found = True
+                            break
+                    if not found:
+                        muon_params.append(param)
                 else:
-                    self.optimizer = optimizer_cls(
-                        param_groups,
-                        **self.cfg["optimizer"]["kwargs"],
-                    )
-            else:
-                if "muon" in self.cfg["optimizer"]["name"].lower():
-                    raise ValueError("Please specify policy.optimizer.scalar_optim to use the Muon optimizer.")
+                    non_muon_params.append(param)
+            
+            for extra_param in scalar_optim_extra_params:
+                if extra_param not in found_extra_params:
+                    raise ValueError(f"Did not find '{extra_param}' in model parameters, but it was specified for exclusion from Muon. Please specify your own non_muon_params in the config.")
+            
+            param_groups = [dict(params=muon_params)]
+            param_groups.append(
+                dict(
+                    params=non_muon_params,
+                    algorithm=scalar_param_optim,
+                    **self.cfg["optimizer"].get("scalar_optim_kwargs", {})
+                )
+            )
+            
+            # Create optimizer
+            if self.cfg["optimizer"]["pass_device_mesh"]:
                 self.optimizer = optimizer_cls(
-                    self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
+                    param_groups,
+                    self.device_mesh["dp"],
+                    **self.cfg["optimizer"]["kwargs"],
+                )
+            else:
+                self.optimizer = optimizer_cls(
+                    param_groups,
+                    **self.cfg["optimizer"]["kwargs"],
                 )
         else:
-            self.optimizer = None
+            if "muon" in self.cfg["optimizer"]["name"].lower():
+                raise ValueError("Please specify policy.optimizer.scalar_optim to use the Muon optimizer.")
+            self.optimizer = optimizer_cls(
+                self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
+            )
 
-        if "scheduler" in self.cfg and self.optimizer is not None:
+        # Set up scheduler
+        if "scheduler" in self.cfg:
             if isinstance(self.cfg["scheduler"], dict):
                 scheduler_cls = import_class_from_path(
                     cast(str, self.cfg["scheduler"]["name"])
@@ -592,29 +590,27 @@ class DTensorV2PolicyWorker:
                 self.scheduler = torch.optim.lr_scheduler.SequentialLR(
                     self.optimizer, schedulers, milestones
                 )
-
-        elif self.optimizer is not None:
-            ## default to a passthrough LR schedule
+        else:
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(
                 self.optimizer, lr_lambda=lambda epoch: 1
             )
         
+        # Load remainder of checkpoint state
         if weights_path and optimizer_path:
             if self.use_hf_checkpoint:
-                self._load_optim_checkpoint(optimizer_path)
+                self._load_hf_optim_checkpoint(optimizer_path)
             else:
                 logging.info(f"Loading DCP checkpoint from {weights_path}")
                 self.load_dcp_checkpoint(weights_path, optimizer_path)
 
-        # vars used for refit
-        ## will be initialized in prepare_refit_info
         self.refit_param_info = None
-        ## used for streaming update inference engine weights
+        
+        # Used for streaming refits
         self._held_sharded_state_dict_reference: Optional[dict[str, torch.Tensor]] = (
             None
         )
         self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
-        self._streaming_refit_metadata: Optional[
+        self._refit_metadata: Optional[
             dict[str, tuple[torch.Size, torch.dtype]]
         ] = None
 
@@ -652,9 +648,6 @@ class DTensorV2PolicyWorker:
         use_cache: bool,
     ) -> dict[str, Any]:
         return {"tokens": input_ids}
-
-    def _compute_model_logits(self, model_kwargs: dict[str, Any]) -> torch.Tensor:
-        return self.model(**model_kwargs)
 
     def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
         state_dict = self.model.state_dict()
@@ -986,7 +979,7 @@ class DTensorV2PolicyWorker:
                                     use_cache=False,
                                 )
 
-                                logits = self._compute_model_logits(model_args)
+                                logits = self.model(**model_args)
 
                             # Apply temperature scaling
                             logits = self._apply_temperature_scaling(logits)
@@ -1320,7 +1313,7 @@ class DTensorV2PolicyWorker:
                             flash_attn_kwargs=flash_attn_kwargs,
                             use_cache=False,
                         )
-                        logits = self._compute_model_logits(model_args)
+                        logits = self.model(**model_args)
 
                     # Apply temperature scaling
                     logits = self._apply_temperature_scaling(logits)
@@ -1545,11 +1538,11 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
-        if self._streaming_refit_metadata is None:
-            # Derive metadata by streaming the HF conversion
+        if self._refit_metadata is None:
+            # Derive metadata by doing the HF conversion
             state_dict = self.model.state_dict()
             try:
-                state_dict_info = self._collect_hf_stream_metadata(state_dict)
+                state_dict_info = self._collect_hf_metadata(state_dict)
             finally:
                 del state_dict
         
@@ -1570,14 +1563,14 @@ class DTensorV2PolicyWorker:
                         "packed_tensors": chunk_tensors
                     }
             
-            self._streaming_refit_metadata = new_metadata
+            self._refit_metadata = new_metadata
 
-        return self._streaming_refit_metadata
+        return self._refit_metadata
 
-    def _collect_hf_stream_metadata(
+    def _collect_hf_metadata(
         self, state_dict: dict[str, Any]
     ) -> dict[str, tuple[torch.Size, torch.dtype]]:
-        """Stream HF-converted tensors and log metadata before dropping buffers."""
+        """Collect HF-converted tensors and store metadata before dropping buffers."""
         metadata: dict[str, tuple[torch.Size, torch.dtype]] = {}
 
         if self.adapter is None:
@@ -1610,7 +1603,7 @@ class DTensorV2PolicyWorker:
             # No adapter, map hf keys to native keys directly
             hf_key_to_native_key = {k: k for k in state_dict.keys()}
         
-        for _, chunk_info in self._streaming_refit_metadata.items():
+        for _, chunk_info in self._refit_metadata.items():
             # Collect all of the necessary tensors for this chunk
             if self.adapter is not None:
                 minidict_to_convert = {}
@@ -1639,7 +1632,6 @@ class DTensorV2PolicyWorker:
         self.model = self.move_buffer_to_device(self.model, "cuda")
 
         self.model.eval()
-        self.offload_before_refit()
 
     @wrap_with_nvtx_name("v2_policy_worker/prepare_for_training")
     def prepare_for_training(self, *args, **kwargs) -> None:
@@ -1658,47 +1650,6 @@ class DTensorV2PolicyWorker:
                         state[k] = v.to("cuda")
 
         torch.cuda.empty_cache()
-
-    @torch.no_grad()
-    @wrap_with_nvtx_name("v2_policy_worker/offload_before_refit")
-    def offload_before_refit(self) -> None:
-        """Offload the optimizer to the CPU."""
-        torch.randn(1).cuda()  # wake up torch allocator
-        if hasattr(self, "optimizer") and self.optimizer is not None:
-            for state in self.optimizer.state.values():
-                for k, v in state.items():
-                    if isinstance(v, (DTensor, torch.Tensor)):
-                        state[k] = v.to("cpu")
-
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    @torch.no_grad()
-    @wrap_with_nvtx_name("v2_policy_worker/offload_after_refit")
-    def offload_after_refit(self) -> None:
-        # Offload as much as possible on the CPU
-        self.model = self.move_to_cpu(self.model)
-        self.model.eval()
-        torch.randn(1).cuda()  # wake up torch allocator
-        self.offload_before_refit()  # rerun the old offload function
-
-        # Clean up the held tensors
-        if self._held_sharded_state_dict_reference is not None:
-            del self._held_sharded_state_dict_reference
-            self._held_sharded_state_dict_reference = None
-        if self._held_streamed_param_reference is not None:
-            del self._held_streamed_param_reference
-            self._held_streamed_param_reference = None
-
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        # Print memory stats after offloading
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory after optimizer offload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
 
     def move_to_device(self, model: nn.Module, device: str | torch.device) -> nn.Module:
         model = self.move_buffer_to_device(model, device)
@@ -1724,10 +1675,6 @@ class DTensorV2PolicyWorker:
         gc.collect()
         torch.cuda.empty_cache()
         return model
-
-    def check_file_visibility(self, path: str) -> bool:
-        """Return True if the given filesystem path exists on this worker."""
-        return os.path.exists(path)
 
     def save_checkpoint(
         self,
@@ -1833,7 +1780,7 @@ class DTensorV2PolicyWorker:
         if optimizer_path and self.optimizer is not None:
             self._reshard_optimizer_state()
     
-    def _load_optim_checkpoint(self, optimizer_path: str) -> None:
+    def _load_hf_optim_checkpoint(self, optimizer_path: str) -> None:
         """Manually loads a non-sharded optimizer checkpoint. Used for HF checkpoints."""
         optimizer_file_path = _infer_checkpoint_file_path(
             optimizer_path,
@@ -1889,9 +1836,6 @@ class DTensorV2PolicyWorker:
                         device_mesh=mesh,
                         placements=placements,
                     )
-
-    def shutdown(self) -> None:
-        """Shutdown the policy."""
 
     def start_gpu_profiling(self) -> None:
         """Start GPU profiling."""

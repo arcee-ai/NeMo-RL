@@ -532,16 +532,6 @@ class Policy:
         # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
-    def offload_before_refit(self) -> None:
-        """Offload the optimizer and buffers to the CPU."""
-        futures = self.worker_group.run_all_workers_single_data("offload_before_refit")
-        ray.get(futures)
-
-    def offload_after_refit(self) -> None:
-        """Offload the optimizer and buffers to the CPU."""
-        futures = self.worker_group.run_all_workers_single_data("offload_after_refit")
-        ray.get(futures)
-
     def save_checkpoint(
         self,
         weights_path: str,
