@@ -110,8 +110,8 @@ def run_vf_rollouts(
         "stop_strings": policy_generation.cfg.get("stop_strings", None),
         "logprobs": 1,
         "extra_body": {
-            "return_tokens_as_token_ids": True,
             "top_k": policy_generation.cfg.get("top_k", None),
+            "return_token_ids": True,
         }
     }
 
@@ -180,13 +180,12 @@ def run_vf_rollouts(
                     result = responses[responses_idx]
                     responses_idx += 1
                     
-                    logprobs_obj = result.choices[0].logprobs.content
+                    input_ids = result.prompt_token_ids
+                    output_ids = result.choices[0].token_ids
                     
-                    token_ids = []
-                    generation_logprobs = []
-                    for logprob_obj in logprobs_obj:
-                        token_ids.append(int(logprob_obj.token.split(":")[-1]))
-                        generation_logprobs.append(logprob_obj.logprob)
+                    # We use generation logprobs to generate token masks, so we expect -9999 for all prompt tokens.
+                    # For completion tokens, just extract them from the vLLM response.
+                    generation_logprobs = ([-9999] * len(input_ids)) + [x.logprob for x in result.choices[0].logprobs.content]
                     
                     # We patch vLLM to return the full canonical prompt alongside our completion, so we should see at least one -9999 in the completion logprobs.
                     assert -9999 in generation_logprobs, "vLLM full-sequence monkey-patch appears to have failed, no prompt tokens in completion logprobs"
@@ -195,7 +194,7 @@ def run_vf_rollouts(
                         "role": msg["role"],
                         "content": msg["content"],
                         "tool_calls": msg.get("tool_calls", []) or [],
-                        "token_ids": torch.tensor(token_ids),
+                        "token_ids": torch.tensor(input_ids + output_ids),
                         "generation_logprobs": torch.tensor(generation_logprobs),
                     })
                 else:
