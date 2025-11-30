@@ -13,11 +13,9 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from enum import Enum, auto
 from typing import Optional, Tuple, TypeVar
 
 import torch
-from transformers import AutoConfig
 
 Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
@@ -30,38 +28,6 @@ class FlashAttentionKwargs:
     cu_seqlens_k: Tensor
     max_seqlen_q: int
     max_seqlen_k: int
-
-
-class ModelFlag(Enum):
-    """Enum that defines special flags for model-specific behaviors.
-
-    This enum provides a way to identify models that require special handling or
-    configuration in different parts of the RLKit codebase.
-
-    Flags:
-        VLLM_LOAD_FORMAT_AUTO: Models that should use the "auto" load format when initializing
-                               VLLM.
-
-    Each flag has a `matches` method that determines if the flag applies to a given model_name.
-    """
-
-    VLLM_LOAD_FORMAT_AUTO = auto()
-
-    def matches(self, model_name: str) -> bool:
-        match self:
-            case ModelFlag.VLLM_LOAD_FORMAT_AUTO:
-                return is_gemma_model(model_name)
-            case _:
-                raise ValueError(f"Unknown ModelFlag: {self}")
-
-
-def is_gemma_model(model_name: str) -> bool:
-    hf_config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    return hasattr(hf_config, "model_type") and hf_config.model_type in [
-        "gemma2",
-        "gemma3",
-        "gemma3_text",
-    ]
 
 
 def group_and_cat_tensors(

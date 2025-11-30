@@ -44,20 +44,12 @@ from torch.distributed.tensor.experimental._attention import (
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
-    AutoModelForSequenceClassification,
     AutoTokenizer,
 )
 from rlkit.algorithms.interfaces import LossFunction, LossType
 from rlkit.algorithms.loss_functions import SequencePackingLossWrapper
 from rlkit.algorithms.utils import masked_mean
 from rlkit.distributed.batched_data_dict import BatchedDataDict
-from rlkit.models.dtensor.parallelize import (
-    _parallelize_model,
-    clip_grad_by_total_norm_,
-    get_grad_norm,
-    get_logprobs_from_vocab_parallel_logits,
-    to_local_if_dtensor,
-)
 from rlkit.models.huggingface.common import (
     get_flash_attention_kwargs,
     pack_sequences,
@@ -75,7 +67,11 @@ from rlkit.models.policy.utils import (
     get_runtime_env_for_policy_worker,
     import_class_from_path,
     is_vllm_v1_engine_enabled,
+    clip_grad_by_total_norm_,
+    get_grad_norm,
+    get_logprobs_from_vocab_parallel_logits,
     sliding_window_overwrite,
+    to_local_if_dtensor,
 )
 from rlkit.utils.native_checkpoint import (
     load_checkpoint,
@@ -363,111 +359,56 @@ class DTensorV2PolicyWorker:
             else None,
         )
 
-        self._is_reward_model = self.cfg.get("reward_model_cfg", {}).get(
-            "enabled", False
-        )
-        self.allow_custom_modeling_code = self.cfg["dtensor_v2_cfg"].get(
-            "allow_custom_modeling_code", True
-        )
+        reward_cfg = self.cfg.get("reward_model_cfg", {}) or {}
+        if reward_cfg.get("enabled", False):
+            raise ValueError(
+                "Reward-model policies are not supported in the custom-only policy worker."
+            )
 
-        custom_model_setup: Optional[
-            tuple[
+        try:
+            custom_model_setup: tuple[
                 type[nn.Module],
                 Any,
                 type[BaseStateDictAdapter],
                 Callable,
-            ]
-        ] = None
-        if self.allow_custom_modeling_code and not self._is_reward_model:
-            try:
-                custom_model_setup = get_model_config(self.model_config)
-            except ValueError as exc:
-                logging.info(
-                    "Falling back to Hugging Face implementation for %s: %s",
-                    self.model_config.model_type,
-                    exc,
-                )
-
-        self.uses_custom_model = custom_model_setup is not None
-        self.adapter: Optional[BaseStateDictAdapter]
-        self.adapter = None
-        self.model_class: Optional[type[nn.Module]] = None
-        self._custom_parallelize_function: Optional[Callable] = None
+            ] = get_model_config(self.model_config)
+        except ValueError as exc:
+            raise ValueError(
+                f"Custom model implementation required for {self.model_config.model_type}, "
+                "but no adapter is available."
+            ) from exc
 
         full_state_dict = None
-        if self.uses_custom_model:
-            logging.info(f"Using custom model implementation for {model_name}")
-            custom_model_class, model_args, adapter_class, model_parallelize_function = (
-                custom_model_setup  # type: ignore[arg-type]
+        logging.info(f"Using custom model implementation for {model_name}")
+        custom_model_class, model_args, adapter_class, model_parallelize_function = (
+            custom_model_setup  # type: ignore[arg-type]
+        )
+        self.custom_model_args = model_args
+        self.adapter: BaseStateDictAdapter = adapter_class(
+            model_args=model_args, hf_assets_path=model_name
+        )
+        self._custom_parallelize_function: Callable = model_parallelize_function
+
+        if self.rank == 0:
+            print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
+            model = AutoModelForCausalLM.from_pretrained(
+                # Either load from the original model name or from the weights path if available
+                hf_model_name,
+                device_map="cpu",  # load weights onto CPU initially
+                trust_remote_code=True,
+                config=self.model_config,
             )
-            self.custom_model_args = model_args
-            self.adapter = adapter_class(
-                model_args=model_args, hf_assets_path=model_name
-            )
-            self._custom_parallelize_function = model_parallelize_function
-
-            if self.rank == 0:
-                print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
-                model = AutoModelForCausalLM.from_pretrained(
-                    # Either load from the original model name or from the weights path if available
-                    hf_model_name,
-                    device_map="cpu",  # load weights onto CPU initially
-                    trust_remote_code=True,
-                    config=self.model_config,
-                )
-                
-                hf_state_dict = model.state_dict()
-                full_state_dict = self.adapter.from_hf(hf_state_dict)
-                assert (
-                    full_state_dict is not None
-                ), "Failed to convert HF state dict to custom state dict"
-                del model
-
-            print("Initializing custom model on meta device...")
-            with init_empty_weights():
-                self.model = custom_model_class(model_args=model_args, skip_logits=self.use_cut_cross_entropy)
-        else:
-            logging.info(f"Using HuggingFace implementation for {model_name}")
-            assert not self.use_cut_cross_entropy, "Cut cross-entropy loss kernel is not supported with HuggingFace models"
-            if self._is_reward_model:
-                rm_cfg = self.cfg.get("reward_model_cfg", {})
-                rm_type = rm_cfg.get("reward_model_type", "bradley_terry")
-                if rm_type == "bradley_terry":
-                    model_class = AutoModelForSequenceClassification
-                    if self.model_config.num_labels != 1:
-                        print(
-                            "model_config.num_labels is not 1. Setting it to 1 for Bradley-Terry reward models."
-                        )
-                        self.model_config.num_labels = 1
-                else:
-                    raise ValueError(f"Unknown reward model type: {rm_type}")
-            else:
-                model_class = AutoModelForCausalLM
-
-            if self.rank == 0:
-                print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
-                model = model_class.from_pretrained(
-                    # Either load from the original model name or from the weights path if available
-                    hf_model_name,
-                    device_map="cpu",
-                    trust_remote_code=True,
-                    config=self.model_config,
-                )
-                full_state_dict = model.state_dict()
-                del model
-
-            print("Initializing Hugging Face model on meta device...")
-            with init_empty_weights():
-                self.model = model_class.from_config(
-                    self.model_config,
-                    trust_remote_code=True,
-                )
             
-            self.model_class = model_class
-            self.model_config = self.model_config
+            hf_state_dict = model.state_dict()
+            full_state_dict = self.adapter.from_hf(hf_state_dict)
+            assert (
+                full_state_dict is not None
+            ), "Failed to convert HF state dict to custom state dict"
+            del model
 
-            if getattr(getattr(self.model, "config", None), "pad_token_id", None) is None:
-                self.model.config.pad_token_id = tokenizer.pad_token_id
+        print("Initializing custom model on meta device...")
+        with init_empty_weights():
+            self.model = custom_model_class(model_args=model_args, skip_logits=self.use_cut_cross_entropy)
 
         # caching since this property is not always preserved after FSDP
         self.tokenizer = tokenizer
@@ -566,34 +507,20 @@ class DTensorV2PolicyWorker:
         activation_checkpointing = self.cfg["dtensor_v2_cfg"].get(
             "activation_checkpointing", False
         )
-        if self.uses_custom_model:
-            self.model = self._custom_parallelize_function(  # type: ignore[operator]
-                self.model,
-                self.device_mesh,
-                self.dp_mesh,
-                self.tp_mesh,
-                self.ep_mesh,
-                self.pp_mesh,
-                self.cp_mesh,
-                self.dp_replicate,
-                param_dtype=self.dtype,
-                sequence_parallel=sequence_parallel_enabled,
-                cpu_offload=self.cpu_offload,
-                activation_checkpointing=activation_checkpointing,
-            )
-        else:
-            self.model = _parallelize_model(
-                self.model,
-                self.dp_cp_mesh,
-                self.tp_mesh,
-                param_dtype=self.dtype,
-                sequence_parallel=sequence_parallel_enabled,
-                cpu_offload=self.cpu_offload,
-                activation_checkpointing=activation_checkpointing,
-                custom_parallel_plan=self.cfg["dtensor_v2_cfg"].get(
-                    "custom_parallel_plan"
-                ),
-            )
+        self.model = self._custom_parallelize_function(  # type: ignore[operator]
+            self.model,
+            self.device_mesh,
+            self.dp_mesh,
+            self.tp_mesh,
+            self.ep_mesh,
+            self.pp_mesh,
+            self.cp_mesh,
+            self.dp_replicate,
+            param_dtype=self.dtype,
+            sequence_parallel=sequence_parallel_enabled,
+            cpu_offload=self.cpu_offload,
+            activation_checkpointing=activation_checkpointing,
+        )
 
         logging.info(f"[Rank {self.rank}] Loading state dict from rank 0...")
         # This will broadcast the state dict from rank 0 to all other ranks
@@ -606,9 +533,6 @@ class DTensorV2PolicyWorker:
                 broadcast_from_rank0=True,
             ),
         )
-
-        if not self.uses_custom_model:
-            self._tie_word_embeddings_if_needed()
 
         if init_reference_model:
             if self.use_hf_checkpoint and weights_path:
@@ -634,10 +558,7 @@ class DTensorV2PolicyWorker:
                 non_muon_params = []
                 
                 # For convenience, include a sensible default.
-                if self.uses_custom_model:
-                    default_extra_params = ["output.weight", "tok_embeddings.weight"]
-                else:
-                    default_extra_params = ["lm_head.weight", "embed_tokens.weight"]
+                default_extra_params = ["output.weight", "tok_embeddings.weight"]
                 
                 scalar_optim_extra_params = self.cfg["optimizer"].get("non_muon_params", default_extra_params)
                 
@@ -752,50 +673,21 @@ class DTensorV2PolicyWorker:
         """Load the base Hugging Face weights used to seed the reference policy."""
         logging.info("Loading reference policy weights from %s", model_name)
 
-        if self.uses_custom_model:
-            assert (
-                self.adapter is not None
-            ), "Adapter must be initialized for custom model reference loading."
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="cpu",
-                trust_remote_code=True,
-                config=self.model_config,
-            )
-            state_dict = self.adapter.from_hf(model.state_dict())
-            del model
-        else:
-            assert (
-                self.model_class is not None
-            ), "Model class must be set when using Hugging Face implementations."
-            model = self.model_class.from_pretrained(
-                model_name,
-                device_map="cpu",
-                trust_remote_code=True,
-                config=self.model_config,
-            )
-            state_dict = model.state_dict()
-            del model
+        assert (
+            self.adapter is not None
+        ), "Adapter must be initialized for custom model reference loading."
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            device_map="cpu",
+            trust_remote_code=True,
+            config=self.model_config,
+        )
+        state_dict = self.adapter.from_hf(model.state_dict())
+        del model
 
         gc.collect()
 
         return state_dict
-
-    def _tie_word_embeddings_if_needed(self) -> None:
-        if not hasattr(self.model, "lm_head"):
-            return
-        config = getattr(self.model, "config", None)
-        if config is None or not getattr(config, "tie_word_embeddings", False):
-            return
-
-        embed_tokens_weight = None
-        for name, param in self.model.named_parameters():
-            if "embed_tokens" in name and name.endswith(".weight"):
-                embed_tokens_weight = param
-                break
-
-        if embed_tokens_weight is not None:
-            self.model.lm_head.weight = embed_tokens_weight
 
     def _build_forward_kwargs(
         self,
@@ -806,29 +698,10 @@ class DTensorV2PolicyWorker:
         flash_attn_kwargs: Optional[Any],
         use_cache: bool,
     ) -> dict[str, Any]:
-        if self.uses_custom_model:
-            return {"tokens": input_ids}
-
-        kwargs: dict[str, Any] = {
-            "input_ids": input_ids,
-            "use_cache": use_cache,
-        }
-        if attention_mask is not None:
-            kwargs["attention_mask"] = attention_mask
-        if position_ids is not None:
-            kwargs["position_ids"] = position_ids
-        if flash_attn_kwargs and not self._is_reward_model:
-            kwargs["flash_attn_kwargs"] = flash_attn_kwargs
-        return kwargs
+        return {"tokens": input_ids}
 
     def _compute_model_logits(self, model_kwargs: dict[str, Any]) -> torch.Tensor:
-        outputs = self.model(**model_kwargs)
-        if self.uses_custom_model:
-            return outputs
-
-        if hasattr(outputs, "logits"):
-            return outputs.logits
-        return self.model.lm_head(outputs.last_hidden_state)
+        return self.model(**model_kwargs)
 
     def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
         state_dict = self.model.state_dict()
@@ -1898,13 +1771,12 @@ class DTensorV2PolicyWorker:
     @wrap_with_nvtx_name("v2_policy_worker/prepare_for_training")
     def prepare_for_training(self, *args, **kwargs) -> None:
         # onload models and optimizer state to cuda
-        if not self.uses_custom_model:
-            if not self.cpu_offload:
-                self.move_to_cuda(self.model)
-            else:
-                # when cpu offload is enabled, the buffers do not get moved
-                # to cuda automatically, so we need to do that manually
-                self.model = self.move_buffer_to_device(self.model, "cuda")
+        if not self.cpu_offload:
+            self.move_to_cuda(self.model)
+        else:
+            # when cpu offload is enabled, the buffers do not get moved
+            # to cuda automatically, so we need to do that manually
+            self.model = self.move_buffer_to_device(self.model, "cuda")
 
         self.model.train()
         # Move optimizer state to CUDA if it exists
@@ -2044,25 +1916,16 @@ class DTensorV2PolicyWorker:
                 tokenizer_save_path = os.path.abspath(tokenizer_path)
                 os.makedirs(tokenizer_save_path, exist_ok=True)
 
-            if self.uses_custom_model:
-                # Create empty version of the HF model
-                with init_empty_weights():
-                    model_hf = AutoModelForCausalLM.from_config(
-                        self.model_config,
-                        trust_remote_code=True,
-                    )
-                
-                assert self.adapter is not None
-                state_dict_hf = self.adapter.to_hf(model_state)
-                model_hf.load_state_dict(state_dict_hf, strict=True, assign=True)
-            else:
-                # Rebuild a HF model on CPU and load the gathered weights.
-                with init_empty_weights():
-                    model_hf = self.model_class.from_config(  # type: ignore[attr-defined]
-                        self.model_config,
-                        trust_remote_code=True,
-                    )
-                model_hf.load_state_dict(model_state, strict=True, assign=True)
+            # Create empty version of the HF model
+            with init_empty_weights():
+                model_hf = AutoModelForCausalLM.from_config(
+                    self.model_config,
+                    trust_remote_code=True,
+                )
+            
+            assert self.adapter is not None
+            state_dict_hf = self.adapter.to_hf(model_state)
+            model_hf.load_state_dict(state_dict_hf, strict=True, assign=True)
 
             # Save model in expected path
             model_hf.save_pretrained(weights_path)

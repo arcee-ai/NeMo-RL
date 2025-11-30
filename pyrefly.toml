@@ -52,8 +52,6 @@ project-includes = [
     "rlkit/environments/interfaces.py",
     "rlkit/environments/rollouts.py",
     "rlkit/models/__init__.py",
-    "rlkit/models/dtensor/__init__.py",
-    "rlkit/models/dtensor/parallelize.py",
     "rlkit/models/generation/__init__.py",
     "rlkit/models/generation/interfaces.py",
     "rlkit/models/huggingface/__init__.py",

@@ -14,11 +14,13 @@
 
 import importlib
 import os
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
+from torch.distributed.tensor import DTensor
 from transformers import AutoConfig
 
+from rlkit.distributed.model_utils import dtensor_from_parallel_logits_to_logprobs
 from rlkit.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
 
 
@@ -212,3 +214,112 @@ def get_handle_from_tensor(tensor: torch.Tensor) -> tuple[Any]:
 
     # skip serializing the function for better refit performance
     return reduce_tensor(tensor.detach())[1:]
+
+
+def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
+    """Return the local shard of a DTensor, or the tensor itself if already local."""
+    with torch.no_grad():
+        return tensor.to_local() if isinstance(tensor, DTensor) else tensor
+
+
+def clip_grad_by_total_norm_(
+    parameters: Union[list[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
+    max_grad_norm: Union[int, float],
+    total_norm: float,
+    dtype: torch.dtype = torch.float32,
+) -> None:
+    """Clip gradients by the provided total norm."""
+    if isinstance(parameters, (torch.Tensor, DTensor)):
+        parameters = [parameters]
+
+    grads = [
+        to_local_if_dtensor(p.grad.detach()).to(dtype)
+        for p in parameters
+        if p.grad is not None
+    ]
+
+    clip_coeff = max_grad_norm / (total_norm + 1.0e-6)
+    if clip_coeff < 1.0:
+        for g in grads:
+            g.mul_(clip_coeff)
+
+
+def get_grad_norm(
+    parameters: Union[list[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
+    dp_cp_group: torch.distributed.ProcessGroup,
+    tp_group: torch.distributed.ProcessGroup,
+    norm_type: Union[int, float] = 2,
+    dtype: torch.dtype = torch.float32,
+) -> float:
+    """Calculate the norm of gradients across DP and TP meshes."""
+    if isinstance(parameters, (torch.Tensor, DTensor)):
+        parameters = [parameters]
+
+    grads_for_norm = [
+        to_local_if_dtensor(p.grad.detach()).to(dtype)
+        for p in parameters
+        if p.grad is not None
+    ]
+
+    norm_type = float(norm_type)
+    total_norm: float
+
+    if norm_type == torch.inf:
+        total_norm = max(grad.abs().max().item() for grad in grads_for_norm)
+        total_norm_cuda = torch.tensor(
+            [float(total_norm)], dtype=torch.float, device="cuda"
+        )
+        torch.distributed.all_reduce(
+            total_norm_cuda, op=torch.distributed.ReduceOp.MAX, group=dp_cp_group
+        )
+        torch.distributed.all_reduce(
+            total_norm_cuda, op=torch.distributed.ReduceOp.MAX, group=tp_group
+        )
+        total_norm = float(total_norm_cuda[0].item())
+    else:
+        total_norm_tensor = torch.tensor(0.0, dtype=torch.float32, device="cuda")
+        for grad in grads_for_norm:
+            grad_norm = torch.norm(grad, norm_type)
+            total_norm_tensor += torch.pow(grad_norm, norm_type)
+
+        torch.distributed.all_reduce(
+            total_norm_tensor, op=torch.distributed.ReduceOp.SUM, group=dp_cp_group
+        )
+        torch.distributed.all_reduce(
+            total_norm_tensor, op=torch.distributed.ReduceOp.SUM, group=tp_group
+        )
+        total_norm = total_norm_tensor.item() ** (1.0 / norm_type)  # type: ignore
+
+    return total_norm
+
+
+def get_logprobs_from_vocab_parallel_logits(
+    vocab_parallel_logits: DTensor,
+    input_ids: torch.Tensor | DTensor,
+    seq_index: Optional[torch.Tensor] = None,
+    chunk_size: Optional[int] = None,
+) -> torch.Tensor:
+    """Compute log probabilities from vocabulary-parallel logits."""
+    device_mesh = vocab_parallel_logits.device_mesh
+    if seq_index is not None:
+        assert (
+            device_mesh.mesh_dim_names is not None
+            and "cp" in device_mesh.mesh_dim_names
+        ), "seq_index must be provided for cp sharded logits"
+
+    tp_group = device_mesh.get_group("tp")
+    tp_rank = tp_group.rank()
+    tp_size = tp_group.size()
+
+    vocab_interval_per_rank = vocab_parallel_logits.shape[-1] // tp_size
+
+    return dtensor_from_parallel_logits_to_logprobs(
+        vocab_parallel_logits.to_local(),
+        input_ids,
+        vocab_interval_per_rank * tp_rank,
+        (tp_rank + 1) * vocab_interval_per_rank,
+        tp_group,
+        inference_only=not torch.is_grad_enabled(),
+        seq_index=seq_index,
+        chunk_size=chunk_size,
+    )

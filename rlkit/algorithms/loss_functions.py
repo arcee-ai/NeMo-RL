@@ -22,9 +22,7 @@ from rlkit.algorithms.utils import (
 )
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.distributed.model_utils import from_parallel_logits_to_logprobs
-from rlkit.models.dtensor.parallelize import (
-    get_logprobs_from_vocab_parallel_logits,
-)
+from rlkit.models.policy.utils import get_logprobs_from_vocab_parallel_logits
 
 Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
