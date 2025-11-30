@@ -393,8 +393,8 @@ class DTensorV2PolicyWorker:
         self.ep_size = self.cfg["dtensor_v2_cfg"].get("expert_parallel_size", 1)
         self.dp_replicate = self.cfg["dtensor_v2_cfg"].get("dp_replicate", 1)
         
-        if self.ep_size > 1:
-            raise ValueError("EP is numerically inaccurate and has been disabled for now.")
+        # if self.ep_size > 1:
+        #     raise ValueError("EP is numerically inaccurate and has been disabled for now.")
 
         if self.cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
@@ -642,12 +642,10 @@ class DTensorV2PolicyWorker:
         self,
         *,
         input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor],
-        position_ids: Optional[torch.Tensor],
-        flash_attn_kwargs: Optional[Any],
-        use_cache: bool,
     ) -> dict[str, Any]:
-        return {"tokens": input_ids}
+        # Get attention masks from model. Models sometimes have multiple for local/global or other attention schemes.
+        attention_masks = self.model.get_attention_masks(input_ids, self.tokenizer)
+        return {"tokens": input_ids, "attention_masks": attention_masks}
 
     def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
         state_dict = self.model.state_dict()
@@ -925,7 +923,10 @@ class DTensorV2PolicyWorker:
                             output_weight = self.model.output.weight
                             if isinstance(output_weight, DTensor):
                                 output_weight = output_weight.full_tensor()
-                            hidden = self.model(input_ids, attention_masks=self.model.get_attention_masks(input_ids, self.tokenizer))
+                            
+                            forward_kwargs = self._build_forward_kwargs(input_ids=input_ids)
+                            
+                            hidden = self.model(**forward_kwargs)
                             token_loss = linear_cross_entropy(
                                 # Returns final hidden state
                                 hidden,
@@ -972,11 +973,7 @@ class DTensorV2PolicyWorker:
                         with DTensorV2PolicyWorker.train_context(context_parallel_ctx):
                             with torch.autocast(device_type="cuda", dtype=self.dtype):
                                 model_args = self._build_forward_kwargs(
-                                    input_ids=input_ids,
-                                    attention_mask=attention_mask,
-                                    position_ids=position_ids,
-                                    flash_attn_kwargs=flash_attn_kwargs,
-                                    use_cache=False,
+                                    input_ids=input_ids
                                 )
 
                                 logits = self.model(**model_args)
@@ -1308,10 +1305,6 @@ class DTensorV2PolicyWorker:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         model_args = self._build_forward_kwargs(
                             input_ids=input_ids,
-                            attention_mask=attention_mask_input_all_ones,
-                            position_ids=position_ids,
-                            flash_attn_kwargs=flash_attn_kwargs,
-                            use_cache=False,
                         )
                         logits = self.model(**model_args)
 

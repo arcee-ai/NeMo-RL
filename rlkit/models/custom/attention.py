@@ -34,6 +34,8 @@ __all__ = [
 
 AttentionMasksType = dict[str, BlockMask] | BlockMask
 
+torch._dynamo.config.cache_size_limit = 1024 * 1024 * 1024 * 1024 # 1TB
+
 class FlexAttentionWrapper(torch.nn.Module):
     """Wrapper around `flex_attention` to make it torch.compile and CP compatible.
 

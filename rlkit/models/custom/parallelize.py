@@ -26,7 +26,6 @@ from torch.distributed._composable.replicate import replicate
 from rlkit.models.custom.expert_parallel import (
     ExpertParallel,
     ExpertTensorParallel,
-    NoParallel,
     ReordererSequenceParallel,
     TensorParallel,
 )
@@ -34,6 +33,8 @@ from rlkit.models.custom.expert_parallel import (
 from collections import defaultdict
 import logging
 from typing import Literal, Optional
+
+from rlkit.models.custom.utils import NoParallel
 
 def is_moe_enabled(module: nn.Module):
     return hasattr(module, "moe_enabled") and module.moe_enabled

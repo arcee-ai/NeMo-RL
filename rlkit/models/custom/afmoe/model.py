@@ -214,7 +214,7 @@ class Attention(nn.Module):
         if self.uses_sdpa:
             output = self.inner_attention(xq, xk, xv)
         else:
-            assert isinstance(attention_masks, dict), attention_masks
+            # assert isinstance(attention_masks, dict), attention_masks
             attention_mask = attention_masks[
                 "swa" if self.is_local_attention else "full"
             ]
@@ -260,7 +260,7 @@ class TransformerBlock(nn.Module):
 
         self.attention = Attention(model_args, layer_id)
         if self.moe_enabled:
-            self.moe = MoE(model_args)
+            self.moe = MoE(model_args.moe_args, dim=model_args.dim, hidden_dim=model_args.moe_inter_dim)
             self.moe.layer_id = layer_id
         else:
             self.feed_forward = FeedForward(dim=model_args.dim, hidden_dim=model_args.inter_dim)
@@ -306,9 +306,9 @@ class TransformerBlock(nn.Module):
             nn.init.constant_(post_norm.weight, self.n_layers**-0.5)  # pyright: ignore[reportUnusedCallResult, reportAny]
         self.attention.init_weights(self.weight_init_std, self.base_std)
         if self.moe_enabled:
-            self.moe.init_weights(self.weight_init_std, self.base_std, buffer_device)
+            self.moe.init_weights(self.weight_init_std, buffer_device)
         else:
-            self.feed_forward.init_weights(self.weight_init_std, self.base_std)
+            self.feed_forward.init_weights(self.weight_init_std)
 
 
 class AFMoEModel(BaseModel):

@@ -20,6 +20,8 @@ class MoEArgs:
     top_k: int = 2
     use_grouped_mm: bool = True  # grouped mm or for-loop for the experts computation
     load_balance_coeff: float | None = 1e-3
+    
+    _debug_force_load_balance: bool = False
 
 @dataclass
 class AFMoEModelArgs(BaseModelArgs):
