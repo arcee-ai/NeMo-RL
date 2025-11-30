@@ -12,3 +12,4 @@ class DTensorV2Config(TypedDict):
     expert_parallel_size: NotRequired[int | None]
     custom_parallel_plan: NotRequired[str | None]
     allow_custom_modeling_code: NotRequired[bool | None]
+    env_vars: NotRequired[dict[str, str] | None]

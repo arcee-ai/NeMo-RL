@@ -75,94 +75,58 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
 
-        worker_builder_cls: str
-        tp_size = 1
-        pp_size = 1
-        cp_size = 1
+        dtensor_v2_cfg = config.get("dtensor_v2_cfg", {}) or {}
+        assert dtensor_v2_cfg.get("enabled", False), (
+            "Please set policy.dtensor_v2_cfg.enabled=true to use the DTensor training backend."
+        )
 
-        dtv2_enable = config.get("dtensor_v2_cfg", {}).get("enabled", False)
-        dtensor_cfg = config.get("dtensor_cfg", {}) or {}
-        dtensor_enable = dtensor_cfg.get("enabled", False)
+        worker_builder_cls = "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker"
+        tp_size = dtensor_v2_cfg.get("tensor_parallel_size", 1)
+        cp_size = dtensor_v2_cfg.get("context_parallel_size", 1)
+        pp_size = dtensor_v2_cfg.get("pipeline_parallel_size", 1)
+        ep_size = dtensor_v2_cfg.get("expert_parallel_size", 1)
+        dp_replicate = dtensor_v2_cfg.get("dp_replicate", 1)
+        env_vars = dtensor_v2_cfg.get("env_vars", {})
 
-        if dtv2_enable:
-            worker_builder_cls = (
-                "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker"
-            )
-            tp_size = config["dtensor_v2_cfg"].get("tensor_parallel_size", 1)
-            cp_size = config["dtensor_v2_cfg"].get("context_parallel_size", 1)
-            pp_size = config["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
-            ep_size = config["dtensor_v2_cfg"].get("expert_parallel_size", 1)
-            dp_replicate = config["dtensor_v2_cfg"].get("dp_replicate", 1)
-            env_vars = config["dtensor_v2_cfg"].get("env_vars", {})
-        else:
-            assert dtensor_enable, (
-                "Please set policy.dtensor_cfg.enabled=true to use the DTensor training backend "
-                "or set policy.torchtitan_cfg.enabled=true to use the TorchTitan backend."
-            )
-            worker_builder_cls = (
-                "rlkit.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
-            )
-            tp_size = dtensor_cfg.get("tensor_parallel_size", 1)
-            cp_size = dtensor_cfg.get("context_parallel_size", 1)
-            dp_replicate = 1
-            env_vars = dtensor_cfg.get("env_vars", {})
+        # Build a flattened DP axis for DTensorV2: dp = dp_replicate * dp_shard_mod_ep * dp_shard_in_ep
+        mesh_info = get_device_mesh_info(
+            cluster.world_size(),
+            tp_size,
+            cp_size,
+            ep_size,
+            pp_size,
+            dp_replicate,
+            always_include_all=True,
+        )
 
-        if dtv2_enable:
-            dp_size = cluster.world_size() // (tp_size * cp_size * pp_size * ep_size)
-            # Build a flattened DP axis for DTensorV2: dp = dp_replicate * dp_shard_mod_ep * dp_shard_in_ep
-            mesh_info = get_device_mesh_info(
-                cluster.world_size(),
-                tp_size,
-                cp_size,
-                ep_size,
-                pp_size,
-                dp_replicate,
-                always_include_all=True,
-            )
+        shape_map = {n: s for n, s in zip(mesh_info["mesh_dim_names"], mesh_info["mesh_shape"])}
+        dp_axis_size = (
+            shape_map.get("dp_replicate", 1)
+            * shape_map.get("dp_shard_mod_ep", 1)
+            * shape_map.get("dp_shard_in_ep", 1)
+        )
+        new_shape = [
+            shape_map.get("pp", 1),
+            max(1, dp_axis_size),
+            shape_map.get("cp", 1),
+            shape_map.get("tp", 1),
+        ]
+        new_names = [
+            "pipeline_parallel",
+            "data_parallel",
+            "context_parallel",
+            "tensor_parallel",
+        ]
 
-            shape_map = {n: s for n, s in zip(mesh_info["mesh_dim_names"], mesh_info["mesh_shape"])}
-            dp_axis_size = (
-                shape_map.get("dp_replicate", 1)
-                * shape_map.get("dp_shard_mod_ep", 1)
-                * shape_map.get("dp_shard_in_ep", 1)
-            )
-            new_shape = [
-                shape_map.get("pp", 1),
-                max(1, dp_axis_size),
-                shape_map.get("cp", 1),
-                shape_map.get("tp", 1),
-            ]
-            new_names = [
-                "pipeline_parallel",
-                "data_parallel",
-                "context_parallel",
-                "tensor_parallel",
-            ]
+        assert np.prod(new_shape) == cluster.world_size(), (
+            f"NamedSharding shape {tuple(new_shape)} product "
+            f"!= world_size {cluster.world_size()}"
+        )
 
-            assert np.prod(new_shape) == cluster.world_size(), (
-                f"NamedSharding shape {tuple(new_shape)} product "
-                f"!= world_size {cluster.world_size()}"
-            )
-
-            self.sharding_annotations = NamedSharding(
-                layout=np.arange(cluster.world_size()).reshape(*new_shape),
-                names=new_names,
-            )
-        else:
-            self.sharding_annotations = NamedSharding(
-                layout=np.arange(cluster.world_size()).reshape(
-                    pp_size,  # PP
-                    -1,  # DP
-                    cp_size,  # CP
-                    tp_size,  # TP
-                ),
-                names=[
-                    "pipeline_parallel",
-                    "data_parallel",
-                    "context_parallel",
-                    "tensor_parallel",
-                ],
-            )
+        self.sharding_annotations = NamedSharding(
+            layout=np.arange(cluster.world_size()).reshape(*new_shape),
+            names=new_names,
+        )
 
         pre_init_queue = RayQueue()
         worker_builder = RayWorkerBuilder(

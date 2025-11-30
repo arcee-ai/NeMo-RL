@@ -10,7 +10,6 @@ from .logging import MLflowConfig
 from .logging import GPUMonitoringConfig
 from .cluster import ClusterConfig
 from .checkpointing import CheckpointingConfig
-from .rl.policy.dtv1 import DTensorConfig
 from .rl.policy import SequencePackingConfig
 from .rl.policy import RewardModelConfig
 from .rl.policy.dtv2 import DTensorV2Config
@@ -33,7 +32,6 @@ __all__ = [
     "GPUMonitoringConfig",
     "ClusterConfig",
     "CheckpointingConfig",
-    "DTensorConfig",
     "SequencePackingConfig",
     "RewardModelConfig",
     "DTensorV2Config",

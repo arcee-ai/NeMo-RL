@@ -20,7 +20,6 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from rlkit.data import hf_datasets
 from rlkit.config import TokenizerConfig
 
 def _pad_tensor(

@@ -328,7 +328,7 @@ def get_hf_tp_plan(model: PreTrainedModel):
         )
 
     assert len(hf_tp_plan) > 0, (
-        f"Hugging Face tp plan is not supported for {model_cls}, please set dtensor_cfg.tensor_parallel_size to 1 or provide a custom_parallel_plan. "
+        f"Hugging Face tp plan is not supported for {model_cls}, please set dtensor_v2_cfg.tensor_parallel_size to 1 or provide a custom_parallel_plan. "
         "The usage example of custom_parallel_plan can refer to `docs/design-docs/fsdp2-parallel-plan.md`."
     )
 
