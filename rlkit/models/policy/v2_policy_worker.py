@@ -50,10 +50,6 @@ from rlkit.algorithms.interfaces import LossFunction, LossType
 from rlkit.algorithms.loss_functions import SequencePackingLossWrapper
 from rlkit.algorithms.utils import masked_mean
 from rlkit.distributed.batched_data_dict import BatchedDataDict
-from rlkit.models.huggingface.common import (
-    get_flash_attention_kwargs,
-    pack_sequences,
-)
 from rlkit.config import PolicyConfig
 from rlkit.models.policy.interfaces import (
     LogprobOutputSpec,
@@ -62,11 +58,13 @@ from rlkit.models.policy.interfaces import (
 from rlkit.models.policy.utils import (
     configure_dynamo_cache,
     configure_expandable_segments,
+    get_flash_attention_kwargs,
     get_gpu_info,
     get_handle_from_tensor,
     get_runtime_env_for_policy_worker,
     import_class_from_path,
     is_vllm_v1_engine_enabled,
+    pack_sequences,
     clip_grad_by_total_norm_,
     get_grad_norm,
     get_logprobs_from_vocab_parallel_logits,

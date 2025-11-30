@@ -54,7 +54,6 @@ project-includes = [
     "rlkit/models/__init__.py",
     "rlkit/models/generation/__init__.py",
     "rlkit/models/generation/interfaces.py",
-    "rlkit/models/huggingface/__init__.py",
     "rlkit/models/policy/__init__.py",
     "rlkit/models/policy/interfaces.py",
     "rlkit/models/policy/utils.py",

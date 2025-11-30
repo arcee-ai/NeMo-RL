@@ -14,7 +14,8 @@
 
 import importlib
 import os
-from typing import Any, Optional, Union
+from dataclasses import dataclass
+from typing import Any, Optional, Tuple, TypeVar, Union
 
 import torch
 from torch.distributed.tensor import DTensor
@@ -22,6 +23,8 @@ from transformers import AutoConfig
 
 from rlkit.distributed.model_utils import dtensor_from_parallel_logits_to_logprobs
 from rlkit.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
+
+Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
 
 def is_vllm_v1_engine_enabled() -> bool:
@@ -220,6 +223,109 @@ def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
     """Return the local shard of a DTensor, or the tensor itself if already local."""
     with torch.no_grad():
         return tensor.to_local() if isinstance(tensor, DTensor) else tensor
+
+
+@dataclass
+class FlashAttentionKwargs:
+    """Dataclass to hold FlashAttention v2 kwargs."""
+
+    cu_seqlens_q: Tensor
+    cu_seqlens_k: Tensor
+    max_seqlen_q: int
+    max_seqlen_k: int
+
+
+def group_and_cat_tensors(
+    tensors: list[torch.Tensor],
+    group_sizes: list[int],
+    padding_value: int = 0,
+    min_seq_len: int = 0,
+) -> torch.Tensor:
+    """Group tensors into buckets, concatenate, and left-pad to a consistent length."""
+    grouped: list[torch.Tensor] = []
+    index = 0
+    for size in group_sizes:
+        group = tensors[index : index + size]
+        concat = torch.cat(group, dim=0)
+        grouped.append(concat)
+        index += size
+
+    max_len = max((t.size(0) for t in grouped), default=0)
+    max_len = max(max_len, min_seq_len)
+
+    padded = torch.stack(
+        [
+            torch.nn.functional.pad(t, (0, max_len - t.size(0)), value=padding_value)
+            for t in grouped
+        ]
+    )
+
+    return padded
+
+
+def pack_sequences(
+    input_ids: torch.Tensor,
+    input_lengths: torch.Tensor,
+    packed_sequence_size: list[int],
+    padding_value: int = 0,
+    return_attention_mask: bool = True,
+    min_seq_len: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    """Pack variable-length sequences into rows, padding and stacking for transformer input."""
+    flat_input_ids = []
+    position_ids = []
+    flat_lengths = input_lengths.tolist()
+
+    for i, seq_len in enumerate(flat_lengths):
+        flat_input_ids.append(input_ids[i, :seq_len])
+        position_ids.append(
+            torch.arange(seq_len, dtype=torch.long, device=input_ids.device)
+        )
+
+    input_ids_packed = group_and_cat_tensors(
+        flat_input_ids, packed_sequence_size, padding_value, min_seq_len=min_seq_len
+    )
+    position_ids_packed = group_and_cat_tensors(
+        position_ids, packed_sequence_size, padding_value=0, min_seq_len=min_seq_len
+    )
+
+    batch_size, max_seq_len = input_ids_packed.shape
+
+    attention_mask = None
+    if return_attention_mask:
+        attention_mask = torch.zeros(
+            (batch_size, max_seq_len, max_seq_len),
+            dtype=torch.bool,
+            device=input_ids.device,
+        )
+        index = 0
+        for i, group_size in enumerate(packed_sequence_size):
+            group_lengths = flat_lengths[index : index + group_size]
+            total_len = sum(group_lengths)
+            attention_mask[i, :total_len, :total_len] = torch.tril(
+                torch.ones(
+                    (total_len, total_len), dtype=torch.bool, device=input_ids.device
+                )
+            )
+            index += group_size
+
+    return input_ids_packed, position_ids_packed, attention_mask
+
+
+def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> FlashAttentionKwargs:
+    """Return FlashAttention v2 kwargs derived from sequence lengths."""
+    input_lengths_int32 = input_lengths.to(torch.int32)
+    cu_seqlens = torch.nn.functional.pad(
+        input_lengths_int32.cumsum(dim=0), (1, 0)
+    )  # prepend 0
+    max_len = input_lengths.max().item()
+
+    return FlashAttentionKwargs(
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_k=cu_seqlens.clone(),  # same for self-attention
+        max_seqlen_q=max_len,
+        max_seqlen_k=max_len,
+    )
 
 
 def clip_grad_by_total_norm_(
