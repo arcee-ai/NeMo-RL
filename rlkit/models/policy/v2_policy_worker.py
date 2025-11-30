@@ -78,6 +78,7 @@ from rlkit.utils.native_checkpoint import (
 from rlkit.utils.nsys import wrap_with_nvtx_name
 
 from rlkit.models.custom.convert import get_model_config
+from rlkit.models.custom.parallelize import parallelize_model
 from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
 
 
@@ -315,7 +316,6 @@ class DTensorV2PolicyWorker:
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
 
-        self.cpu_offload = self.cfg["dtensor_v2_cfg"].get("cpu_offload", False)
         self.max_grad_norm = self.cfg["max_grad_norm"]
 
         if self.cfg["precision"] == "float32":
@@ -357,35 +357,13 @@ class DTensorV2PolicyWorker:
             else None,
         )
 
-        reward_cfg = self.cfg.get("reward_model_cfg", {}) or {}
-        if reward_cfg.get("enabled", False):
-            raise ValueError(
-                "Reward-model policies are not supported in the custom-only policy worker."
-            )
-
-        try:
-            custom_model_setup: tuple[
-                type[nn.Module],
-                Any,
-                type[BaseStateDictAdapter],
-                Callable,
-            ] = get_model_config(self.model_config)
-        except ValueError as exc:
-            raise ValueError(
-                f"Custom model implementation required for {self.model_config.model_type}, "
-                "but no adapter is available."
-            ) from exc
-
         full_state_dict = None
         logging.info(f"Using custom model implementation for {model_name}")
-        custom_model_class, model_args, adapter_class, model_parallelize_function = (
-            custom_model_setup  # type: ignore[arg-type]
-        )
-        self.custom_model_args = model_args
+        custom_model_class, self.custom_model_args, adapter_class = get_model_config(self.model_config)
+        
         self.adapter: BaseStateDictAdapter = adapter_class(
-            model_args=model_args, hf_assets_path=model_name
+            model_args=self.custom_model_args, hf_assets_path=model_name
         )
-        self._custom_parallelize_function: Callable = model_parallelize_function
 
         if self.rank == 0:
             print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
@@ -406,7 +384,7 @@ class DTensorV2PolicyWorker:
 
         print("Initializing custom model on meta device...")
         with init_empty_weights():
-            self.model = custom_model_class(model_args=model_args, skip_logits=self.use_cut_cross_entropy)
+            self.model = custom_model_class(model_args=self.custom_model_args, skip_logits=self.use_cut_cross_entropy)
 
         # caching since this property is not always preserved after FSDP
         self.tokenizer = tokenizer
@@ -424,29 +402,9 @@ class DTensorV2PolicyWorker:
         if self.ep_size > 1:
             raise ValueError("EP is numerically inaccurate and has been disabled for now.")
 
-        if self.ep_size > 1 and not hasattr(torch, "_grouped_mm"):
-            raise RuntimeError(
-                "Expert parallelism is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information."
-            )
-
         if self.cp_size > 1 and self.enable_seq_packing:
             raise ValueError(
-                "Context parallel is not supported for sequence packing. Refer to https://github.com/NVIDIA/RLKit/blob/main/docs/model-quirks.md#context-parallel-with-fsdp2 for more details."
-            )
-        sequence_parallel_enabled = self.cfg["dtensor_v2_cfg"].get(
-            "sequence_parallel", False
-        )
-
-        if sequence_parallel_enabled and self.tp_size == 1:
-            print(
-                "[WARNING]: sequence_parallel=True, but tp_size=1 which has no effect. Enable tp_size > 1 to use sequence parallelism."
-            )
-
-        if self.cp_size > 1:
-            assert not (self.tp_size > 1 and sequence_parallel_enabled), (
-                "It's a known issue that context parallel can't be used together with sequence parallel in DTensor worker. "
-                "Please either set cp_size = 1 or disable sequence parallel. "
-                "See https://github.com/NVIDIA-NeMo/RL/issues/659 for more details."
+                "Context parallel is not supported for sequence packing. Refer to https://github.com/NVIDIA-NeMo/RL/blob/main/docs/model-quirks.md#context-parallel-with-fsdp2 for more details."
             )
 
         if self.ep_size > 1:
@@ -505,18 +463,20 @@ class DTensorV2PolicyWorker:
         activation_checkpointing = self.cfg["dtensor_v2_cfg"].get(
             "activation_checkpointing", False
         )
-        self.model = self._custom_parallelize_function(  # type: ignore[operator]
-            self.model,
-            self.device_mesh,
-            self.dp_mesh,
-            self.tp_mesh,
-            self.ep_mesh,
-            self.pp_mesh,
-            self.cp_mesh,
-            self.dp_replicate,
+        self.model = parallelize_model(  # type: ignore[operator]
+            model=self.model,
+            # Mesh info
+            world_mesh=self.device_mesh,
+            tp_size=self.tp_size,
+            ep_size=self.ep_size,
+            pp_size=self.pp_size,
+            cp_size=self.cp_size,
+            dp_replicate=self.dp_replicate,
+            dp_shard=self.dp_size / self.dp_replicate,
+            # Model construction
+            model_compile_enabled=True,
             param_dtype=self.dtype,
-            sequence_parallel=sequence_parallel_enabled,
-            cpu_offload=self.cpu_offload,
+            reduce_dtype=torch.float32,
             activation_checkpointing=activation_checkpointing,
         )
 
@@ -533,6 +493,8 @@ class DTensorV2PolicyWorker:
         )
 
         if init_reference_model:
+            # We reload the HF model directly from the checkpoint path with HF checkpointing
+            # So the reference weights need to be loaded separately.
             if self.use_hf_checkpoint and weights_path:
                 self.reference_model_state_dict = self._load_reference_full_state_dict(
                     model_name=model_name
@@ -541,9 +503,6 @@ class DTensorV2PolicyWorker:
                 self.reference_model_state_dict = get_cpu_state_dict(
                     self.model.state_dict().items(), pin_memory=True
                 )
-
-        if self.cpu_offload:
-            self.model = self.move_to_device(self.model, "cpu")
 
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
@@ -1646,9 +1605,6 @@ class DTensorV2PolicyWorker:
     def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
         from rlkit.utils.nvml import get_free_memory_bytes
 
-        if self.cpu_offload:
-            self.model = self.move_to_cuda(self.model)
-
         export_state_dict = self._export_state_dict()
         self._held_sharded_state_dict_reference = export_state_dict
 
@@ -1704,14 +1660,6 @@ class DTensorV2PolicyWorker:
         one tensor at a time instead of materializing the entire converted
         state dict, which would double memory usage.
         """
-        # Manually move model to cuda for cpu offload case
-        if self.cpu_offload:
-            print(
-                "[WARNING]: Unless you are lacking of memory, it is not recommended to enable cpu_offload when "
-                "using non-colocated generation since it will have an extra onload and offload at refit stage."
-            )
-            self.model = self.move_to_cuda(self.model)
-        
         state_dict = self.model.state_dict()
         
         # First, build a mapping from hf keys to real state dict keys if necessary
@@ -1751,17 +1699,9 @@ class DTensorV2PolicyWorker:
                 chunk_tensor = torch.stack(collected_tensors)
                 self.model_update_group.broadcast(chunk_tensor, src=0)
 
-        # Manually move model to cpu for cpu offload case
-        # cpu offload needs model on CPU before model forward
-        if self.cpu_offload:
-            self.model = self.move_to_cpu(self.model)
-
     @wrap_with_nvtx_name("v2_policy_worker/prepare_for_lp_inference")
     def prepare_for_lp_inference(self) -> None:
-        if not self.cpu_offload:
-            self.move_to_cuda(self.model)
-        else:
-            self.model = self.move_buffer_to_device(self.model, "cuda")
+        self.model = self.move_buffer_to_device(self.model, "cuda")
 
         self.model.eval()
         self.offload_before_refit()
@@ -1769,19 +1709,13 @@ class DTensorV2PolicyWorker:
     @wrap_with_nvtx_name("v2_policy_worker/prepare_for_training")
     def prepare_for_training(self, *args, **kwargs) -> None:
         # onload models and optimizer state to cuda
-        if not self.cpu_offload:
-            self.move_to_cuda(self.model)
-        else:
-            # when cpu offload is enabled, the buffers do not get moved
-            # to cuda automatically, so we need to do that manually
-            self.model = self.move_buffer_to_device(self.model, "cuda")
+        self.model = self.move_buffer_to_device(self.model, "cuda")
 
         self.model.train()
         # Move optimizer state to CUDA if it exists
         if (
             hasattr(self, "optimizer")
             and self.optimizer is not None
-            and not self.cpu_offload
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():

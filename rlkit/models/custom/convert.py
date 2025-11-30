@@ -23,10 +23,8 @@ from rlkit.models.custom.qwen3moe.parallelize import parallelize_qwen3moe
 
 from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
 
-def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseModelArgs, type[BaseStateDictAdapter], Callable]:
+def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseModelArgs, type[BaseStateDictAdapter]]:
     mt = config.model_type
-    
-    is_nightly_torch = hasattr(torch, "_grouped_mm")
     
     if mt == "afmoe":
         layer_types = config.layer_types
@@ -52,7 +50,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
                 route_scale = config.route_scale,
                 score_before_experts = False,
                 top_k = config.num_experts_per_tok,
-                use_grouped_mm = is_nightly_torch,
+                use_grouped_mm = True,
                 load_balance_coeff = config.load_balance_coeff,
             ),
             n_dense_layers = config.num_dense_layers,
@@ -64,7 +62,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             local_attn_sliding_window_size=config.sliding_window,
             mup_enabled = config.mup_enabled,
             enable_weight_tying = config.tie_word_embeddings,
-        ), AFMoEStateDictAdapter, parallelize_afmoe
+        ), AFMoEStateDictAdapter
     elif mt == "qwen3":
         uses_sliding_causal = getattr(config, "sliding_window", None) is not None
         return Qwen3Model, Qwen3ModelArgs(
@@ -83,7 +81,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             attn_mask_type = "sliding_causal" if uses_sliding_causal else "causal",
             use_flex_attn = uses_sliding_causal,
             fixed_block_size = config.sliding_window if uses_sliding_causal else None,
-        ), Qwen3StateDictAdapter, parallelize_qwen3
+        ), Qwen3StateDictAdapter
     elif mt == "qwen3_moe":
         uses_sliding_causal = getattr(config, "sliding_window", None) is not None
         return Qwen3MoEModel, Qwen3MoEModelArgs(
@@ -111,12 +109,12 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
                 route_scale = 1,
                 score_before_experts = False,
                 top_k = config.num_experts_per_tok,
-                use_grouped_mm = is_nightly_torch,
+                use_grouped_mm = True,
                 load_balance_coeff = None
             ),
             decoder_sparse_step = getattr(config, "decoder_sparse_step", 1),
             mlp_only_layers = list(getattr(config, "mlp_only_layers", [])),
             moe_intermediate_size = config.moe_intermediate_size,
-        ), Qwen3MoeStateDictAdapter, parallelize_qwen3moe
+        ), Qwen3MoeStateDictAdapter
     else:
         raise ValueError(f"Model type {mt} unknown or not supported")
