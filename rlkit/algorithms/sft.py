@@ -15,7 +15,7 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Callable, NotRequired, Optional, TypedDict, cast
+from typing import Any, NotRequired, Optional, TypedDict, cast
 
 from datasets import Dataset
 import numpy as np
@@ -36,13 +36,8 @@ from rlkit.config import (
     SFTConfig,
     SFTMasterConfig as MasterConfig,
 )
-from rlkit.data.llm_message_utils import (
-    add_loss_mask_to_message_log,
-    batched_message_log_to_flat_message,
-)
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.models.policy.interfaces import PolicyInterface
 from rlkit.models.policy.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager
 from rlkit.utils.logger import Logger

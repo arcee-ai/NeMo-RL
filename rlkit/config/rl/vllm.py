@@ -4,12 +4,6 @@ class ResourcesConfig(TypedDict):
     gpus_per_node: int
     num_nodes: int
 
-
-class ColocationConfig(TypedDict):
-    enabled: bool
-    resources: NotRequired[ResourcesConfig]
-
-
 class GenerationConfig(TypedDict):
     """Configuration for generation."""
 
@@ -22,7 +16,7 @@ class GenerationConfig(TypedDict):
     stop_token_ids: list[int] | None
     stop_strings: NotRequired[list[str] | None]
     pad_token_id: NotRequired[int]
-    colocated: NotRequired[ColocationConfig]
+    resources: ResourcesConfig
 
 class VllmSpecificArgs(TypedDict):
     tensor_parallel_size: int

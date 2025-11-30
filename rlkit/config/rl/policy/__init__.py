@@ -1,33 +1,12 @@
 from typing import Any, Union, TypedDict, NotRequired
 
+from rlkit.config.rl.vllm import GenerationConfig
+
 from .dtv2 import DTensorV2Config
 
 class TokenizerConfig(TypedDict):
     name: str
     chat_template: NotRequired[str | None]
-
-
-class ResourcesConfig(TypedDict):
-    gpus_per_node: int
-    num_nodes: int
-
-
-class ColocationConfig(TypedDict):
-    enabled: bool
-    resources: NotRequired[ResourcesConfig | None]
-
-
-class GenerationConfig(TypedDict):
-    max_new_tokens: int
-    temperature: float
-    top_p: float
-    top_k: int
-    min_p: NotRequired[float | None]
-    model_name: str
-    stop_token_ids: list[int] | None
-    stop_strings: NotRequired[list[str] | None]
-    pad_token_id: NotRequired[int | None]
-    colocated: NotRequired[ColocationConfig | None]
 
 
 class SequencePackingConfig(TypedDict):

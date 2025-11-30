@@ -1,25 +1,20 @@
-from typing import Callable
-import torch
 from torch import nn
-from transformers import PreTrainedModel, PretrainedConfig
+from transformers import PretrainedConfig
 
 from rlkit.models.custom.model import BaseModelArgs
 
 from rlkit.models.custom.afmoe.model import AFMoEModel
 from rlkit.models.custom.afmoe.args import AFMoEModelArgs, MoEArgs as MoEArgsAFMoE
 from rlkit.models.custom.afmoe.state_dict_adapter import AFMoEStateDictAdapter
-from rlkit.models.custom.afmoe.parallelize import parallelize_afmoe
 
 from rlkit.models.custom.moe import MoEArgs
 from rlkit.models.custom.qwen3.model import Qwen3Model
 from rlkit.models.custom.qwen3.args import Qwen3ModelArgs
 from rlkit.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
-from rlkit.models.custom.qwen3.parallelize import parallelize_qwen3
 
 from rlkit.models.custom.qwen3moe.model import Qwen3MoEModel
 from rlkit.models.custom.qwen3moe.args import Qwen3MoEModelArgs
 from rlkit.models.custom.qwen3moe.state_dict_adapter import Qwen3MoeStateDictAdapter
-from rlkit.models.custom.qwen3moe.parallelize import parallelize_qwen3moe
 
 from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
 

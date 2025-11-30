@@ -31,9 +31,9 @@ class VllmHttpGeneration:
         self.pp_size = config["vllm_cfg"]["pipeline_parallel_size"]
         
         # Calculate DP size from total GPUs and TP/PP size
-        num_nodes = config["colocated"]["resources"].get("num_nodes", 1)
+        num_nodes = config["resources"].get("num_nodes", 1)
         self.num_nodes = 1 if num_nodes is None else int(num_nodes)
-        gpus_per_node = config["colocated"]["resources"].get("gpus_per_node", 1)
+        gpus_per_node = config["resources"].get("gpus_per_node", 1)
         gpus_per_node = 1 if gpus_per_node is None else int(gpus_per_node)
         self.dp_size = gpus_per_node // (self.tp_size * self.pp_size)
 
@@ -134,9 +134,6 @@ class VllmHttpGeneration:
     def prepare_refit_info(self, state_dict_info: dict[str, Any]) -> None:
         # Wait for refit prep to complete across replicas.
         ray.get([actor.admin_prepare_refit_info.remote(state_dict_info) for actor in self.actors])
-
-    def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
-        raise NotImplementedError("update_weights_from_ipc_handles is not supported for vLLM over HTTP")
 
     def update_weights_from_collective(self):
         return [actor.admin_update_from_collective.remote() for actor in self.actors]

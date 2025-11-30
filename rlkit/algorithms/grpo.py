@@ -54,7 +54,6 @@ from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.environments.interfaces import EnvironmentInterface
 from rlkit.config.rl.vllm import HttpVllmConfig
 from rlkit.models.generation.vllm_http_generation import VllmHttpGeneration
-from rlkit.models.policy.interfaces import ColocatablePolicyInterface
 from rlkit.models.policy.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager
 from rlkit.utils.logger import (
@@ -149,7 +148,6 @@ class GRPOTrainer:
         (
             train_cluster,
             inference_cluster,
-            colocated_inference,
             inference_nodes,
             inference_gpus_per_node,
         ) = self._setup_clusters(generation_config, cluster_config)
@@ -191,14 +189,13 @@ class GRPOTrainer:
             optimizer_path,
             init_reference_model=init_reference_model,
         )
-
-        if not colocated_inference:
-            self._initialize_collective_communication(
-                train_cluster,
-                inference_cluster,
-                inference_nodes,
-                inference_gpus_per_node,
-            )
+        
+        self._initialize_collective_communication(
+            train_cluster,
+            inference_cluster,
+            inference_nodes,
+            inference_gpus_per_node,
+        )
 
         state_dict_info = self.policy.prepare_refit_info()
         if self.policy_generation is not None:
@@ -215,7 +212,6 @@ class GRPOTrainer:
         
         self.interleave_rollouts = self.master_config["grpo"].get("interleave_rollouts", False)
         
-        self.colocated_inference = colocated_inference
         self.inference_nodes = inference_nodes
         self.inference_gpus_per_node = inference_gpus_per_node
         self.train_cluster = train_cluster
@@ -386,64 +382,41 @@ class GRPOTrainer:
     ) -> tuple[
         RayVirtualCluster,
         RayVirtualCluster,
-        bool,
         int,
         int,
     ]:
-        colocated_inference = generation_config["colocated"]["enabled"]
-
-        if colocated_inference:
-            cluster = RayVirtualCluster(
-                name="grpo_policy_cluster",
-                bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
-                * cluster_config["num_nodes"],
-                use_gpus=True,
-                num_gpus_per_node=cluster_config["gpus_per_node"],
-                max_colocated_worker_groups=2,
-            )
-            logging.info(
-                f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes"
-            )
-            return (
-                cluster,
-                cluster,
-                True,
-                cluster_config["num_nodes"],
-                cluster_config["gpus_per_node"],
-            )
-
         train_gpus_per_node = cluster_config["gpus_per_node"]
         train_nodes = cluster_config["num_nodes"]
 
-        inference_resources = generation_config["colocated"]["resources"]
+        inference_resources = generation_config["resources"]
         inference_gpus_per_node = inference_resources["gpus_per_node"]
         inference_nodes = inference_resources["num_nodes"]
 
         if cluster_config["num_nodes"] == 1:
             assert inference_gpus_per_node > 0, (
-                "policy.generation.colocated.resources.gpus_per_node must be > 0 "
-                "when cluster.num_nodes = 1 and inference is non-colocated, "
+                "policy.generation.resources.gpus_per_node must be > 0 "
+                "when cluster.num_nodes = 1, "
                 f"but got {inference_gpus_per_node}."
             )
             assert inference_nodes is None or inference_nodes == 1, (
-                "policy.generation.colocated.resources.num_nodes must be 1 or set to null "
-                "when cluster.num_nodes = 1 and inference is non-colocated, "
+                "policy.generation.resources.num_nodes must be 1 or set to null "
+                "when cluster.num_nodes = 1, "
                 f"but got {inference_nodes}."
             )
             inference_nodes = 1
             train_gpus_per_node -= inference_gpus_per_node
         else:
             assert inference_nodes > 0, (
-                "policy.generation.colocated.resources.num_nodes must be > 0 "
-                "when cluster.num_nodes > 1 and inference is non-colocated, "
+                "policy.generation.resources.num_nodes must be > 0 "
+                "when cluster.num_nodes > 1, "
                 f"but got {inference_nodes}."
             )
             assert (
                 inference_gpus_per_node is None
                 or inference_gpus_per_node == cluster_config["gpus_per_node"]
             ), (
-                "policy.generation.colocated.resources.gpus_per_node must be equal to cluster.gpus_per_node or set to null "
-                "when cluster.num_nodes > 1 and inference is non-colocated, "
+                "policy.generation.resources.gpus_per_node must be equal to cluster.gpus_per_node or set to null "
+                "when cluster.num_nodes > 1, "
                 f"but got {inference_gpus_per_node}."
             )
             inference_gpus_per_node = cluster_config["gpus_per_node"]
@@ -474,7 +447,6 @@ class GRPOTrainer:
         return (
             train_cluster,
             inference_cluster,
-            False,
             inference_nodes,
             inference_gpus_per_node,
         )
@@ -502,7 +474,7 @@ class GRPOTrainer:
         weights_path: Optional[Path],
         optimizer_path: Optional[Path],
         init_reference_model: bool,
-    ) -> ColocatablePolicyInterface:
+    ) -> Policy:
         return Policy(
             cluster=train_cluster,
             config=policy_config,
@@ -564,7 +536,6 @@ class GRPOTrainer:
         consumed_samples = self.grpo_save_state["consumed_samples"]
         val_period = self.master_config["grpo"]["val_period"]
         val_at_start = self.master_config["grpo"]["val_at_start"]
-        colocated_inference = self.master_config["policy"]["generation"]["colocated"]["enabled"]
 
         # Call finish generation before training begins to ensure the policy is ready.
         await self.policy_generation.finish_generation()
@@ -608,14 +579,14 @@ class GRPOTrainer:
                         # Refit policy after we have awaited the previous rollout, for accurate timing
                         logging.info("Refitting policy...")
                         with timer.time("refit_policy"):
-                            await self._refit_policy_generation(colocated_inference)
+                            await self._refit_policy_generation()
                         
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
                     else:
                         # Refit policy before the first rollout in case we are reloading a checkpoint.
                         logging.info("Refitting policy...")
                         with timer.time("refit_policy"):
-                            await self._refit_policy_generation(colocated_inference)
+                            await self._refit_policy_generation()
                         
                         # Queue up rollout with current datapoint and move to the next. Should only happen on the first step.
                         prev_rollout_task = asyncio.create_task(self._rollout_step(rollout_batch, timer))
@@ -623,7 +594,7 @@ class GRPOTrainer:
                 else:
                     logging.info("Refitting policy...")
                     with timer.time("refit_policy"):
-                        await self._refit_policy_generation(colocated_inference)
+                        await self._refit_policy_generation()
                     logging.info("Generating rollouts...")
                     with timer.time("generation"):
                         repeated_batch, rollout_metrics = await self._rollout_step(rollout_batch, timer)
@@ -1136,14 +1107,9 @@ class GRPOTrainer:
 
     async def _refit_policy_generation(
         self,
-        colocated_inference: bool,
         _refit_buffer_size_gb: Optional[int] = None,
         timer: Optional[Timer] = None,
     ) -> None:
-        if colocated_inference:
-            self.policy.offload_before_refit()
-            self.policy_generation.prepare_for_generation(tags=["weights"])
-
         timer_context = (
             timer.time("prepare_for_generation/transfer_and_update_weights")
             if timer is not None
@@ -1151,46 +1117,23 @@ class GRPOTrainer:
         )
         with timer_context:
             update_success = False
-            if colocated_inference:
-                grouped_param_keys = self.policy.prepare_weights_for_ipc(
-                    _refit_buffer_size_gb=_refit_buffer_size_gb
-                )
-                total_num_keys = sum(len(keys) for keys in grouped_param_keys)
-                logging.info(
-                    f"[Refit] Split {total_num_keys} keys into {len(grouped_param_keys)} groups"
-                )
-                for keys in grouped_param_keys:
-                    ipc_handles = self.policy.get_weights_ipc_handles(keys)
-                    update_success = (
-                        self.policy_generation.update_weights_from_ipc_handles(
-                            ipc_handles
-                        )
-                    )
-                    if not update_success:
-                        break
-            else:
-                futures_train = self.policy.broadcast_weights_for_collective()
-                futures_inference = (
-                    self.policy_generation.update_weights_from_collective()
-                )
-                await self._wait_on_futures(futures_train)
-                results = await self._wait_on_futures(futures_inference)
-                update_success = all(
-                    result for result in results if result is not None
-                )
+            futures_train = self.policy.broadcast_weights_for_collective()
+            futures_inference = (
+                self.policy_generation.update_weights_from_collective()
+            )
+            await self._wait_on_futures(futures_train)
+            results = await self._wait_on_futures(futures_inference)
+            update_success = all(
+                result for result in results if result is not None
+            )
 
             if not update_success:
-                error_tag = "cuda-ipc" if colocated_inference else "nccl"
                 error_message = (
                     "❌ Error: Updating weights for the generation policy failed during refit.\n"
-                    f"This often indicates an issue with {error_tag} or "
+                    "This often indicates an issue with nccl or "
                     "a problem within the generation backend (e.g., vLLM worker).\n"
                 )
                 raise RuntimeError(error_message)
-
-        if colocated_inference:
-            self.policy.offload_after_refit()
-            self.policy_generation.prepare_for_generation(tags=["kv_cache"])
 
     def _validate(self, step: int) -> tuple[dict[str, Any], dict[str, Any]]:
         if self.val_dataloader is None:
@@ -1226,7 +1169,6 @@ class GRPOTrainer:
                     timer,
                     False,
                     False,
-                    self.colocated_inference
                 )
                 
                 repeated_batch = self._process_rollouts(repeated_batch)

@@ -293,14 +293,10 @@ class DTensorV2PolicyWorker:
     ):
         self.use_hf_checkpoint = use_hf_checkpoint
         self.use_cut_cross_entropy = use_cut_cross_entropy
-        self.is_generation_colocated = None
-        if "generation" in config and config["generation"] is not None:
-            self.is_generation_colocated = config["generation"]["colocated"]["enabled"]
 
         # Explicitly set NCCL_CUMEM_ENABLE to 1 to avoid the P2P initialization error for PyNCCLCommunicator.
         # See https://github.com/NVIDIA-NeMo/RL/issues/564 for more details.
-        if not self.is_generation_colocated:
-            os.environ["NCCL_CUMEM_ENABLE"] = "1"
+        os.environ["NCCL_CUMEM_ENABLE"] = "1"
 
         # Disable dynamo autotune_local_cache to avoid crash when there's already a cache
         # with different order of node_bundles
@@ -743,7 +739,7 @@ class DTensorV2PolicyWorker:
         """Initialize the collective communication."""
         from vllm.distributed.utils import StatelessProcessGroup
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-
+        
         if self.rank == 0:
             logging.info(f"Initializing collective communication on trainer using PyNCCL (rank {self.rank}, world_size {world_size})")
             pg = StatelessProcessGroup.create(
@@ -1549,44 +1545,34 @@ class DTensorV2PolicyWorker:
 
     @torch.no_grad()
     def prepare_refit_info(self) -> Optional[dict[str, Any]]:
-        if self.is_generation_colocated:
-            # For colocated inference, we need the actual converted state dict
-            state_dict_for_refit = self._export_state_dict()
-            # Collect info for streaming multiple tensors
-            self.refit_param_info = []
-            for name, tensor in state_dict_for_refit.items():
-                # dtensor's numel will return complete tensor instead of only local tensor
-                size_in_bytes = tensor.element_size() * tensor.numel()
-                self.refit_param_info.append((name, size_in_bytes))
-        else:
-            if self._streaming_refit_metadata is None:
-                # For non-colocated inference, derive metadata by streaming the HF conversion
-                state_dict = self.model.state_dict()
-                try:
-                    state_dict_info = self._collect_hf_stream_metadata(state_dict)
-                finally:
-                    del state_dict
+        if self._streaming_refit_metadata is None:
+            # Derive metadata by streaming the HF conversion
+            state_dict = self.model.state_dict()
+            try:
+                state_dict_info = self._collect_hf_stream_metadata(state_dict)
+            finally:
+                del state_dict
+        
+            # Find all same-size (and same dtype) tensors
+            similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
             
-                # Find all same-size (and same dtype) tensors
-                similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
-                
-                TENSOR_PACK_MAX = 1000
-                
-                new_metadata = {}
-                
-                for refit_info, tensors in similar_tensors.items():
-                    for i in range(0, len(tensors), TENSOR_PACK_MAX):
-                        chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
-                        key = "packed_tensor_" + str(refit_info) + "_" + str(i)
-                        new_metadata[key] = {
-                            "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
-                            "dtype": refit_info[1], 
-                            "packed_tensors": chunk_tensors
-                        }
-                
-                self._streaming_refit_metadata = new_metadata
+            TENSOR_PACK_MAX = 1000
+            
+            new_metadata = {}
+            
+            for refit_info, tensors in similar_tensors.items():
+                for i in range(0, len(tensors), TENSOR_PACK_MAX):
+                    chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
+                    key = "packed_tensor_" + str(refit_info) + "_" + str(i)
+                    new_metadata[key] = {
+                        "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
+                        "dtype": refit_info[1], 
+                        "packed_tensors": chunk_tensors
+                    }
+            
+            self._streaming_refit_metadata = new_metadata
 
-            return self._streaming_refit_metadata
+        return self._streaming_refit_metadata
 
     def _collect_hf_stream_metadata(
         self, state_dict: dict[str, Any]
@@ -1600,57 +1586,6 @@ class DTensorV2PolicyWorker:
             return metadata
 
         return self.adapter.get_hf_metadata(state_dict)
-
-    @torch.no_grad()
-    def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
-        from rlkit.utils.nvml import get_free_memory_bytes
-
-        export_state_dict = self._export_state_dict()
-        self._held_sharded_state_dict_reference = export_state_dict
-
-        if self.refit_param_info is None:
-            self.refit_param_info = []
-            for name, tensor in export_state_dict.items():
-                size_in_bytes = tensor.element_size() * tensor.numel()
-                self.refit_param_info.append((name, size_in_bytes))
-
-        device_idx = torch.cuda.current_device()
-        total_available_bytes = get_free_memory_bytes(device_idx)
-        memory_ratio = os.getenv("RLKIT_REFIT_BUFFER_MEMORY_RATIO", "0.8")
-        total_available_bytes *= float(memory_ratio)
-
-        return self.refit_param_info, total_available_bytes
-
-    @torch.no_grad()
-    @wrap_with_nvtx_name("v2_policy_worker/get_weights_ipc_handles")
-    def get_weights_ipc_handles(self, keys: Iterable[str]) -> dict[str, Any]:
-        assert self._held_sharded_state_dict_reference is not None, (
-            "prepare_weights_for_ipc must be called before get_weights_ipc_handles"
-        )
-
-        if self._held_streamed_param_reference is not None:
-            del self._held_streamed_param_reference
-            self._held_streamed_param_reference = None
-
-        converted_params: dict[str, torch.Tensor] = {}
-        for key in keys:
-            tensor = self._held_sharded_state_dict_reference[key]
-            if isinstance(tensor, DTensor):
-                full_tensor = tensor.full_tensor()
-            else:
-                full_tensor = tensor
-            converted_params[key] = full_tensor.to(self.dtype, non_blocking=True)
-
-        self._held_streamed_param_reference = converted_params
-
-        device_uuid = self.report_device_id()
-        all_handles = []
-        for key, param in converted_params.items():
-            handle = get_handle_from_tensor(param)
-            all_handles.append((key, handle))
-
-        serialized = (False, all_handles)
-        return {device_uuid: serialized}
 
     @torch.no_grad()
     def broadcast_weights_for_collective(self) -> None:
