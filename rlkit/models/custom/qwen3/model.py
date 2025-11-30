@@ -325,8 +325,7 @@ class TransformerBlock(nn.Module):
 
 
 class Qwen3Model(BaseModel):
-    """
-    Qwen3Model Module
+    """Qwen3Model Module.
 
     Args:
         model_args (TransformerModelArgs): Model configuration arguments.
@@ -371,8 +370,10 @@ class Qwen3Model(BaseModel):
         self,
         buffer_device: torch.device | None = None,
     ):
-        """
-        [Note: On ``init_weights`` vs. ``reset_parameters``]
+        """Initialize the weights of the model.
+        
+        [Note: On ``init_weights`` vs. ``reset_parameters``].
+        
         Modules may define ``reset_parameters`` to initialize parameter values.
         ``reset_parameters`` is meant to only initialize directly owned
         parameters/buffers, not those of their child modules, and it can be
@@ -413,8 +414,7 @@ class Qwen3Model(BaseModel):
         )
 
     def forward(self, tokens: torch.Tensor):
-        """
-        Perform a forward pass through the Transformer model.
+        """Perform a forward pass through the Transformer model.
 
         Args:
             tokens (torch.Tensor): Input token indices if pipeline parallelism is not enabled.
