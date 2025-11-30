@@ -7,8 +7,8 @@ import openai
 import ray
 
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.models.generation.vllm_http.config import HttpVllmConfig
-from rlkit.models.generation.vllm_http.vllm_http import VLLMOpenAIServe
+from rlkit.config.rl.vllm import HttpVllmConfig
+from rlkit.models.generation.vllm_http import VLLMOpenAIServe
 
 from ray import serve
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
@@ -20,19 +20,11 @@ class VllmHttpGeneration:
     def __init__(self, cluster: RayVirtualCluster, config: HttpVllmConfig):
         # Save config for later use
         self.cfg = config
-
-        # serve.start(detached=False, http_options={"port": 8000, "host": "127.0.0.1", "location": "EveryNode", "access_log": False})
     
         runtime_env = {
             "py_executable": sys.executable,
-            "env_vars": dict(os.environ),
+            "env_vars": {**os.environ, "VLLM_USE_V1": "1", "NCCL_CUMEM_ENABLE": "1", "VLLM_ALLOW_INSECURE_SERIALIZATION": "1"},
         }
-        
-        # TODO: find better place for this, force V1 engine
-        runtime_env["env_vars"]["VLLM_USE_V1"] = "1"
-        runtime_env["env_vars"]["NCCL_CUMEM_ENABLE"] = "1"
-        # TODO: I really don't like this. Find a way around torch dtype serialization.
-        runtime_env["env_vars"]["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
         self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
@@ -75,7 +67,7 @@ class VllmHttpGeneration:
                 soft=False,  # Hard constraint - must be on this node
             )
             
-            actor = VLLMOpenAIServe.options(
+            actor = VLLMOpenAIServe.options( # type: ignore - type checking strangeness w/r/t Ray options method
                 name=f"vllm_http_generation_{i}",
                 runtime_env=runtime_env,
                 scheduling_strategy=scheduling_strategy,

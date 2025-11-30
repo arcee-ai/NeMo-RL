@@ -6,7 +6,7 @@ import torch
 import ray
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.data.interfaces import DatumSpec
-from rlkit.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
+from rlkit.models.generation.vllm_http_generation import VllmHttpGeneration
 from rlkit.environments.interfaces import EnvironmentInterface
 
 import verifiers as vf

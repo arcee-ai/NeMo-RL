@@ -19,7 +19,6 @@ import torch
 
 from rlkit.algorithms.interfaces import LossFunction
 from rlkit.distributed.batched_data_dict import BatchedDataDict
-from rlkit.models.generation.interfaces import GenerationDatumSpec
 
 
 class LogprobOutputSpec(TypedDict):
@@ -39,7 +38,7 @@ class PolicyInterface(ABC):
 
     @abstractmethod
     def get_logprobs(
-        self, data: BatchedDataDict[GenerationDatumSpec]
+        self, data: BatchedDataDict[Any]
     ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get logprobs of actions from observations.
 
@@ -54,7 +53,7 @@ class PolicyInterface(ABC):
 
     @abstractmethod
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict[GenerationDatumSpec]
+        self, data: BatchedDataDict[Any]
     ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get logprobs of actions from observations.
 

@@ -11,13 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import asyncio
 import os
 import uuid
 import warnings
 from collections import defaultdict
 from typing import Any, Optional, Union
-import logging
 
 import numpy as np
 import ray
@@ -34,10 +32,6 @@ from rlkit.distributed.batched_data_dict import (
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
-from rlkit.models.generation.interfaces import (
-    GenerationDatumSpec,
-    GenerationOutputSpec,
-)
 from rlkit.config import PolicyConfig
 from rlkit.models.policy.interfaces import (
     ColocatablePolicyInterface,
@@ -213,7 +207,7 @@ class Policy(ColocatablePolicyInterface):
         return futures
 
     async def get_logprobs(
-        self, data: BatchedDataDict[GenerationDatumSpec]
+        self, data: BatchedDataDict[Any]
     ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a data dict.
 
@@ -280,7 +274,7 @@ class Policy(ColocatablePolicyInterface):
 
     def get_reference_policy_logprobs(
         self,
-        data: BatchedDataDict[GenerationDatumSpec],
+        data: BatchedDataDict[Any],
         micro_batch_size: Optional[int] = None,
     ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs of the reference policy for a data dict.
@@ -496,49 +490,6 @@ class Policy(ColocatablePolicyInterface):
             aggregated_results["router_statistics"] = aggregated_router_stats
 
         return aggregated_results
-
-    def generate(
-        self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
-    ) -> BatchedDataDict[GenerationOutputSpec]:
-        """Generate a batch of data using the policy."""
-        # Verify input data is right-padded
-        assert isinstance(data, BatchedDataDict), (
-            f"data must be a BatchedDataDict, got type: {type(data)}"
-        )
-        assert "input_ids" in data and "input_lengths" in data, (
-            "Missing required input fields"
-        )
-
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
-        sharded_data = data.shard_by_batch_size(dp_size, batch_size=None)
-        futures = self.worker_group.run_all_workers_sharded_data(
-            "generate",
-            data=sharded_data,
-            in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
-            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
-            common_kwargs={"greedy": greedy},
-        )
-        assert self.cfg["generation"] is not None, "Generation config is not set"
-        result: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict.from_batches(
-            self.worker_group.get_all_worker_results(futures),
-            pad_value_dict={"output_ids": self.cfg["generation"]["pad_token_id"]},
-        )
-
-        # Verify the output has all required fields
-        required_keys = [
-            "output_ids",
-            "generation_lengths",
-            "unpadded_sequence_lengths",
-            "logprobs",
-        ]
-        missing_keys = [key for key in required_keys if key not in result]
-        if missing_keys:
-            raise ValueError(
-                f"Missing required keys for GenerationOutputSpec: {missing_keys}"
-            )
-
-        return result
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         # We don't need to do anything here

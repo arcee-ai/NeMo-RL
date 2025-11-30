@@ -17,6 +17,8 @@ import sys
 
 from datasets import Dataset
 from openai.types.chat import ChatCompletionMessageToolCallUnion
+
+from rlkit.config.rl.vllm import HttpVllmConfig
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
 # Prevent verifiers from spamming the console with progress bars when we do parallel rollouts.
@@ -28,22 +30,14 @@ import asyncio
 from typing import Any, Optional
 
 from omegaconf import OmegaConf
-import ray
 from transformers import PreTrainedTokenizerBase
 import torch
 
 from rlkit.environments.vf_environment import VfEnvironment
 from rlkit.algorithms.grpo import GRPOTrainer
 from rlkit.algorithms.utils import get_tokenizer
-from rlkit.config import DataConfig
-from rlkit.data.interfaces import (
-    DatumSpec,
-    APIMessage,
-    TaskDataSpec,
-)
 from rlkit.distributed.virtual_cluster import init_ray
 from rlkit.environments.interfaces import EnvironmentInterface
-from rlkit.models.generation import configure_generation_config
 from rlkit.utils.config import load_config, parse_hydra_overrides
 from rlkit.utils.logger import get_next_experiment_dir
 from rlkit.config import RLConfig
@@ -58,6 +52,20 @@ logging.getLogger("asyncio").setLevel(logging.ERROR)
 
 OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
 
+def configure_generation_config(
+    config: HttpVllmConfig, tokenizer: PreTrainedTokenizerBase, is_eval: bool = False
+) -> HttpVllmConfig:
+    """Apply specific configurations to generation config."""
+    # tokenizer setting
+    config["pad_token_id"] = tokenizer.pad_token_id
+    if config.get("stop_token_ids") is None:
+        config["stop_token_ids"] = [tokenizer.eos_token_id]
+
+    # Set skip_tokenizer_init for the HTTP backend
+    should_init_tokenizer = is_eval or config.get("stop_strings") is not None
+    config["vllm_cfg"]["skip_tokenizer_init"] = not should_init_tokenizer
+
+    return config
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     """Parse command line arguments."""

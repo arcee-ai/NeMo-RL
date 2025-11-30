@@ -52,8 +52,8 @@ from rlkit.data.messages import APIMessage
 from rlkit.distributed.batched_data_dict import BatchedDataDict
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.environments.interfaces import EnvironmentInterface
-from rlkit.models.generation.vllm_http.config import HttpVllmConfig
-from rlkit.models.generation.vllm_http.vllm_http_generation import VllmHttpGeneration
+from rlkit.config.rl.vllm import HttpVllmConfig
+from rlkit.models.generation.vllm_http_generation import VllmHttpGeneration
 from rlkit.models.policy.interfaces import ColocatablePolicyInterface
 from rlkit.models.policy.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager

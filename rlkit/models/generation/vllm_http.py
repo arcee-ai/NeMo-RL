@@ -2,12 +2,9 @@
 import asyncio
 import logging
 from typing import Any, Optional
-from weakref import WeakValueDictionary
 
-from fastapi import FastAPI, Request
-from ray import serve
+from fastapi import FastAPI
 import ray
-import torch
 import uvicorn
 
 # Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
@@ -152,7 +149,7 @@ class VLLMOpenAIServe:
         gpu_memory_utilization: float = 0.7,
         data_parallel_size: int = 1,
         extra_cli_args: Optional[list[str]] = None,
-        worker_extension_cls: str = "rlkit.models.generation.vllm_http.worker_ext.VllmHttpWorkerExtension",
+        worker_extension_cls: str = "rlkit.models.generation.worker_ext.VllmHttpWorkerExtension",
         tool_call_parser: str | None = None,
     ):
         for _name in [
@@ -287,46 +284,3 @@ class VLLMOpenAIServe:
 
     async def admin_report_device_id(self) -> list[str]:
         return await self._engine_client.collective_rpc("report_device_id", args=tuple())
-
-    def maybe_parse_tool_calls(self, parser_name: str | None, texts: list[str]) -> list[dict[str, Any]]:
-        """Parse tool calls from generated texts if a parser is configured.
-
-        Returns a list aligned with `texts`, each entry a dict (model_dump) or None.
-        """
-        
-        # For some reason, this file is imported in contexts outside of the vLLM worker.
-        # As such, this import needs to be here rather than at the top level.
-        from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParserManager, ToolParser
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        
-        try:
-            ParserCls = ToolParserManager.get_tool_parser(parser_name)
-        except Exception:
-            print(f"Failed to get tool parser {parser_name}, returning empty tool calls")
-            return [{}] * len(texts)
-
-        if self._tokenizer is None:
-            print("No tokenizer found, returning empty tool calls")
-            return [{}] * len(texts)
-
-        try:
-            parser: ToolParser = ParserCls(self._tokenizer)
-            # Dummy request for parser shim.
-            req = ChatCompletionRequest(
-                messages=[{"role": "user", "content": ""}],
-                tool_choice="auto",
-                tools=[],
-            )
-            results: list[dict[str, Any] | None] = []
-            for text in texts:
-                try:
-                    info = parser.extract_tool_calls(text, req)
-                    results.append(info.model_dump())
-                except Exception as e:
-                    print(f"Failed to parse tool calls for text {text}, returning empty tool call: {e}")
-                    results.append({})
-            
-            return results
-        except Exception as e:
-            print(f"Failed to parse tool calls, returning empty tool calls: {e}")
-            return [{}] * len(texts)
