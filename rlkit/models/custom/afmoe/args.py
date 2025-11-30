@@ -48,6 +48,7 @@ class AFMoEModelArgs(BaseModelArgs):
     attn_mask_type: str = "causal"
     local_attn_mask_type: str = "causal_sliding_window"
     local_attn_sliding_window_size: int = 1024
+    use_sdpa_for_global_attn: bool = False
     eos_id: int = 0
 
     mup_enabled: bool = False

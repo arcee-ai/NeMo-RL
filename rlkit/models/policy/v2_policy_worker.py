@@ -925,7 +925,7 @@ class DTensorV2PolicyWorker:
                             output_weight = self.model.output.weight
                             if isinstance(output_weight, DTensor):
                                 output_weight = output_weight.full_tensor()
-                            hidden = self.model(input_ids)
+                            hidden = self.model(input_ids, attention_masks=self.model.get_attention_masks(input_ids, self.tokenizer))
                             token_loss = linear_cross_entropy(
                                 # Returns final hidden state
                                 hidden,

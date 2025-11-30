@@ -1,8 +1,10 @@
 import torch
+from torch.nn.attention.flex_attention import and_masks
 import torch.nn.functional as F
 from torch import nn
+from transformers import PreTrainedTokenizerBase
 
-from rlkit.models.custom.attention import build_attention, init_attention_mask
+from rlkit.models.custom.attention import AttentionMasksType, FlexAttentionWrapper, ScaledDotProductAttentionWrapper, create_attention_mask, get_causal_mask_mod, get_document_mask_mod, get_sliding_window_mask_mod
 from rlkit.models.custom.model import BaseModel
 
 from .args import AFMoEModelArgs
@@ -10,8 +12,7 @@ from .moe import FeedForward, MoE
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Precompute the cosine and sine frequencies for rotary embeddings.
+    """Precompute the cosine and sine frequencies for rotary embeddings.
 
     This function calculates frequency tensors and returns their cosine and sine values
     for use in rotary position embeddings.
@@ -47,8 +48,7 @@ def apply_rotary_emb(
     cos: torch.Tensor,
     sin: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply rotary embeddings to input tensors using cosine and sine frequencies.
+    """Apply rotary embeddings to input tensors using cosine and sine frequencies.
 
     This function applies rotary embeddings to the given query 'xq' and key 'xk' tensors using the provided
     cosine and sine frequency tensors. The rotary embeddings are applied using the rotate_half approach.
@@ -78,7 +78,7 @@ def apply_rotary_emb(
 
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    """Equivalent to torch.repeat_interleave(x, dim=2, repeats=n_rep)."""
     bs, slen, n_kv_heads, head_dim = x.shape
     if n_rep == 1:
         return x
@@ -89,11 +89,10 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     )
 
 class Attention(nn.Module):
-    """
-    Multi-head attention module.
+    """Multi-head attention module.
 
     Args:
-        model_args (AFMoEModelArgs): Model configuration arguments.
+        model_args (TransformerModelArgs): Model configuration arguments.
 
     Attributes:
         n_kv_heads (int): Number of key and value heads.
@@ -120,7 +119,9 @@ class Attention(nn.Module):
             self.head_dim = model_args.head_dim
         else:
             self.head_dim = model_args.dim // model_args.n_heads
-        self.is_local_attention = (layer_id+1) % model_args.global_attn_every_n_layers != 0
+        self.is_local_attention = (
+            layer_id + 1
+        ) % model_args.global_attn_every_n_layers != 0
         self.wq = nn.Linear(
             model_args.dim, model_args.n_heads * self.head_dim, bias=False
         )
@@ -131,50 +132,60 @@ class Attention(nn.Module):
         )
         self.q_norm = nn.RMSNorm(self.head_dim, eps=model_args.norm_eps)
         self.k_norm = nn.RMSNorm(self.head_dim, eps=model_args.norm_eps)
-        self.gate_proj = nn.Linear(model_args.dim, self.head_dim * self.n_heads, bias=False)
-        self.sdpa = build_attention(model_args.use_flex_attn, model_args.attn_mask_type)
+        self.gate_proj = nn.Linear(
+            model_args.dim, self.head_dim * self.n_heads, bias=False
+        )
+
+        self.use_flex_attn = model_args.use_flex_attn
         if self.is_local_attention:
-            self.sdpa = build_attention(model_args.use_flex_attn, model_args.local_attn_mask_type)
+            if not self.use_flex_attn:
+                raise ValueError("SWA is only supported for flex-attn")
+            self.inner_attention = FlexAttentionWrapper()
+            self.uses_sdpa = False
         else:
-            self.sdpa = build_attention(model_args.use_flex_attn, model_args.attn_mask_type)
+            if model_args.use_sdpa_for_global_attn:
+                self.inner_attention = ScaledDotProductAttentionWrapper()
+                self.uses_sdpa = True
+            else:
+                self.inner_attention = FlexAttentionWrapper()
+                self.uses_sdpa = False
 
     def init_weights(self, out_init_std: float, base_init_std: float):
         cutoff_factor = 3
-        for linear in (self.wq, self.wk, self.wv):
+        for linear in (self.wq, self.wk, self.wv, self.gate_proj):
             nn.init.trunc_normal_(
                 linear.weight,
                 mean=0.0,
                 std=base_init_std,
-                a=-cutoff_factor*base_init_std,
-                b=cutoff_factor*base_init_std,
-            ) # pyright: ignore[reportUnusedCallResult]
+                a=-cutoff_factor * base_init_std,
+                b=cutoff_factor * base_init_std,
+            )
         for norm in (self.q_norm, self.k_norm):
             norm.reset_parameters()
         nn.init.trunc_normal_(
             self.wo.weight,
             mean=0.0,
             std=out_init_std,
-            a=-cutoff_factor*out_init_std,
-            b=cutoff_factor*out_init_std,
-        ) # pyright: ignore[reportUnusedCallResult]
+            a=-cutoff_factor * out_init_std,
+            b=cutoff_factor * out_init_std,
+        )
 
     def forward(
         self,
         x: torch.Tensor,
-        freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        freqs_cis: torch.Tensor,
+        attention_masks: AttentionMasksType | None,
     ):
-        """
-        Forward pass of the attention module.
+        """Forward pass of the attention module.
 
         Args:
             x (torch.Tensor): Input tensor.
-            freqs_cis (tuple[torch.Tensor, torch.Tensor]): Precomputed cosine and sine frequency tensors.
+            freqs_cis (torch.Tensor): Precomputed frequency tensor.
 
         Returns:
             torch.Tensor: Output tensor after attention.
 
         """
-
         bs, seqlen, _ = x.shape
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
         gate = self.gate_proj(x)
@@ -200,7 +211,14 @@ class Attention(nn.Module):
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
-        output = self.sdpa(xq, xk, xv)
+        if self.uses_sdpa:
+            output = self.inner_attention(xq, xk, xv)
+        else:
+            assert isinstance(attention_masks, dict), attention_masks
+            attention_mask = attention_masks[
+                "swa" if self.is_local_attention else "full"
+            ]
+            output = self.inner_attention(xq, xk, xv, block_mask=attention_mask)
 
         output = output.transpose(
             1, 2
@@ -211,8 +229,7 @@ class Attention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """
-    TransformerBlock Module
+    """TransformerBlock Module.
 
     Args:
         layer_id (int): Identifier for the layer.
@@ -262,9 +279,9 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        attention_masks: AttentionMasksType | None,
     ):
-        """
-        Perform a forward pass through the TransformerBlock.
+        """Perform a forward pass through the TransformerBlock.
 
         Args:
             x (torch.Tensor): Input tensor.
@@ -274,7 +291,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        h = x + self.attention_norm_b(self.attention(self.attention_norm_a(x), freqs_cis))
+        h = x + self.attention_norm_b(self.attention(self.attention_norm_a(x), freqs_cis, attention_masks))
         if self.moe_enabled:
             out = h + self.ffn_norm_b(self.moe(self.ffn_norm_a(h)))
         else:
@@ -295,8 +312,7 @@ class TransformerBlock(nn.Module):
 
 
 class AFMoEModel(BaseModel):
-    """
-    Transformer Module
+    """Transformer Module.
 
     Args:
         model_args (AFMoEModelArgs): Model configuration arguments.
@@ -338,7 +354,8 @@ class AFMoEModel(BaseModel):
         self,
         buffer_device: torch.device | None = None,
     ):
-        """
+        """Initialize the weights of the model.
+        
         [Note: On ``init_weights`` vs. ``reset_parameters``]
         Modules may define ``reset_parameters`` to initialize parameter values.
         ``reset_parameters`` is meant to only initialize directly owned
@@ -416,11 +433,11 @@ class AFMoEModel(BaseModel):
     def forward(
         self,
         tokens: torch.Tensor,
+        attention_masks: AttentionMasksType | None = None,
         eos_id: int | None = None,
         input_batch: torch.Tensor | None = None,
     ):
-        """
-        Perform a forward pass through the Transformer model.
+        """Perform a forward pass through the Transformer model.
 
         Args:
             tokens (torch.Tensor): Input token indices if pipeline parallelism is not enabled.
@@ -436,13 +453,6 @@ class AFMoEModel(BaseModel):
             torch.Tensor: Output logits after applying the Transformer model.
 
         """
-        if self.model_args.use_flex_attn:
-            init_attention_mask(
-                input_batch if input_batch is not None else tokens,
-                eos_id=eos_id,
-                sliding_window_size=self.model_args.local_attn_sliding_window_size
-            )
-
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
@@ -451,7 +461,7 @@ class AFMoEModel(BaseModel):
 
         freqs_cis = (self.freqs_cos, self.freqs_sin)
         for layer in self.layers.values():
-            h = layer(h, freqs_cis)
+            h = layer(h, freqs_cis, attention_masks)
 
         h = self.norm(h) if self.norm else h
         if self.skip_logits:
@@ -459,12 +469,40 @@ class AFMoEModel(BaseModel):
         else:
             output = self.output(h) if self.output else h
             return output
+    
+    def get_attention_masks(
+        self,
+        input_batch: torch.Tensor,
+        tokenizer: PreTrainedTokenizerBase,
+    ) -> AttentionMasksType:
+        mask_mods = [get_causal_mask_mod()]
+        match self.model_args.attn_mask_type:
+            case "causal":
+                B = 1
+            case "block_causal":
+                mask_mods.append(get_document_mask_mod(input_batch, tokenizer.eos_id))
+                B = input_batch.shape[0]
+            case _:
+                raise ValueError(
+                    f"Unknown attention mask type: {self.model_args.attn_mask_type}"
+                )
+
+        swa_mask_mod = and_masks(
+            *mask_mods,
+            get_sliding_window_mask_mod(self.model_args.local_attn_sliding_window_size),
+        )
+        full_mask_mod = and_masks(*mask_mods)
+
+        seqlen = input_batch.shape[1]
+        return {
+            "full": create_attention_mask(full_mask_mod, B, None, seqlen, seqlen),
+            "swa": create_attention_mask(swa_mask_mod, B, None, seqlen, seqlen),
+        }
 
     def collect_router_statistics(
         self, ep_mesh=None, as_fractions: bool = False
     ) -> dict[str, float]:
-        """
-        Collect router statistics from all MoE layers.
+        """Collect router statistics from all MoE layers.
         
         Args:
             ep_mesh: Optional DeviceMesh for expert parallel group. If provided,

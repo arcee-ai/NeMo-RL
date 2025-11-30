@@ -16,7 +16,7 @@ if device == "cuda":
 
 config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
 
-model_class, model_args, state_dict_adapter_class, parallelize_fn = get_model_config(config)
+model_class, model_args, state_dict_adapter_class = get_model_config(config)
 
 print("create tt model")
 with init_empty_weights():
@@ -84,7 +84,6 @@ To Troy's proud monarch, and the friends of Troy!
 That adverse gods commit to stern debate
 The best, the bravest, of the Grecian state.
 Young as ye are, this youthful heat restrain,
-"""
 # A godlike race of heroes once I knew,
 # Such as no more these aged eyes shall view!
 # Lives there a chief to match Pirithous' fame,
@@ -141,9 +140,10 @@ with torch.no_grad():
             logits_hf = model_hf(input_ids.cpu()).logits
     print("run tt model")
     with torch.inference_mode():
+        
         if device == "cuda":
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits_tt = model_tt(input_ids)
+                logits_tt = model_tt(input_ids, attention_masks=model_tt.get_attention_masks(input_ids, tokenizer))
         else:
             logits_tt = model_tt(input_ids)
 

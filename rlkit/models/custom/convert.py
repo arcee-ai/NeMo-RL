@@ -7,7 +7,6 @@ from rlkit.models.custom.afmoe.model import AFMoEModel
 from rlkit.models.custom.afmoe.args import AFMoEModelArgs, MoEArgs as MoEArgsAFMoE
 from rlkit.models.custom.afmoe.state_dict_adapter import AFMoEStateDictAdapter
 
-from rlkit.models.custom.moe import MoEArgs
 from rlkit.models.custom.qwen3.model import Qwen3Model
 from rlkit.models.custom.qwen3.args import Qwen3ModelArgs
 from rlkit.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
