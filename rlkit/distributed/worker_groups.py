@@ -14,9 +14,9 @@
 import asyncio
 import importlib
 import os
-import sys
 from copy import deepcopy
 from dataclasses import dataclass
+import sys
 from typing import Any, Optional, Union
 
 import ray
@@ -471,7 +471,11 @@ class RayWorkerGroup:
 
                 # Pass these options to the remote_worker_builder
                 runtime_env = {
-                    "env_vars": worker_env_vars,
+                    "env_vars": {
+                        "VIRTUAL_ENV": sys.executable,
+                        "UV_PROJECT_ENVIRONMENT": sys.executable,
+                        **worker_env_vars,
+                    },
                     "py_executable": sys.executable,
                 }
 

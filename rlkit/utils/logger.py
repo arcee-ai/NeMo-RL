@@ -37,17 +37,12 @@ from rich.box import ROUNDED
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
-from torch.utils.tensorboard import SummaryWriter
 
 from rlkit.config.logging import (
-    GPUMonitoringConfig,
     LoggerConfig,
-    MLflowConfig,
-    TensorboardConfig,
     WandbConfig,
 )
 from rlkit.data.messages import APIMessage
-from rlkit.distributed.batched_data_dict import BatchedDataDict
 
 # Flag to track if rich logging has been configured
 _rich_logging_configured = False
@@ -69,54 +64,7 @@ class LoggerInterface(ABC):
     def log_hyperparams(self, params: Mapping[str, Any]) -> None:
         """Log dictionary of hyperparameters."""
         pass
-
-
-class TensorboardLogger(LoggerInterface):
-    """Tensorboard logger backend."""
-
-    def __init__(self, cfg: TensorboardConfig, log_dir: Optional[str] = None):
-        self.writer = SummaryWriter(log_dir=log_dir)
-        print(f"Initialized TensorboardLogger at {log_dir}")
-
-    def log_metrics(
-        self,
-        metrics: dict[str, Any],
-        step: int,
-        prefix: Optional[str] = "",
-        step_metric: Optional[str] = None,  # ignored in TensorBoard
-    ) -> None:
-        """Log metrics to Tensorboard.
-
-        Args:
-            metrics: Dict of metrics to log
-            step: Global step value
-            prefix: Optional prefix for metric names
-            step_metric: Optional step metric name (ignored in TensorBoard)
-        """
-        for name, value in metrics.items():
-            if prefix:
-                name = f"{prefix}/{name}"
-            self.writer.add_scalar(name, value, step)
-
-    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
-        """Log hyperparameters to Tensorboard.
-
-        Args:
-            params: Dictionary of hyperparameters to log
-        """
-        # Flatten the params because add_hparams does not support nested dicts
-        self.writer.add_hparams(flatten_dict(params), {})
-
-    def log_plot(self, figure: plt.Figure, step: int, name: str) -> None:
-        """Log a plot to Tensorboard.
-
-        Args:
-            plot_data: Dictionary of plot data
-            step: Global step value
-        """
-        self.writer.add_figure(name, figure, step)
-
-
+    
 class WandbLogger(LoggerInterface):
     """Weights & Biases logger backend."""
 
@@ -687,91 +635,6 @@ class RayGpuMonitorLogger:
             self.metrics_buffer = []
 
 
-class MLflowLogger(LoggerInterface):
-    """MLflow logger backend."""
-
-    def __init__(self, cfg: MLflowConfig, log_dir: Optional[str] = None):
-        """Initialize MLflow logger.
-
-        Args:
-            cfg: MLflow configuration
-            log_dir: Optional log directory
-        """
-        if cfg["tracking_uri"]:
-            mlflow.set_tracking_uri(cfg["tracking_uri"])
-
-        experiment = mlflow.get_experiment_by_name(cfg["experiment_name"])
-        if experiment is None:
-            if log_dir:
-                mlflow.create_experiment(
-                    name=cfg["experiment_name"],
-                    artifact_location=log_dir,
-                )
-            else:
-                mlflow.create_experiment(cfg["experiment_name"])
-        else:
-            mlflow.set_experiment(cfg["experiment_name"])
-
-        # Start run
-        run_kwargs: dict[str, str] = {}
-        run_kwargs["run_name"] = cfg["run_name"]
-
-        self.run = mlflow.start_run(**run_kwargs)
-        print(
-            f"Initialized MLflowLogger for experiment {cfg['experiment_name']}, "
-            f"run {cfg['run_name']}"
-        )
-
-    def log_metrics(
-        self,
-        metrics: dict[str, Any],
-        step: int,
-        prefix: Optional[str] = "",
-        step_metric: Optional[str] = None,
-    ) -> None:
-        """Log metrics to MLflow.
-
-        Args:
-            metrics: Dict of metrics to log
-            step: Global step value
-            prefix: Optional prefix for metric names
-            step_metric: Optional step metric name (ignored in MLflow)
-        """
-        for name, value in metrics.items():
-            if prefix:
-                name = f"{prefix}/{name}"
-            mlflow.log_metric(name, value, step=step)
-
-    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
-        """Log hyperparameters to MLflow.
-
-        Args:
-            params: Dictionary of hyperparameters to log
-        """
-        # MLflow does not support nested dicts
-        mlflow.log_params(flatten_dict(params))
-
-    def log_plot(self, figure: plt.Figure, step: int, name: str) -> None:
-        """Log a plot to MLflow.
-
-        Args:
-            figure: Matplotlib figure to log
-            step: Global step value
-            name: Name of the plot
-        """
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tmp_file:
-            figure.savefig(tmp_file.name, format="png", bbox_inches="tight")
-            mlflow.log_artifact(tmp_file.name, f"plots/{name}")
-
-    def __del__(self) -> None:
-        """Clean up resources when the logger is destroyed."""
-        try:
-            mlflow.end_run()
-        except Exception:
-            # Ignore errors during cleanup
-            pass
-
-
 class Logger(LoggerInterface):
     """Main logger class that delegates to multiple backend loggers."""
 
@@ -781,11 +644,8 @@ class Logger(LoggerInterface):
         Args:
             cfg: Config dict with the following keys:
                 - wandb_enabled
-                - tensorboard_enabled
                 - mlflow_enabled
                 - wandb
-                - tensorboard
-                - mlflow
                 - monitor_gpus
                 - gpu_collection_interval
                 - gpu_flush_interval
@@ -801,20 +661,6 @@ class Logger(LoggerInterface):
             os.makedirs(wandb_log_dir, exist_ok=True)
             self.wandb_logger = WandbLogger(cfg["wandb"], log_dir=wandb_log_dir)
             self.loggers.append(self.wandb_logger)
-
-        if cfg["tensorboard_enabled"]:
-            tensorboard_log_dir = os.path.join(self.base_log_dir, "tensorboard")
-            os.makedirs(tensorboard_log_dir, exist_ok=True)
-            tensorboard_logger = TensorboardLogger(
-                cfg["tensorboard"], log_dir=tensorboard_log_dir
-            )
-            self.loggers.append(tensorboard_logger)
-
-        if cfg["mlflow_enabled"]:
-            mlflow_log_dir = os.path.join(self.base_log_dir, "mlflow")
-            os.makedirs(mlflow_log_dir, exist_ok=True)
-            mlflow_logger = MLflowLogger(cfg["mlflow"], log_dir=mlflow_log_dir)
-            self.loggers.append(mlflow_logger)
 
         # Initialize GPU monitoring if requested
         self.gpu_monitor = None
@@ -865,142 +711,6 @@ class Logger(LoggerInterface):
         """
         for logger in self.loggers:
             logger.log_hyperparams(params)
-
-    def log_batched_dict_as_jsonl(
-        self, to_log: BatchedDataDict[Any] | dict[str, Any], filename: str
-    ) -> None:
-        """Log a list of dictionaries to a JSONL file.
-
-        Args:
-            to_log: BatchedDataDict to log
-            filename: Filename to log to (within the log directory)
-        """
-        if not isinstance(to_log, BatchedDataDict):
-            to_log = BatchedDataDict(to_log)
-
-        # Create full path within log directory
-        filepath = os.path.join(self.base_log_dir, filename)
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        def fix_sample_recursive(sample: Any) -> Any:
-            if isinstance(sample, torch.Tensor):
-                return sample.tolist()
-            elif isinstance(sample, list):
-                return [fix_sample_recursive(v) for v in sample]
-            elif isinstance(sample, dict):
-                return {k: fix_sample_recursive(v) for k, v in sample.items()}
-            else:
-                return sample
-
-        # Write to JSONL file
-        with open(filepath, "w") as f:
-            for i, sample in enumerate(to_log.make_microbatch_iterator(1)):
-                fixed_sample = {}
-                for key, value in sample.items():
-                    fixed_sample[key] = fix_sample_recursive(value)
-                f.write(json.dumps({**fixed_sample, "idx": i}) + "\n")
-
-        print(f"Logged data to {filepath}")
-
-    def log_plot_token_mult_prob_error(
-        self, data: dict[str, Any], step: int, name: str
-    ) -> None:
-        """Log a plot of log probability errors in samples.
-
-        This function logs & plots the per-token log-probabilities and errors over the sequence
-        for the sample with the highest multiplicative probability error in the batch.
-
-        Args:
-            log_data: Dictionary of log probability samples
-            step: Global step value
-            name: Name of the plot
-        """
-        # find the sample with the highest log probability error
-        token_mask = data["token_mask"][:, 1:]
-        sample_mask = data["sample_mask"]
-        generation_logprobs = data["generation_logprobs"][:, 1:]
-        prev_logprobs = data["prev_logprobs"][:, 1:]
-        mask = token_mask * sample_mask.unsqueeze(-1)
-
-        diff = (generation_logprobs - prev_logprobs).abs() * token_mask
-        mask = token_mask * sample_mask.unsqueeze(-1)
-
-        mult_prob_error = (torch.exp(diff) * mask).sum(dim=-1) / mask.sum(dim=-1)
-
-        sample_idx = torch.argmax(mult_prob_error)
-        sample_error = mult_prob_error[sample_idx]
-
-        # plot the sample with the highest log probability error
-        # offset by 1 token for next token prediction
-        generation_start_idx, generation_end_idx = (
-            data["prompt_lengths"][sample_idx] - 1,
-            data["full_lengths"][sample_idx] - 1,
-        )
-
-        if generation_start_idx >= generation_end_idx:
-            print(
-                f"Skipping token_mult_prob_error plot because generation_start_idx ({generation_start_idx}) >= generation_end_idx ({generation_end_idx})"
-            )
-            return
-
-        generation_logprob = generation_logprobs[
-            sample_idx, int(generation_start_idx) : int(generation_end_idx)
-        ]
-        prev_logprob = (
-            prev_logprobs[
-                sample_idx, int(generation_start_idx) : int(generation_end_idx)
-            ]
-            * mask[sample_idx, int(generation_start_idx) : int(generation_end_idx)]
-        )
-        diff_i = diff[sample_idx, int(generation_start_idx) : int(generation_end_idx)]
-
-        # Find max absolute error token
-        max_abs_error_idx = torch.argmax(diff_i).item()
-        max_abs_error = diff_i[max_abs_error_idx].item()
-
-        # Find max relative error token (ratio of probabilities)
-        gen_prob = torch.exp(generation_logprob)
-        prev_prob = torch.exp(prev_logprob)
-        relative_error = torch.abs((gen_prob - prev_prob) / gen_prob)
-        max_rel_error_idx = torch.argmax(relative_error).item()
-        max_rel_error = relative_error[max_rel_error_idx].item()
-
-        fig = plt.figure()
-        step_idx = torch.arange(int(generation_start_idx), int(generation_end_idx))
-
-        plt.plot(step_idx, generation_logprob, label="logprob (inference engine)")
-        plt.plot(step_idx, prev_logprob, label="logprob (reference policy)")
-        plt.plot(
-            step_idx,
-            diff_i,
-            label=f"abs diff (token_mult_prob_error={sample_error:.2f})",
-        )
-
-        # Highlight max errors with points
-        plt.plot(
-            step_idx[max_abs_error_idx],
-            diff_i[max_abs_error_idx],
-            "ro",
-            markersize=8,
-            label=f"Max abs error: {max_abs_error:.4f}",
-        )
-        plt.plot(
-            step_idx[max_rel_error_idx],
-            diff_i[max_rel_error_idx],
-            "bo",
-            markersize=8,
-            label=f"Max rel error (prob): {max_rel_error:.4f}",
-        )
-
-        plt.xlabel("Token Position (starting from prompt end)")
-        plt.ylabel("Log Probability/Difference")
-        plt.legend()
-        plt.tight_layout()
-
-        for logger in self.loggers:
-            logger.log_plot(fig, step, name)
-
-        plt.close(fig)
 
     def __del__(self) -> None:
         """Clean up resources when the logger is destroyed."""

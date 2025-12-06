@@ -1,4 +1,4 @@
-from .rl import RLConfig, GRPOMasterConfig
+from .rl import RLConfig
 from .rl.policy import PolicyConfig, TokenizerConfig
 from .rl.loss import ClippedPGLossConfig
 from .data import DataConfig
@@ -11,14 +11,12 @@ from .logging import GPUMonitoringConfig
 from .cluster import ClusterConfig
 from .checkpointing import CheckpointingConfig
 from .rl.policy import SequencePackingConfig
-from .rl.policy import RewardModelConfig
 from .rl.policy.dtv2 import DTensorV2Config
 from .sft import SFTConfig, SFTMasterConfig
 from .rm import RMConfig, RMMasterConfig
 
 __all__ = [
     "RLConfig",
-    "GRPOMasterConfig",
     "PolicyConfig",
     "TokenizerConfig",
     "ClippedPGLossConfig",
@@ -33,7 +31,6 @@ __all__ = [
     "ClusterConfig",
     "CheckpointingConfig",
     "SequencePackingConfig",
-    "RewardModelConfig",
     "DTensorV2Config",
     "SFTConfig",
     "SFTMasterConfig",

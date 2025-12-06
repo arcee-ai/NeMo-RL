@@ -21,12 +21,12 @@ from datasets import Dataset
 import numpy as np
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
+from transformers import PreTrainedTokenizerBase
 
 from rlkit.algorithms.loss_functions import (
     NLLLoss,
 )
-from rlkit.algorithms.utils import set_seed, _pad_tensor
+from rlkit.algorithms.utils import set_seed
 from rlkit.config import (
     ClusterConfig,
     CheckpointingConfig,
@@ -36,7 +36,7 @@ from rlkit.config import (
     SFTConfig,
     SFTMasterConfig as MasterConfig,
 )
-from rlkit.distributed.batched_data_dict import BatchedDataDict
+from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.models.policy.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager
@@ -68,7 +68,7 @@ class SFTTrainer:
     def __init__(
         self,
         master_config: MasterConfig,
-        tokenizer: AutoTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         train_dataset: Dataset,
         val_dataset: Optional[Dataset]
     ) -> None:
@@ -155,13 +155,14 @@ class SFTTrainer:
         StatefulDataLoader,
         Optional[StatefulDataLoader],
     ]:
-        sft_collate_fn = lambda batch: {k: [x[k] for x in batch] for k in batch[0]}
+        # Use batch_size=1 so we can pull samples one at a time and pack them
         train_dataloader = StatefulDataLoader(
-            train_dataset,
-            batch_size=policy_config["train_global_batch_size"],
+            train_dataset, # type: ignore[arg-type]
+            batch_size=1,
             shuffle=data_config["shuffle"],
-            collate_fn=sft_collate_fn,
-            drop_last=True,
+            drop_last=False,
+            # Default collate function mangles dictionaries. We just want the raw list.
+            collate_fn=lambda x: x,
         )
 
         if last_checkpoint_path is not None:
@@ -173,10 +174,10 @@ class SFTTrainer:
         val_dataloader: Optional[StatefulDataLoader] = None
         if val_dataset is not None:
             val_dataloader = StatefulDataLoader(
-                val_dataset,
-                batch_size=sft_config["val_global_batch_size"],
+                val_dataset, # type: ignore[arg-type]
+                batch_size=1,
                 shuffle=False,
-                collate_fn=sft_collate_fn
+                collate_fn=lambda x: x,
             )
 
         return train_dataloader, val_dataloader
@@ -217,50 +218,37 @@ class SFTTrainer:
             use_cut_cross_entropy=use_cce,
         )
 
-    def _process_batch(self, batch: BatchedDataDict) -> BatchedDataDict:
+    def _sample_to_document(self, sample: dict[str, list]) -> dict[str, list] | None:
+        """Convert a single sample to the document format expected by pack_sequences.
+        
+        Args:
+            sample: Dictionary with 'input_ids' and 'token_mask' keys.
+        
+        Returns:
+            Document dict with 'token_ids', 'token_mask', and 'targets' keys,
+            or None if the sample is invalid.
+        """
         max_seq_len = self.master_config["policy"]["max_total_sequence_length"]
-        max_batch_len = min(max([len(x) for x in batch["input_ids"]]), max_seq_len)
-        batch_size = len(batch["input_ids"])
-        train_data = {
-            "input_ids": [None for _ in range(batch_size)],
-            "input_lengths": [None for _ in range(batch_size)],
-            "token_mask": [None for _ in range(batch_size)],
-            "sample_mask": [None for _ in range(batch_size)],
+        
+        input_ids = sample["input_ids"]
+        token_mask = sample["token_mask"]
+        
+        if len(input_ids) > max_seq_len:
+            # Truncate if too long
+            input_ids = input_ids[:max_seq_len]
+            token_mask = token_mask[:max_seq_len]
+            logging.warning(f"Truncated sample from {len(sample['input_ids'])} to {max_seq_len} tokens")
+        
+        if len(input_ids) == 0:
+            return None
+        
+        # Convert to the format expected by pack_sequences
+        # 'targets' is a marker field to indicate SFT data (actual targets derived from token_ids)
+        return {
+            "token_ids": list(input_ids),
+            "token_mask": [bool(m) for m in token_mask],
+            "targets": list(input_ids),  # Marker field for SFT detection
         }
-        
-        truncated = 0
-        
-        if self.master_config["sft"].get("run_vram_torture_test", False):
-            logging.warning("Filling batch with BOS token to test VRAM usage. Do not use this for training!")
-        
-        for i, (input_ids, token_mask, sample_mask) in enumerate(zip(
-            batch["input_ids"],
-            batch["token_mask"],
-            batch["sample_mask"]
-        )):
-            # Run VRAM torture test by filling the batch with BOS tokens (or whatever the first token in a sequence is).
-            if self.master_config["sft"].get("run_vram_torture_test", False):
-                train_data["input_ids"][i] = torch.tensor([input_ids[0]] * max_seq_len)
-                train_data["token_mask"][i] = torch.ones_like(train_data["input_ids"][i])
-                train_data["sample_mask"][i] = torch.tensor(1.0)
-                train_data["input_lengths"][i] = torch.tensor(max_seq_len)
-                continue
-            
-            if len(input_ids) > max_seq_len:
-                # This sample is too long, so we truncate it
-                input_ids = input_ids[:max_seq_len]
-                token_mask = token_mask[:max_seq_len]
-                truncated += 1
-            
-            train_data["input_ids"][i] = _pad_tensor(torch.tensor(input_ids), max_batch_len, "right", pad_value=self.tokenizer.pad_token_id)
-            train_data["input_lengths"][i] = torch.tensor(len(input_ids))
-            train_data["token_mask"][i] = _pad_tensor(torch.tensor(token_mask), max_batch_len, "right", pad_value=0)
-            train_data["sample_mask"][i] = torch.tensor(sample_mask)
-        
-        if truncated > 0:
-            logging.warning(f"Truncated {truncated} samples from the batch due to exceeding the maximum sequence length")
-        
-        return BatchedDataDict({k: torch.stack(v) for k, v in train_data.items()})
 
     async def validate(self, step: int) -> Optional[tuple[dict[str, float], dict[str, float]]]:
         """Run validation on the validation dataset."""
@@ -270,6 +258,12 @@ class SFTTrainer:
 
         timer = Timer()
         sft_config = self.master_config["sft"]
+        
+        pad_values = {
+            "token_ids": self.tokenizer.pad_token_id,
+            "token_mask": False,
+            "targets": self.tokenizer.pad_token_id,
+        }
 
         with timer.time("total_validation_time"):
             print(f"▶ Starting validation at step {step}...")
@@ -278,17 +272,55 @@ class SFTTrainer:
             num_valid_batches = 0
 
             self.policy.prepare_for_training()
-            for batch_idx, raw_val_batch in enumerate(self.val_dataloader):
-                val_batch = BatchedDataDict(raw_val_batch)
+            
+            val_dataloader_iter = iter(self.val_dataloader)
+            packing_pool: list[dict[str, list]] = []
+            out_of_samples = False
+            
+            while num_valid_batches < sft_config["val_batches"] or sft_config["val_batches"] <= 0:
+                # Pull samples until we can fill all bins
+                while not out_of_samples:
+                    sample = next(val_dataloader_iter, None)
+                    if sample is None:
+                        out_of_samples = True
+                        break
+                    
+                    doc = self._sample_to_document(sample[0])
+                    if doc is not None:
+                        packing_pool.append(doc)
+                    
+                    # Try packing
+                    bins, remainder = pack_sequences(
+                        documents=packing_pool,
+                        max_bin_size=self.master_config["policy"]["max_total_sequence_length"],
+                        num_bins=sft_config["val_global_batch_size"],
+                        separator_value=pad_values,
+                    )
+                    
+                    # If we have remainder, bins are full
+                    if len(remainder) > 0:
+                        packing_pool = list(remainder)
+                        break
                 
-                val_data = self._process_batch(val_batch)
+                # Check if we ran out of samples without filling bins
+                if len(remainder) == 0:
+                    if out_of_samples:
+                        # No more samples and bins aren't full - we're done
+                        break
+                    # Keep waiting for more samples
+                    continue
+                
+                # Distribute bins for DP
+                dist_bins = distribute_bins_for_dp(
+                    bins=bins,
+                    num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
+                )
 
                 val_results = await self.policy.train(
-                    val_data,
+                    dist_bins,
                     self.loss_fn,
+                    pad_values,
                     eval_mode=True,
-                    gbs=sft_config["val_global_batch_size"],
-                    mbs=sft_config["val_micro_batch_size"],
                 )
 
                 if len(val_results["all_mb_metrics"]) == 0:
@@ -305,12 +337,6 @@ class SFTTrainer:
                     else:
                         val_metrics["val_loss"] += float(loss_tensor)
                     num_valid_batches += 1
-
-                if (
-                    sft_config["val_batches"] > 0
-                    and batch_idx >= sft_config["val_batches"] - 1
-                ):
-                    break
 
             if num_valid_batches > 0:
                 val_metrics["val_loss"] /= num_valid_batches
@@ -334,7 +360,7 @@ class SFTTrainer:
 
         timer.reset()
 
-        return val_metrics, timing_metrics
+        return cast(tuple[dict[str, float], dict[str, float]], (val_metrics, timing_metrics))
 
     async def train(self) -> None:
         timer = Timer()
@@ -344,195 +370,201 @@ class SFTTrainer:
         )
         timeout.start_iterations()
 
-        current_epoch = self.sft_save_state.get("epoch", 0)
-        current_step = self.sft_save_state.get("step", 0)
-        total_steps = self.sft_save_state.get("total_steps", 0)
+        step = self.sft_save_state.get("total_steps", 0)
+        consumed_samples = self.sft_save_state.get("consumed_samples", 0)
 
         sft_config = self.master_config["sft"]
         val_period = sft_config["val_period"]
         val_at_start = sft_config["val_at_start"]
-        max_num_epochs = sft_config["max_num_epochs"]
+        
+        pad_values = {
+            "token_ids": self.tokenizer.pad_token_id,
+            "token_mask": False,
+            "targets": self.tokenizer.pad_token_id,
+        }
 
-        if val_at_start and total_steps == 0:
+        if val_at_start and step == 0:
             print("\n🔍 Running initial validation...")
             validation_result = await self.validate(step=0)
             if validation_result is not None:
                 val_metrics, validation_timings = validation_result
-                self.logger.log_metrics(val_metrics, total_steps, prefix="validation")
+                self.logger.log_metrics(val_metrics, step, prefix="validation")
                 self.logger.log_metrics(
-                    validation_timings, total_steps, prefix="timing/validation"
+                    validation_timings, step, prefix="timing/validation"
                 )
 
         self.policy.prepare_for_training()
-
-        while (
-            current_epoch < max_num_epochs
-            and total_steps < self.master_config["sft"]["max_num_steps"]
-        ):
-            logging.info(
-                f"\n{'=' * 25} Epoch {current_epoch + 1}/{max_num_epochs} {'=' * 25}"
-            )
-
-            for raw_batch in self.train_dataloader:
-                logging.info(
-                    f"\n{'=' * 25} Step {current_step + 1}/{min(len(self.train_dataloader), self.master_config['sft']['max_num_steps'])} {'=' * 25}"
-                )
-                
-                batch = BatchedDataDict(raw_batch)
-                
-                maybe_gpu_profile_step(self.policy, total_steps + 1)
-                val_metrics, validation_timings = None, None
-
-                with timer.time("total_step_time"):
-                    logging.info("Preparing batch...")
-                    with timer.time("data_processing"):
-                        train_data = self._process_batch(batch)
-
-                    logging.info("Taking a training step...")
-                    with timer.time("policy_training"):
-                        train_results = await self.policy.train(train_data, self.loss_fn)
-
-                    is_last_step = total_steps + 1 >= self.master_config["sft"][
-                        "max_num_steps"
-                    ] or (
-                        current_epoch + 1 == max_num_epochs
-                        and current_step + 1 == len(self.train_dataloader)
-                    )
-
-                    if val_period > 0 and (total_steps + 1) % val_period == 0:
-                        logging.info("Running validation...")
-                        validation_result = await self.validate(step=total_steps + 1)
-                        if validation_result is not None:
-                            val_metrics, validation_timings = validation_result
-                            self.logger.log_metrics(
-                                validation_timings,
-                                total_steps + 1,
-                                prefix="timing/validation",
-                            )
-                            self.logger.log_metrics(
-                                val_metrics, total_steps + 1, prefix="validation"
-                            )
-
-                    self.sft_save_state["consumed_samples"] += self.master_config[
-                        "policy"
-                    ]["train_global_batch_size"]
-                    timeout.mark_iteration()
-                    should_save_by_step = (
-                        is_last_step
-                        or (total_steps + 1)
-                        % self.master_config["checkpointing"]["save_period"]
-                        == 0
-                    )
-                    should_save_by_timeout = timeout.check_save()
-
-                    if self.master_config["checkpointing"]["enabled"] and (
-                        should_save_by_step or should_save_by_timeout
-                    ):
-                        self.sft_save_state["step"] = (
-                            current_step + 1
-                        ) % len(self.train_dataloader)
-                        self.sft_save_state["total_steps"] = total_steps + 1
-                        self.sft_save_state["epoch"] = current_epoch
-                        if val_metrics is not None:
-                            self.sft_save_state["val_loss"] = val_metrics["val_loss"]
-                        elif "val_loss" in self.sft_save_state:
-                            del self.sft_save_state["val_loss"]
-
-                        if (
-                            self.master_config["checkpointing"]["metric_name"]
-                            is not None
-                        ):
-                            if (
-                                self.master_config["checkpointing"]["metric_name"]
-                                not in self.sft_save_state
-                            ):
-                                warnings.warn(
-                                    f"You asked to save checkpoints based on {self.master_config['checkpointing']['metric_name']} but the metric is not found in the save state. "
-                                    "Saving most recent k checkpoints instead."
-                                )
-                                self.master_config["checkpointing"]["metric_name"] = (
-                                    None
-                                )
-
-                        with timer.time("checkpointing"):
-                            logging.info(f"Saving checkpoint for step {total_steps + 1}...")
-                            checkpoint_path = self.checkpointer.init_tmp_checkpoint(
-                                total_steps + 1, self.sft_save_state, self.master_config
-                            )
-                            
-                            self.policy.save_checkpoint(
-                                weights_path=os.path.join(
-                                    checkpoint_path, "policy", "weights"
-                                ),
-                                optimizer_path=os.path.join(
-                                    checkpoint_path, "policy", "optimizer"
-                                ),
-                                tokenizer_path=os.path.join(
-                                    checkpoint_path, "policy", "tokenizer"
-                                ),
-                            )
-                            torch.save(
-                                self.train_dataloader.state_dict(),
-                                os.path.join(
-                                    checkpoint_path, "train_dataloader.pt"
-                                ),
-                            )
-                            self.checkpointer.finalize_checkpoint(checkpoint_path)
-
-                metrics = {
-                    "loss": self._to_scalar_array(train_results["loss"]),
-                    "grad_norm": self._to_scalar_array(train_results["grad_norm"]),
-                }
-                metrics.update(train_results["all_mb_metrics"])
-                mean_reduction_keys = {
-                    "lr",
-                    "wd",
-                    "global_valid_seqs",
-                    "global_valid_toks",
-                    "avg_pad_tokens_per_sequence",
-                    "packing_efficiency",
-                }
-                for k, v in metrics.items():
-                    if k in mean_reduction_keys:
-                        metrics[k] = np.mean(v).item()
-                    else:
-                        metrics[k] = np.sum(v).item()
-                
-                # Add router statistics if available
-                expert_balance_metrics = {}
-                router_stats_metrics = {}
-                if "router_statistics" in train_results:
-                    router_stats = train_results["router_statistics"]
-                    # Router statistics are already aggregated across EP ranks
-                    # Separate expert balance from other router statistics
-                    # All router stats go to expert category, not train
-                    for expert_key, count in router_stats.items():
-                        if expert_key.startswith("expert_balance_"):
-                            # Extract layer_id from "expert_balance_{layer_id}"
-                            # These will be logged separately in expert category
-                            layer_id = expert_key.replace("expert_balance_", "")
-                            expert_balance_metrics[layer_id] = count
-                        else:
-                            # Store other router statistics (expert fractions) for expert category
-                            router_stats_metrics[expert_key] = count
+        
+        dataloader_iter = iter(self.train_dataloader)
+        packing_pool: list[dict[str, list]] = []
+        out_of_samples = False
+        
+        while step < sft_config["max_num_steps"]:
+            maybe_gpu_profile_step(self.policy, step + 1)
+            
+            with timer.time("total_step_time"):
+                # Pull samples from dataloader until bins are full
+                with timer.time("data_processing"):
+                    while not out_of_samples:
+                        sample = next(dataloader_iter, None)
+                        if sample is None:
+                            out_of_samples = True
+                            break
+                        
+                        doc = self._sample_to_document(sample[0])
+                        if doc is not None:
+                            packing_pool.append(doc)
+                            consumed_samples += 1
+                        
+                        # Try packing
+                        bins, remainder = pack_sequences(
+                            documents=packing_pool,
+                            max_bin_size=self.master_config["policy"]["max_total_sequence_length"],
+                            num_bins=self.master_config["policy"]["train_global_batch_size"],
+                            separator_value=pad_values,
+                        )
+                        
+                        # If we have remainder, bins are full - proceed with training
+                        if len(remainder) > 0:
+                            packing_pool = list(remainder)
+                            break
                     
-                    # Calculate full-model balance (average across all layers)
-                    # This goes to train category
-                    if expert_balance_metrics:
-                        full_model_balance = np.mean(list(expert_balance_metrics.values()))
-                        metrics["expert_balance"] = full_model_balance
+                    # Check if we ran out of samples without filling bins
+                    if len(remainder) == 0:
+                        if out_of_samples:
+                            # No more samples and bins aren't full - we're done
+                            logging.info("Finished training - ran out of samples.")
+                            break
+                        # Keep waiting for more samples
+                        continue
+                    
+                    bin_lengths = [len(bin["token_ids"]) for bin in bins]
+                    min_bin_length = min(bin_lengths)
+                    max_bin_length = max(bin_lengths)
+                    mean_bin_length = sum(bin_lengths) / len(bin_lengths)
+                    logging.info(f"Step {step + 1}: Packed sequences into {len(bins)} bins: min={min_bin_length}, max={max_bin_length}, mean={mean_bin_length:.1f}")
+                    
+                    # Distribute bins for DP
+                    dist_bins = distribute_bins_for_dp(
+                        bins=bins,
+                        num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
+                    )
+
+                logging.info("Taking a training step...")
+                with timer.time("policy_training"):
+                    train_results = await self.policy.train(
+                        dist_bins,
+                        self.loss_fn,
+                        pad_values,
+                    )
+
+                val_metrics, validation_timings = None, None
+                if val_period > 0 and (step + 1) % val_period == 0:
+                    logging.info("Running validation...")
+                    validation_result = await self.validate(step=step + 1)
+                    if validation_result is not None:
+                        val_metrics, validation_timings = validation_result
+                        self.logger.log_metrics(
+                            validation_timings,
+                            step + 1,
+                            prefix="timing/validation",
+                        )
+                        self.logger.log_metrics(
+                            val_metrics, step + 1, prefix="validation"
+                        )
+
+                timeout.mark_iteration()
+                should_save_by_step = (step + 1) % self.master_config["checkpointing"]["save_period"] == 0
+                should_save_by_timeout = timeout.check_save()
+
+                if self.master_config["checkpointing"]["enabled"] and (
+                    should_save_by_step or should_save_by_timeout
+                ):
+                    self._save_checkpoint(step, consumed_samples, val_metrics, timer)
+
+            metrics = {
+                "loss": self._to_scalar_array(train_results["loss"]),
+                "grad_norm": self._to_scalar_array(train_results["grad_norm"]),
+            }
+            metrics.update(train_results["all_mb_metrics"])
+            mean_reduction_keys = {
+                "lr",
+                "wd",
+                "global_valid_seqs",
+                "global_valid_toks",
+                "avg_pad_tokens_per_sequence",
+                "packing_efficiency",
+            }
+            for k, v in metrics.items():
+                if k in mean_reduction_keys:
+                    metrics[k] = np.mean(v).item()
+                else:
+                    metrics[k] = np.sum(v).item()
+            
+            # Add router statistics if available
+            expert_balance_metrics = {}
+            router_stats_metrics = {}
+            if "router_statistics" in train_results:
+                router_stats = train_results["router_statistics"]
+                for expert_key, count in router_stats.items():
+                    if expert_key.startswith("expert_balance_"):
+                        layer_id = expert_key.replace("expert_balance_", "")
+                        expert_balance_metrics[layer_id] = count
+                    else:
+                        router_stats_metrics[expert_key] = count
                 
-                self._log_step(metrics, timer, train_results, total_steps, expert_balance_metrics, router_stats_metrics)
+                if expert_balance_metrics:
+                    full_model_balance = np.mean(list(expert_balance_metrics.values()))
+                    metrics["expert_balance"] = full_model_balance
+            
+            self._log_step(metrics, timer, train_results, step, expert_balance_metrics, router_stats_metrics)
 
-                timer.reset()
-                current_step += 1
-                total_steps += 1
+            timer.reset()
+            step += 1
+        
+        # Final checkpoint
+        logging.info("Finished training!")
+        if self.master_config["checkpointing"]["enabled"]:
+            self._save_checkpoint(step, consumed_samples, None, timer)
+    
+    def _save_checkpoint(
+        self,
+        step: int,
+        consumed_samples: int,
+        val_metrics: Optional[dict[str, float]],
+        timer: Timer,
+    ) -> None:
+        self.sft_save_state["total_steps"] = step + 1
+        self.sft_save_state["consumed_samples"] = consumed_samples
+        if val_metrics is not None:
+            self.sft_save_state["val_loss"] = val_metrics["val_loss"]
+        elif "val_loss" in self.sft_save_state:
+            del self.sft_save_state["val_loss"]
 
-                if total_steps >= self.master_config["sft"]["max_num_steps"]:
-                    return
+        if self.master_config["checkpointing"]["metric_name"] is not None:
+            if self.master_config["checkpointing"]["metric_name"] not in self.sft_save_state:
+                warnings.warn(
+                    f"You asked to save checkpoints based on {self.master_config['checkpointing']['metric_name']} but the metric is not found in the save state. "
+                    "Saving most recent k checkpoints instead."
+                )
+                self.master_config["checkpointing"]["metric_name"] = None
 
-            current_epoch += 1
-            current_step = 0
+        with timer.time("checkpointing"):
+            logging.info(f"Saving checkpoint for step {step + 1}...")
+            checkpoint_path = self.checkpointer.init_tmp_checkpoint(
+                step + 1, self.sft_save_state, self.master_config
+            )
+            
+            self.policy.save_checkpoint(
+                weights_path=os.path.join(checkpoint_path, "policy", "weights"),
+                optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
+                tokenizer_path=os.path.join(checkpoint_path, "policy", "tokenizer"),
+            )
+            torch.save(
+                self.train_dataloader.state_dict(),
+                os.path.join(checkpoint_path, "train_dataloader.pt"),
+            )
+            self.checkpointer.finalize_checkpoint(checkpoint_path)
     
     def _log_step(
         self,
@@ -546,30 +578,12 @@ class SFTTrainer:
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
         print("\n📊 Training Results:")
         print(f"  • Loss: {float(metrics['loss']):.4f}")
-        if "total_flops" in train_results:
-            total_tflops = (
-                train_results["total_flops"]
-                / timing_metrics["policy_training"]
-                / 1e12
-            )
-            num_ranks = train_results["num_ranks"]
-            print(
-                f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)"
-            )
-            if "theoretical_tflops" in train_results:
-                theoretical_tflops = train_results["theoretical_tflops"]
-                print(
-                    "  • Training Model Floating Point Utilization: "
-                    f"{100 * total_tflops / theoretical_tflops:.2f}%"
-                )
-                metrics["train_fp_utilization"] = (
-                    total_tflops / theoretical_tflops
-                )
-            total_valid_toks = train_results["all_mb_metrics"]["global_valid_toks"][0]
-            print(f"  • Total valid tokens: {total_valid_toks}")
-            print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks']):.0f}")
-            print(f"  • Estimated throughput: {total_valid_toks / timing_metrics['policy_training']:.2f} tok/s")
-            
+
+        total_valid_toks = train_results["all_mb_metrics"]["global_valid_toks"][0]
+        print(f"  • Total valid tokens: {total_valid_toks}")
+        print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks']):.0f}")
+        print(f"  • Estimated throughput: {total_valid_toks / timing_metrics['policy_training']:.2f} tok/s")
+
         print("\n⏱️  Timing:")
         total_time = timing_metrics.get("total_step_time", 0)
         print(f"  • Total step time: {total_time:.2f}s")
@@ -578,7 +592,7 @@ class SFTTrainer:
             timing_metrics.items(), key=lambda item: item[1], reverse=True
         ):
             if k != "total_step_time":
-                percent = (v / total_time * 100) if total_time > 0 else 0
+                percent = (v / total_time * 100) if total_time > 0 else 0 # type: ignore
                 print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
         self.logger.log_metrics(metrics, total_steps + 1, prefix="train")

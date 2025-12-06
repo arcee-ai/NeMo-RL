@@ -1,7 +1,7 @@
 from torch import nn
 from transformers import PretrainedConfig
 
-from rlkit.models.custom.model import BaseModelArgs
+from rlkit.models.custom.model import BaseModel, BaseModelArgs
 
 from rlkit.models.custom.afmoe.model import AFMoEModel
 from rlkit.models.custom.afmoe.args import AFMoEModelArgs, MoEArgs as MoEArgsAFMoE
@@ -13,7 +13,7 @@ from rlkit.models.custom.qwen3.state_dict_adapter import Qwen3StateDictAdapter
 
 from rlkit.models.custom.state_dict_adapter import BaseStateDictAdapter
 
-def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseModelArgs, type[BaseStateDictAdapter]]:
+def get_model_config(config: PretrainedConfig) -> tuple[type[BaseModel], BaseModelArgs, type[BaseStateDictAdapter]]:
     mt = config.model_type
     
     if mt == "afmoe":
@@ -47,7 +47,7 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             max_seq_len = config.max_position_embeddings,
             depth_init = False,
             use_flex_attn=True,
-            attn_mask_type="causal",
+            attn_mask_type="block_causal",
             local_attn_mask_type="causal_sliding_window",
             local_attn_sliding_window_size=config.sliding_window,
             mup_enabled = config.mup_enabled,
@@ -66,9 +66,9 @@ def get_model_config(config: PretrainedConfig) -> tuple[type[nn.Module], BaseMod
             norm_eps = config.rms_norm_eps,
             rope_theta = config.rope_theta,
             max_seq_len = config.max_position_embeddings,
-            eos_id = int(config.eos_token_id) if getattr(config, "eos_token_id", None) is not None else 0,
+            eos_id = int(config.eos_token_id) if config.eos_token_id is not None else 0,
             enable_weight_tying = config.tie_word_embeddings,
-            attn_mask_type = "sliding_causal" if uses_sliding_causal else "causal",
+            attn_mask_type = "block_causal",
             use_flex_attn = uses_sliding_causal,
             fixed_block_size = config.sliding_window if uses_sliding_causal else None,
         ), Qwen3StateDictAdapter

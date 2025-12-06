@@ -6,12 +6,9 @@ class ResourcesConfig(TypedDict):
 
 class GenerationConfig(TypedDict):
     """Configuration for generation."""
-
-    max_new_tokens: int
-    temperature: float
-    top_p: float
-    top_k: int
-    min_p: NotRequired[float]
+    
+    sampling_args: dict[str, Any]
+    
     model_name: str
     stop_token_ids: list[int] | None
     stop_strings: NotRequired[list[str] | None]

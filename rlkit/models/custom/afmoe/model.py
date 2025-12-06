@@ -1,8 +1,8 @@
+# type: ignore[assignment]
 import torch
 from torch.nn.attention.flex_attention import and_masks
 import torch.nn.functional as F
 from torch import nn
-from transformers import PreTrainedTokenizerBase
 
 from rlkit.models.custom.attention import AttentionMasksType, FlexAttentionWrapper, ScaledDotProductAttentionWrapper, create_attention_mask, get_causal_mask_mod, get_document_mask_mod, get_sliding_window_mask_mod
 from rlkit.models.custom.model import BaseModel
@@ -473,14 +473,14 @@ class AFMoEModel(BaseModel):
     def get_attention_masks(
         self,
         input_batch: torch.Tensor,
-        tokenizer: PreTrainedTokenizerBase,
+        separator_value: int,
     ) -> AttentionMasksType:
         mask_mods = [get_causal_mask_mod()]
         match self.model_args.attn_mask_type:
             case "causal":
                 B = 1
             case "block_causal":
-                mask_mods.append(get_document_mask_mod(input_batch, tokenizer.eos_id))
+                mask_mods.append(get_document_mask_mod(input_batch, separator_value))
                 B = input_batch.shape[0]
             case _:
                 raise ValueError(

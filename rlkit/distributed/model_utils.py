@@ -15,7 +15,7 @@
 from typing import Any, Optional
 
 import torch
-from torch.distributed.tensor import DTensor, distribute_tensor
+from torch.distributed.tensor import DTensor
 
 
 @torch.no_grad()
@@ -284,31 +284,7 @@ def dtensor_from_parallel_logits_to_logprobs(
         torch.Tensor: Log probabilities tensor with shape [batch_size, seq_len-1].
             The sequence dimension is reduced by 1 due to the target shifting.
     """
-    cp_size = 1
-
-    if (
-        isinstance(target, DTensor)
-        and target.device_mesh.mesh_dim_names is not None
-        and "cp" in target.device_mesh.mesh_dim_names
-    ):
-        cp_dim_index = target.device_mesh.mesh_dim_names.index("cp")
-        cp_size = target.device_mesh.shape[cp_dim_index]
-
-    if cp_size > 1:
-        assert seq_index is not None, "seq_index must be provided for cp sharded logits"
-        target_shape = torch.Size(target.shape)
-        cp_mesh = target.device_mesh
-        cp_placements = target.placements
-        _, sorted_indices = torch.sort(seq_index)
-        # Recover the original order of the target
-        target = target.full_tensor()[:, sorted_indices]
-        target = target.roll(shifts=-1, dims=-1)[:, seq_index]
-
-        # Reshard
-        target = distribute_tensor(target, cp_mesh, cp_placements)
-        target = target.to_local()
-    else:
-        target = target.roll(shifts=-1, dims=-1)
+    target = target.roll(shifts=-1, dims=-1)
 
     if chunk_size is not None:
         logprobs: torch.Tensor = ChunkedDistributedLogprob.apply(  # type: ignore
@@ -329,13 +305,6 @@ def dtensor_from_parallel_logits_to_logprobs(
             tp_group,
             inference_only,
         ).contiguous()
-
-    if cp_size > 1:
-        # logprobs is sharded on the sequence dimension.
-        # Get full sequence tensor, vocab dim has been reduced already.
-        logprobs_dtensor = DTensor.from_local(logprobs, cp_mesh, cp_placements)
-        logprobs = logprobs_dtensor.full_tensor()[:, sorted_indices]
-        assert logprobs.shape == target_shape
 
     return logprobs[:, :-1]
 
@@ -617,7 +586,7 @@ class AllGatherCPTensor(torch.autograd.Function):
 
         return ret_tensor
 
-    def backward(ctx, grad_output):
+    def backward(ctx, grad_output): # type: ignore[override]
         cp_size = torch.distributed.get_world_size(ctx.cp_group)
         cp_rank = torch.distributed.get_rank(ctx.cp_group)
         torch.distributed.all_reduce(grad_output, group=ctx.cp_group)

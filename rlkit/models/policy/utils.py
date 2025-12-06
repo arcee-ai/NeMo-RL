@@ -15,7 +15,7 @@
 import importlib
 import os
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, TypeVar, Union
+from typing import Any, Optional, Tuple, TypeVar, Union, Iterable
 
 import torch
 from torch.distributed.tensor import DTensor
@@ -312,24 +312,8 @@ def pack_sequences(
     return input_ids_packed, position_ids_packed, attention_mask
 
 
-def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> FlashAttentionKwargs:
-    """Return FlashAttention v2 kwargs derived from sequence lengths."""
-    input_lengths_int32 = input_lengths.to(torch.int32)
-    cu_seqlens = torch.nn.functional.pad(
-        input_lengths_int32.cumsum(dim=0), (1, 0)
-    )  # prepend 0
-    max_len = input_lengths.max().item()
-
-    return FlashAttentionKwargs(
-        cu_seqlens_q=cu_seqlens,
-        cu_seqlens_k=cu_seqlens.clone(),  # same for self-attention
-        max_seqlen_q=max_len,
-        max_seqlen_k=max_len,
-    )
-
-
 def clip_grad_by_total_norm_(
-    parameters: Union[list[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
+    parameters: Union[Iterable[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
     max_grad_norm: Union[int, float],
     total_norm: float,
     dtype: torch.dtype = torch.float32,
@@ -351,7 +335,7 @@ def clip_grad_by_total_norm_(
 
 
 def get_grad_norm(
-    parameters: Union[list[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
+    parameters: Union[Iterable[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
     dp_cp_group: torch.distributed.ProcessGroup,
     tp_group: torch.distributed.ProcessGroup,
     norm_type: Union[int, float] = 2,

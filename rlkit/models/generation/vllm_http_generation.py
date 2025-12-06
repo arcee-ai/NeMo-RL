@@ -114,7 +114,7 @@ class VllmHttpGeneration:
         # The served model name from VLLMOpenAIServe defaults to "policy"
         self.served_model_name = "policy"
         
-    def get_ips(self) -> str:
+    def get_ips(self) -> list[str]:
         return ray.get([actor.admin_get_ip.remote() for actor in self.actors])
 
     def shutdown(self):

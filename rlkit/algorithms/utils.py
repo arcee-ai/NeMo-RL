@@ -26,7 +26,7 @@ def _pad_tensor(
     tensor: torch.Tensor,
     max_len: int,
     pad_side: str,
-    pad_value: int = 0,
+    pad_value: int | float = 0,
 ) -> torch.Tensor:
     """Pad a tensor to the specified length.
 

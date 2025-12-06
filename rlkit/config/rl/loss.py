@@ -10,6 +10,9 @@ class ClippedPGLossConfig(TypedDict):
     token_level_loss: bool
 
 class CISPOLossConfig(TypedDict):
-    epsilon_max: float
     reference_policy_kl_penalty: float
+    ratio_clip_min: float
+    ratio_clip_max: float
     use_on_policy_kl_approximation: bool
+    token_level_loss: bool
+    epsilon_max: float

@@ -1,3 +1,4 @@
+# type: ignore[assignment]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -11,7 +12,6 @@ import torch
 from torch.nn.attention.flex_attention import BlockMask, and_masks
 import torch.nn.functional as F
 from torch import nn
-from transformers import PreTrainedTokenizerBase
 
 from rlkit.models.custom.attention import AttentionMasksType, FlexAttentionWrapper, ScaledDotProductAttentionWrapper, create_attention_mask, get_causal_mask_mod, get_document_mask_mod
 
@@ -46,8 +46,7 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
 
 
 def reshape_for_broadcast(rope_cache: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    """
-    Reshape frequency tensor (represented by cos, sin) for broadcasting it with another tensor.
+    """Reshape frequency tensor (represented by cos, sin) for broadcasting it with another tensor.
 
     This function reshapes the frequency tensor to have the same shape as the target tensor 'x'
     for the purpose of broadcasting the frequency tensor during element-wise operations.
@@ -93,7 +92,7 @@ def apply_rotary_emb(
 
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    """torch.repeat_interleave(x, dim=2, repeats=n_rep)."""
     bs, slen, n_kv_heads, head_dim = x.shape
     if n_rep == 1:
         return x
@@ -105,8 +104,7 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class Attention(nn.Module):
-    """
-    Multi-head attention module.
+    """Multi-head attention module.
 
     Args:
         model_args (TransformerModelArgs): Model configuration arguments.
@@ -231,8 +229,7 @@ class Attention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    """
-    FeedForward module
+    """FeedForward module.
 
     Args:
         dim (int): Input dimension.
@@ -269,8 +266,7 @@ class FeedForward(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """
-    TransformerBlock Module
+    """TransformerBlock Module.
 
     Args:
         layer_id (int): Identifier for the layer.
@@ -285,9 +281,8 @@ class TransformerBlock(nn.Module):
         layer_id (int): Identifier for the layer.
         attention_norm (RMSNorm): Layer normalization for attention output.
         ffn_norm (RMSNorm): Layer normalization for feedforward output.
-
     """
-
+    
     def __init__(self, layer_id: int, model_args: Qwen3ModelArgs):
         super().__init__()
         self.n_heads = model_args.n_heads
@@ -311,8 +306,7 @@ class TransformerBlock(nn.Module):
         rope_cache: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
     ):
-        """
-        Perform a forward pass through the TransformerBlock.
+        """Perform a forward pass through the TransformerBlock.
 
         Args:
             x (torch.Tensor): Input tensor.
@@ -456,7 +450,7 @@ class Qwen3Model(BaseModel):
     def get_attention_masks(
         self,
         input_batch: torch.Tensor,
-        tokenizer: PreTrainedTokenizerBase,
+        separator_value: int,
     ) -> AttentionMasksType | None:
         if not self.model_args.use_flex_attn:
             return None
@@ -466,7 +460,7 @@ class Qwen3Model(BaseModel):
                 B = 1
             case "block_causal":
                 B = input_batch.shape[0]
-                mask_mods.append(get_document_mask_mod(input_batch, tokenizer.eos_id))
+                mask_mods.append(get_document_mask_mod(input_batch, separator_value))
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"

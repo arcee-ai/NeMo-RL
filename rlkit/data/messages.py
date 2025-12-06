@@ -2,7 +2,7 @@ from typing import Literal, TypedDict, NotRequired, Optional, Union
 
 from openai.types.chat import ChatCompletionMessageToolCallUnion
 import torch
-    
+
 class UserMessage(TypedDict):
     role: Literal["user"]
     content: str
@@ -10,8 +10,6 @@ class UserMessage(TypedDict):
 class AssistantMessage(TypedDict):
     role: Literal["assistant"]
     content: str
-    token_ids: NotRequired[torch.Tensor] = None
-    generation_logprobs: NotRequired[torch.Tensor] = None
     tool_calls: Optional[list[ChatCompletionMessageToolCallUnion]] = None
 
 class ToolMessage(TypedDict):

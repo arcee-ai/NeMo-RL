@@ -1,4 +1,4 @@
-from typing import TypedDict, NotRequired
+from typing import Any, TypedDict, NotRequired
 
 from rlkit.config.logging import LoggerConfig
 
@@ -12,10 +12,7 @@ class GRPOConfig(TypedDict):
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     minibatch_advantage_renorm: NotRequired[bool]
-    val_period: int
-    val_batch_size: int
-    val_at_start: bool
-    max_val_samples: int
+    max_staleness: NotRequired[int]
     seed: int
     
     interleave_rollouts: bool
@@ -23,3 +20,7 @@ class GRPOConfig(TypedDict):
     max_prompt_length_ratio: float
     
     run_vram_torture_test: bool  # Ignore environments and run all training on a full context window of nonsense.
+
+class EnvironmentConfig(TypedDict):
+    env_name: str
+    env_kwargs: dict[str, Any]

@@ -1,14 +1,12 @@
 # serve_vllm.py
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import FastAPI
 import ray
 import uvicorn
 
-# Root FastAPI app used as Serve ingress. We will mount vLLM's app onto this.
-_serve_app = FastAPI()
 
 @ray.remote(num_cpus=1)
 class VLLMOpenAIServe:
@@ -25,21 +23,6 @@ class VLLMOpenAIServe:
         worker_extension_cls: str = "rlkit.models.generation.worker_ext.VllmHttpWorkerExtension",
         tool_call_parser: str | None = None,
     ):
-        for _name in [
-            "uvicorn.access",
-            "uvicorn.error",
-            "ray.serve",
-            "ray.serve.deployment",
-            "ray.serve.request_summary"
-        ]:
-            try:
-                if _name == "uvicorn.access":
-                    logging.getLogger(_name).disabled = True
-                else:
-                    logging.getLogger(_name).setLevel(logging.ERROR)
-            except Exception:
-                pass
-
         args = [
             "--model", model,
             "--served-model-name", served_model_name,
@@ -60,8 +43,7 @@ class VLLMOpenAIServe:
             args += ["--enable-auto-tool-choice"]
         if extra_cli_args:
             args += extra_cli_args
-        
-        # We have to import these here so we can import some of these classes in the main process
+
         from vllm.utils.argparse_utils import FlexibleArgumentParser
         from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 
@@ -75,16 +57,14 @@ class VLLMOpenAIServe:
         asyncio.create_task(self._init_app(worker_extension_cls))
     
     async def _init_app(self, worker_extension_cls: str):
-        self._worker_extension_cls = worker_extension_cls
-        
-        # We have to import these here so we can import some of these classes in the main process
-        
         from vllm.engine.arg_utils import AsyncEngineArgs
         from vllm.entrypoints.openai.api_server import (
             build_app as build_vllm_app,
             build_async_engine_client_from_engine_args,
             init_app_state,
         )
+        
+        self._worker_extension_cls = worker_extension_cls
         
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
@@ -104,21 +84,25 @@ class VLLMOpenAIServe:
         await init_app_state(self._engine_client, vllm_app.state, self._args)
         vllm_app.state.engine_client = self._engine_client
         
-        _serve_app.mount("/", vllm_app)
+        # Create the root FastAPI app inside the actor (not at module level)
+        # to avoid serialization issues with Ray
+        serve_app = FastAPI()
+        serve_app.mount("/", vllm_app)
         
         config = uvicorn.Config(
-            _serve_app,
+            serve_app,
             host="0.0.0.0",
             port=8000,
             limit_concurrency=None,  # No limit on concurrent connections
             limit_max_requests=None,  # No limit on total requests
             backlog=8192,  # Increase connection backlog
             timeout_keep_alive=120,  # Keep connections alive longer
+            access_log=False,  # Suppress access log spam
+            log_level="warning",  # Only show warnings and errors
         )
         server = uvicorn.Server(config)
         await server.serve()
     
-    @_serve_app.get("/sanity_check")
     async def _sanity_check(self):
         return {"status": "ok"}
     

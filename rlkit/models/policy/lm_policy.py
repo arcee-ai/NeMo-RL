@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-import uuid
-import warnings
 from collections import defaultdict
 from typing import Any, Optional, Union
 
@@ -22,26 +20,11 @@ import ray
 from ray.util.queue import Queue as RayQueue
 from transformers import PreTrainedTokenizerBase
 
-from rlkit.algorithms.interfaces import LossFunction
-from rlkit.distributed.batched_data_dict import (
-    BatchedDataDict,
-    DynamicBatchingArgs,
-    SequencePackingArgs,
-    SlicedDataDict,
-)
+from rlkit.algorithms.loss_functions import LossFunction
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 from rlkit.config import PolicyConfig
-from rlkit.models.policy.interfaces import (
-    LogprobOutputSpec,
-    ReferenceLogprobOutputSpec,
-)
-from rlkit.utils.flops_tracker import (
-    FLOPTracker,
-    get_default_hf_config,
-    get_theoretical_tflops,
-)
 from rlkit.models.policy.v2_policy_worker import get_device_mesh_info
 
 PathLike = Union[str, "os.PathLike[Any]"]
@@ -67,10 +50,9 @@ class Policy:
         if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
 
-        dtensor_v2_cfg = config.get("dtensor_v2_cfg", {}) or {}
-        assert dtensor_v2_cfg.get("enabled", False), (
-            "Please set policy.dtensor_v2_cfg.enabled=true to use the DTensor training backend."
-        )
+        dtensor_v2_cfg = config["dtensor_v2_cfg"]
+        
+        assert dtensor_v2_cfg is not None, "DTensorV2Config is required"
 
         worker_builder_cls = "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker"
         tp_size = dtensor_v2_cfg.get("tensor_parallel_size", 1)
@@ -144,54 +126,6 @@ class Policy:
             env_vars=env_vars,
         )
 
-        if config["dynamic_batching"]["enabled"]:
-            assert pp_size == 1, (
-                "Dynamic batching is only supported for single pipeline parallel stage"
-            )
-            self.use_dynamic_batches = True
-            self.dynamic_batching_args: DynamicBatchingArgs = {
-                "input_key": "input_ids",
-                "input_lengths_key": "input_lengths",
-                "sequence_length_round": config["dynamic_batching"][
-                    "sequence_length_round"
-                ],
-                "max_tokens_per_microbatch": 0,  # Override this in each different call (presumably different sizes)
-            }
-            assert not config["sequence_packing"]["enabled"], (
-                "Dynamic Batching is exclusive of Sequence Packing. Please disable Sequence Packing to use Dynamic Batching"
-            )
-        else:
-            self.use_dynamic_batches = False
-
-        # initialize FLOPs tracker
-        try:
-            self.flops_tracker = FLOPTracker.from_config(
-                config["model_name"], get_default_hf_config(config["model_name"])
-            )
-        except ValueError as e:
-            self.flops_tracker = None
-            print(f"FLOPS tracker not supported for model {config['model_name']}: {e}")
-
-        if config["sequence_packing"]["enabled"]:
-            self.use_sequence_packing = True
-            self.sequence_packing_args: SequencePackingArgs = {
-                "train_mb_tokens": config["sequence_packing"]["train_mb_tokens"],
-                "logprob_mb_tokens": config["sequence_packing"].get(
-                    "logprob_mb_tokens", None
-                ),
-                "algorithm": config["sequence_packing"]["algorithm"],
-                "input_key": "input_ids",
-                "input_lengths_key": "input_lengths",
-                "sequence_length_pad_multiple": (cp_size * 2 * tp_size)
-                if cp_size > 1
-                else tp_size,
-            }
-            assert not config["dynamic_batching"]["enabled"], (
-                "Sequence Packing is exclusive of Dynamic Batching. Please disable Dynamic Batching"
-            )
-        else:
-            self.use_sequence_packing = False
-
         self.cfg = config
         self.use_hf_checkpoint = use_hf_checkpoint
 
@@ -205,180 +139,24 @@ class Policy:
         # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
-    async def get_logprobs(
-        self, data: BatchedDataDict[Any]
-    ) -> BatchedDataDict[LogprobOutputSpec]:
-        """Get the logprobs of the model for a data dict.
-
-        Returns:
-          a BatchedDataDict with key "logprobs" and shape [batch_size, sequence_length].
-          We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
-          The logprob of input token i is specified at position i in the output logprobs tensor.
-        """
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
-        sharded_data: list[SlicedDataDict]
-        unsorted_data_indices: list[int]
-
-        if self.use_dynamic_batches:
-            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
-                "dynamic_batching"
-            ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
-                dp_size,
-                batch_size=None,
-                dynamic_batching_args=self.dynamic_batching_args,
-            )
-        elif self.use_sequence_packing:
-            self.sequence_packing_args["max_tokens_per_microbatch"] = self.cfg[
-                "sequence_packing"
-            ]["logprob_mb_tokens"]
-            # we just shard into DP shards here as Sequence packing allows for CP.
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(
-                dp_size,
-                batch_size=None,
-                sequence_packing_args=self.sequence_packing_args,
-            )
-        else:
-            sharded_data = data.shard_by_batch_size(  # type: ignore
-                dp_size,
-                batch_size=None,
-            )
-
-        futures = self.worker_group.run_all_workers_sharded_data(
-            "get_logprobs",
-            data=sharded_data,
-            in_sharded_axes=["data_parallel"],
-            replicate_on_axes=[
-                "context_parallel",
-                "tensor_parallel",
-                "pipeline_parallel",
-            ],
-            output_is_replicated=[
-                "context_parallel",
-                "tensor_parallel",
-                "pipeline_parallel",
-            ],
-        )
-        worker_results = await self.worker_group.get_all_worker_results_async(futures)
-        logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
-            worker_results
-        )
-
-        # dynamic batching sorts the inputs by sequence length to improve load balancing,
-        # so change it back here
-        if self.use_dynamic_batches or self.use_sequence_packing:
-            logprobs.reorder_data(unsorted_data_indices)
-
-        return logprobs
-
-    def get_reference_policy_logprobs(
-        self,
-        data: BatchedDataDict[Any],
-        micro_batch_size: Optional[int] = None,
-    ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
-        """Get the logprobs of the reference policy for a data dict.
-
-        Returns: Identical to get_logprobs.
-        """
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
-        sharded_data: list[SlicedDataDict]
-        unsorted_data_indices: list[int]
-        if self.use_dynamic_batches:
-            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
-                "dynamic_batching"
-            ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
-                dp_size,
-                batch_size=None,
-                dynamic_batching_args=self.dynamic_batching_args,
-            )
-        elif self.use_sequence_packing:
-            self.sequence_packing_args["max_tokens_per_microbatch"] = self.cfg[
-                "sequence_packing"
-            ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(
-                dp_size,
-                batch_size=None,
-                sequence_packing_args=self.sequence_packing_args,
-            )
-        else:
-            sharded_data = data.shard_by_batch_size(  # type: ignore
-                dp_size,
-                batch_size=None,
-            )
-
-        futures = self.worker_group.run_all_workers_sharded_data(
-            "get_reference_policy_logprobs",
-            data=sharded_data,
-            in_sharded_axes=["data_parallel"],
-            replicate_on_axes=[
-                "context_parallel",
-                "tensor_parallel",
-                "pipeline_parallel",
-            ],
-            output_is_replicated=[
-                "context_parallel",
-                "tensor_parallel",
-                "pipeline_parallel",
-            ],
-            common_kwargs={"micro_batch_size": micro_batch_size},
-        )
-        logprobs: BatchedDataDict[ReferenceLogprobOutputSpec] = (
-            BatchedDataDict.from_batches(
-                self.worker_group.get_all_worker_results(futures)
-            )
-        )
-
-        # dynamic batching sorts the inputs by sequence length to improve load balancing,
-        # so change it back here
-        if self.use_dynamic_batches or self.use_sequence_packing:
-            logprobs.reorder_data(unsorted_data_indices)
-
-        return logprobs
-
     async def train(
         self,
-        data: BatchedDataDict[Any],
+        sharded_data: list[list[dict[str, list[int | float]]]],
         loss_fn: LossFunction,
+        pad_values: dict[str, int | float | bool],
         eval_mode: bool = False,
-        gbs: Optional[int] = None,
-        mbs: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Train the policy on a batch of data with a given loss function."""
-        batch_size = gbs or self.cfg["train_global_batch_size"]
-        micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
-        # Shard and replicate the batch
-        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
-        if self.use_dynamic_batches:
-            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
-                "dynamic_batching"
-            ]["train_mb_tokens"]
-            sharded_data, _ = data.shard_by_batch_size(
-                dp_size,
-                batch_size=batch_size,
-                dynamic_batching_args=self.dynamic_batching_args,
-            )
-        elif self.use_sequence_packing:
-            self.sequence_packing_args["max_tokens_per_microbatch"] = self.cfg[
-                "sequence_packing"
-            ]["train_mb_tokens"]
-            sharded_data, _ = data.shard_by_batch_size(
-                dp_size,
-                batch_size=batch_size,
-                sequence_packing_args=self.sequence_packing_args,
-            )
-        else:
-            sharded_data = data.shard_by_batch_size(
-                dp_size,
-                batch_size=batch_size,
-            )
-
-        if self.flops_tracker is not None:
-            self.flops_tracker.reset()
-            for shard in sharded_data:
-                input_lengths = shard["input_lengths"]
-                self.flops_tracker.track_batch(input_lengths.tolist())
-
+        """Train the policy on a batch of data with a given loss function.
+        
+        Args:
+            sharded_data: List of shards (one per DP rank), where each shard is a list
+                of packed samples (dicts with token_ids, token_mask, etc.).
+            loss_fn: Loss function to use for training.
+            pad_values: Dictionary mapping field names to their pad values.
+            eval_mode: Whether to run in evaluation mode (no gradient updates).
+        """
+        assert len(sharded_data) > 0, "Data must contain at least one shard"
+        
         # Train each shard in parallel
         futures = self.worker_group.run_all_workers_sharded_data(
             "train",
@@ -397,29 +175,16 @@ class Policy:
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
-                "gbs": batch_size,
-                "mbs": micro_batch_size,
+                "pad_values": pad_values,
             },
         )
         results = await self.worker_group.get_all_worker_results_async(futures)
 
         # Aggregate the results
         aggregated_results = {
-            "loss": results[0]["global_loss"],
+            "loss": results[0]["loss"],
             "grad_norm": results[0]["grad_norm"],
         }
-
-        if self.flops_tracker is not None:
-            aggregated_results["total_flops"] = self.flops_tracker.total_flops
-            aggregated_results["num_ranks"] = len(results)
-
-            try:
-                aggregated_results["theoretical_tflops"] = sum(
-                    get_theoretical_tflops(r["gpu_name"], r["model_dtype"])
-                    for r in results
-                )
-            except Exception as e:
-                warnings.warn(f"Error getting theoretical flops: {e}")
 
         # Aggregate metrics across all workers
         all_mb_metrics = defaultdict(list)
@@ -505,7 +270,7 @@ class Policy:
         )
         ray.get(futures)
 
-    def prepare_refit_info(self) -> Optional[dict[str, Any]]:
+    def prepare_refit_info(self) -> dict[str, Any]:
         """Prepare the info for refit.
 
         Returns:
