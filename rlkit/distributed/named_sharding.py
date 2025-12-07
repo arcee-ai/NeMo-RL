@@ -1,3 +1,4 @@
+"""Class to represent an N-dimensional arrangement of ranks with named axes."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -211,10 +212,12 @@ class NamedSharding:
         return self.shape[name]
 
     def __repr__(self) -> str:
+        """String representation of the NamedSharding object."""
         shape_str = ", ".join([f"{self.shape[name]}" for name in self.names])
         return f"NamedSharding(shape=({shape_str}), names={self.names}, layout={self._layout})"
 
     def __eq__(self, other: object) -> bool:
+        """Check if two NamedSharding objects are equal."""
         if not isinstance(other, NamedSharding):
             return NotImplemented
         return (

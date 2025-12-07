@@ -18,6 +18,7 @@ import os
 from typing import Any, Optional
 
 import torch
+import torch.nn as nn
 import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from torch.distributed.checkpoint.state_dict import (
@@ -27,6 +28,8 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
 )
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.state_dict import StateDictOptions
+from torch.optim import Optimizer
 from transformers import AutoConfig, AutoTokenizer
 
 
@@ -41,7 +44,8 @@ class ModelState(Stateful):
         model: The PyTorch model to track.
     """
 
-    def __init__(self, model: torch.nn.Module):
+    def __init__(self, model: nn.Module):
+        """Initialize the model state."""
         self.model = model
 
     def state_dict(self) -> dict[str, Any]:
@@ -53,7 +57,7 @@ class ModelState(Stateful):
         # this line automatically manages FSDP FQN's, as well as sets the default state dict type to FSDP.SHARDED_STATE_DICT
         model_state_dict = get_model_state_dict(
             self.model,
-            options=torch.distributed.checkpoint.state_dict.StateDictOptions(
+            options=StateDictOptions(
                 cpu_offload=True
             ),
         )
@@ -86,10 +90,11 @@ class OptimizerState(Stateful):
 
     def __init__(
         self,
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
+        model: nn.Module,
+        optimizer: Optimizer,
         scheduler: Optional[Any] = None,
     ):
+        """Initialize the optimizer state."""
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -104,7 +109,7 @@ class OptimizerState(Stateful):
         optimizer_state_dict = get_optimizer_state_dict(
             self.model,
             self.optimizer,
-            options=torch.distributed.checkpoint.state_dict.StateDictOptions(
+            options=StateDictOptions(
                 cpu_offload=True
             ),
         )
@@ -136,9 +141,9 @@ class OptimizerState(Stateful):
 
 
 def save_checkpoint(
-    model: torch.nn.Module,
+    model: nn.Module,
     weights_path: str,
-    optimizer: Optional[torch.optim.Optimizer] = None,
+    optimizer: Optional[Optimizer] = None,
     scheduler: Optional[Any] = None,
     optimizer_path: Optional[str] = None,
     tokenizer: Optional[Any] = None,
@@ -152,6 +157,8 @@ def save_checkpoint(
         optimizer: Optional optimizer to save
         scheduler: Optional scheduler to save
         optimizer_path: Path to save optimizer state (required if optimizer provided)
+        tokenizer: Optional tokenizer to save
+        tokenizer_path: Path to save tokenizer state (required if tokenizer provided)
     """
     model_state = {"model": ModelState(model)}
     dcp.save(model_state, checkpoint_id=weights_path)
@@ -173,9 +180,9 @@ def save_checkpoint(
 
 
 def load_checkpoint(
-    model: torch.nn.Module,
+    model: nn.Module,
     weights_path: str,
-    optimizer: Optional[torch.optim.Optimizer] = None,
+    optimizer: Optional[Optimizer] = None,
     scheduler: Optional[Any] = None,
     optimizer_path: Optional[str] = None,
 ) -> None:

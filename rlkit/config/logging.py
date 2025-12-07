@@ -1,29 +1,20 @@
+"""Configuration for logging."""
 from typing import TypedDict, NotRequired
 
 class WandbConfig(TypedDict):
+    """Configuration for Weights & Biases logging."""
     project: NotRequired[str | None]
     name: NotRequired[str | None]
 
-class TensorboardConfig(TypedDict):
-    log_dir: NotRequired[str | None]
-
-class MLflowConfig(TypedDict):
-    experiment_name: str
-    run_name: str
-    tracking_uri: NotRequired[str | None]
-
 class GPUMonitoringConfig(TypedDict):
+    """Configuration for GPU monitoring."""
     collection_interval: int | float
     flush_interval: int | float
 
 class LoggerConfig(TypedDict):
+    """Configuration for all logging."""
     log_dir: str
     wandb_enabled: bool
-    tensorboard_enabled: bool
-    mlflow_enabled: bool
     wandb: WandbConfig
-    tensorboard: TensorboardConfig
     monitor_gpus: bool
     gpu_monitoring: GPUMonitoringConfig
-    num_val_samples_to_print: int
-    mlflow: NotRequired[MLflowConfig | None]

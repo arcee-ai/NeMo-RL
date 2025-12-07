@@ -1,3 +1,4 @@
+"""Utilities for manipulating distributed tensors and models."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -72,6 +73,7 @@ class DistributedLogprob(torch.autograd.Function):
         group: torch.distributed.ProcessGroup,
         inference_only: bool = False,
     ) -> torch.Tensor:
+        """Forward pass for DistributedLogprob."""
         # Create a mask of valid vocab ids (1 means it needs to be masked).
         target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
         masked_target = target - vocab_start_index
@@ -102,6 +104,7 @@ class DistributedLogprob(torch.autograd.Function):
         ctx: Any,
         *grad_outputs: torch.Tensor,
     ) -> tuple[torch.Tensor, None, None, None, None, None, None]:
+        """Backward pass for DistributedLogprob."""
         grad_output = grad_outputs[0]
         softmax, target_mask, masked_target = ctx.saved_tensors
 
@@ -162,6 +165,7 @@ class ChunkedDistributedLogprob(torch.autograd.Function):
         tp_group: torch.distributed.ProcessGroup,
         inference_only: bool = False,
     ) -> torch.Tensor:
+        """Forward pass for ChunkedDistributedLogprob."""
         # Create a mask of valid vocab ids (1 means it needs to be masked).
         target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
         masked_target = target - vocab_start_index
@@ -211,6 +215,7 @@ class ChunkedDistributedLogprob(torch.autograd.Function):
         ctx: Any,
         *grad_outputs: torch.Tensor,
     ) -> tuple[torch.Tensor, None, None, None, None, None, None]:
+        """Backward pass for ChunkedDistributedLogprob."""
         grad_output = grad_outputs[0]
         vocab_parallel_logits, target_mask, masked_target = ctx.saved_tensors
         chunk_size = ctx.chunk_size
@@ -403,7 +408,7 @@ def from_parallel_logits_to_logprobs_packed_sequences(
             where T is the total number of tokens across all packed sequences.
         target (torch.Tensor): Packed target token indices with shape [1, T].
             NOTE: Must be the unmodified targets as this function will shift them internally.
-        cu_seqlens (torch.Tensor): Cumulative sequence lengths tensor with shape [batch_size + 1].
+        cu_seqlens_padded (torch.Tensor): Cumulative sequence lengths tensor with shape [batch_size + 1].
             cu_seqlens[i] indicates the start position of sequence i in the packed format.
         unpacked_seqlen (int): The length of the unpacked sequence tensor.
         vocab_start_index (int): Starting vocabulary index for this worker's partition.
@@ -523,6 +528,7 @@ def _get_tokens_on_this_cp_rank(
         input_ids: Input token IDs [seq_length, ]
         cp_rank: Context parallelism rank
         cp_size: Context parallelism size
+        seq_dim: Dimension along which to split the input tensor.
 
     Returns:
         Tokens on this context parallelism rank [1, seq_length // cp_size]
@@ -549,13 +555,16 @@ def _get_tokens_on_this_cp_rank(
 def allgather_cp_sharded_tensor(
     tensor, cp_group, seq_dim=1
 ):  # , unpadded_seqlen=None):
+    """All-gather a tensor across context parallelism ranks."""
     return AllGatherCPTensor.apply(tensor, cp_group, seq_dim)  # , unpadded_seqlen)
 
 
 class AllGatherCPTensor(torch.autograd.Function):
+    """Custom autograd function for allgather_cp_sharded_tensor."""
     def forward(
         ctx, tensor, cp_group: torch.distributed.ProcessGroup, seq_dim=1
     ):  # , unpadded_seqlen: Optional[int] = None):
+        """Forward pass for allgather_cp_sharded_tensor."""
         cp_size = torch.distributed.get_world_size(cp_group)
         cp_rank_chunks = []
         for _ in range(cp_size):
@@ -587,6 +596,7 @@ class AllGatherCPTensor(torch.autograd.Function):
         return ret_tensor
 
     def backward(ctx, grad_output): # type: ignore[override]
+        """Backward pass for allgather_cp_sharded_tensor."""
         cp_size = torch.distributed.get_world_size(ctx.cp_group)
         cp_rank = torch.distributed.get_rank(ctx.cp_group)
         torch.distributed.all_reduce(grad_output, group=ctx.cp_group)

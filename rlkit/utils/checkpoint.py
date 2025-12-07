@@ -58,7 +58,7 @@ class CheckpointManager:
         """Initialize the checkpoint manager.
 
         Args:
-            config (CheckpointingConfig)
+            config (CheckpointingConfig): User-supplied configuration for checkpoint management.
         """
         self.checkpoint_dir = Path(config["checkpoint_dir"])
         self.metric_name = config["metric_name"]

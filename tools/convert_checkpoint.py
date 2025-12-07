@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
+"""Convert a Torch DCP checkpoint to a HuggingFace checkpoint."""
 
 import argparse
 import os
-import sys
 import tempfile
 from typing import Any
 
 import torch
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 
-# Local imports
-from rlkit.models.custom.convert import get_model_config
+from rlkit.models.convert import get_model_config
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 
 
@@ -58,6 +56,7 @@ def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[dic
 
 
 def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, push_to_hub: bool = False) -> None:
+    """Convert a Torch DCP checkpoint to a HuggingFace checkpoint."""
     dcp_path = _resolve_dcp_path(dcp_path)
     
     if not os.path.exists(dcp_path):
@@ -108,6 +107,7 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, pu
 
 
 def main() -> None:
+    """Main function to convert a Torch DCP checkpoint to a HuggingFace checkpoint."""
     parser = argparse.ArgumentParser(description="Convert TorchTitan (DCP) checkpoint to HuggingFace format")
     parser.add_argument("dcp_path", type=str, help="Path to Torch DCP checkpoint directory or step dir (e.g., checkpoints/step_62 or checkpoints/step_62/policy)")
     parser.add_argument("hf_model_name", type=str, help="HuggingFace model name or path used for config/tokenizer (e.g., Qwen/Qwen3-0.6B)")

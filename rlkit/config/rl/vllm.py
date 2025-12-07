@@ -1,6 +1,8 @@
+"""Configuration for vLLM."""
 from typing import Any, NotRequired, TypedDict
 
 class ResourcesConfig(TypedDict):
+    """Configuration for how many GPUs are allocated to inference."""
     gpus_per_node: int
     num_nodes: int
 
@@ -16,6 +18,7 @@ class GenerationConfig(TypedDict):
     resources: ResourcesConfig
 
 class VllmSpecificArgs(TypedDict):
+    """Configuration options for vLLM."""
     tensor_parallel_size: int
     pipeline_parallel_size: int
     gpu_memory_utilization: float
@@ -30,6 +33,7 @@ class VllmSpecificArgs(TypedDict):
 
 
 class HttpVllmConfig(GenerationConfig):
+    """Configuration options for the vLLM HTTP server."""
     vllm_cfg: VllmSpecificArgs
     gpus_per_node: int
     server_timeout: NotRequired[int]

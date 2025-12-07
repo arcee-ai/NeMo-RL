@@ -3,7 +3,6 @@
 .code_ref_for_agent/
 
 *.pickle
-uv.lock
 _datasets/
 
 .git

@@ -1,8 +1,10 @@
+"""Preprocess an SFT dataset into the native RLKit format."""
+
 import argparse
 import logging
 from datasets import load_dataset
 from transformers import AutoTokenizer
-from rlkit.data.datasets import transform_dataset
+from rlkit.data.sft_datasets import transform_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

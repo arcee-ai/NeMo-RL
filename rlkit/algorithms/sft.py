@@ -1,3 +1,4 @@
+"""Supervised fine-tuning (SFT) trainer."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,14 +39,14 @@ from rlkit.config import (
 )
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.models.policy.lm_policy import Policy
+from rlkit.training.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager
 from rlkit.utils.logger import Logger
-from rlkit.utils.nsys import maybe_gpu_profile_step
 from rlkit.utils.timer import TimeoutChecker, Timer
 
 
 class SFTSaveState(TypedDict):
+    """Saved state for SFT."""
     epoch: int  # Track current epoch
     step: int  # Track step within current epoch
     total_steps: int  # Track total number of steps across all epochs
@@ -72,6 +73,7 @@ class SFTTrainer:
         train_dataset: Dataset,
         val_dataset: Optional[Dataset]
     ) -> None:
+        """Initialize the SFT trainer."""
         self.master_config = master_config
         self.tokenizer = tokenizer
         self.train_dataset = train_dataset
@@ -363,6 +365,7 @@ class SFTTrainer:
         return cast(tuple[dict[str, float], dict[str, float]], (val_metrics, timing_metrics))
 
     async def train(self) -> None:
+        """Run training loop until finished."""
         timer = Timer()
         timeout = TimeoutChecker(
             timeout=self.master_config["checkpointing"]["checkpoint_must_save_by"],
@@ -400,8 +403,6 @@ class SFTTrainer:
         out_of_samples = False
         
         while step < sft_config["max_num_steps"]:
-            maybe_gpu_profile_step(self.policy, step + 1)
-            
             with timer.time("total_step_time"):
                 # Pull samples from dataloader until bins are full
                 with timer.time("data_processing"):

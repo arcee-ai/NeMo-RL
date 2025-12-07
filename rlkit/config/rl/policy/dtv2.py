@@ -1,6 +1,8 @@
+"""Training worker configuration."""
 from typing import TypedDict, NotRequired
 
 class DTensorV2Config(TypedDict):
+    """Configuration options for training workers."""
     enabled: bool
     activation_checkpointing: NotRequired[bool]
     tensor_parallel_size: NotRequired[int]

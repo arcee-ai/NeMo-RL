@@ -1,3 +1,4 @@
+"""Loss functions."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -129,6 +130,7 @@ class ClippedPGLossFn(LossFunction):
     use_importance_sampling_correction: bool
 
     def __init__(self, cfg: ClippedPGLossConfig):
+        """Initialize the Clipped Policy Gradient loss function."""
         self.ratio_clip_min = cfg["ratio_clip_min"]
         self.ratio_clip_max = cfg["ratio_clip_max"]
         self.ratio_clip_c = cfg["ratio_clip_c"]  # set to None to disable dual-clipping
@@ -359,6 +361,7 @@ class CISPOLossFn(LossFunction):
     """
 
     def __init__(self, cfg: CISPOLossConfig):
+        """Initialize the CISPO loss function."""
         self.epsilon_max = cfg["epsilon_max"]
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
         self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
@@ -540,6 +543,7 @@ class NLLLoss(LossFunction):
         global_valid_seqs: float,
         global_valid_toks: float,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
+        """Negative Log Likelihood Loss function."""
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         mask = data["token_mask"][:, 1:]

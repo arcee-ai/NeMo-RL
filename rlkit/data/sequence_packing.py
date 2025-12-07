@@ -1,3 +1,5 @@
+"""Sequence packing and bin distribution utilities."""
+
 PackableDataDict = dict[str, list[int | float]]
 
 def pack_sequences(

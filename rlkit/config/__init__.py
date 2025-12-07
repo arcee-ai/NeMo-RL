@@ -1,3 +1,4 @@
+"""Root module to re-export all configuration classes."""
 from .rl import RLConfig
 from .rl.policy import PolicyConfig, TokenizerConfig
 from .rl.loss import ClippedPGLossConfig
@@ -13,7 +14,6 @@ from .checkpointing import CheckpointingConfig
 from .rl.policy import SequencePackingConfig
 from .rl.policy.dtv2 import DTensorV2Config
 from .sft import SFTConfig, SFTMasterConfig
-from .rm import RMConfig, RMMasterConfig
 
 __all__ = [
     "RLConfig",

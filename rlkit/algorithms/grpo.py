@@ -1,3 +1,4 @@
+"""RL trainer."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,13 +47,12 @@ from rlkit.config import (
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.config.rl.vllm import HttpVllmConfig
-from rlkit.models.generation.vllm_http_generation import VllmHttpGeneration
-from rlkit.models.policy.lm_policy import Policy
+from rlkit.inference.vllm_http_generation import VllmHttpGeneration
+from rlkit.training.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager
 from rlkit.utils.logger import (
     Logger,
 )
-from rlkit.utils.nsys import maybe_gpu_profile_step
 from rlkit.utils.timer import Timer
 
 import verifiers as vf
@@ -63,6 +63,7 @@ import verifiers as vf
 TokenizerType = TypeVar("TokenizerType", bound=PreTrainedTokenizerBase)
 
 class GRPOSaveState(TypedDict):
+    """Saved state for GRPO."""
     step: int
     consumed_samples: int
 
@@ -73,24 +74,28 @@ def _default_grpo_save_state() -> GRPOSaveState:
     }
 
 class RolloutOutputs(TypedDict):
+    """Outputs of a finished rollout. TODO: Merge this with RLSample."""
     token_ids: list[list[int]]
     generation_logprobs: list[list[float]]
     advantages: list[list[float]]
     token_mask: list[list[float]]
 
 class QueuedRollout:
+    """Data structure to store a completed rollout and information on it."""
     input_data: vf.RolloutInput
     output: RolloutOutputs
     metrics: dict[str, float]
     step_started: int
     
     def __init__(self, input_data: vf.RolloutInput, output: RolloutOutputs, metrics: dict[str, float], step_started: int):
+        """Initialize the queued rollout."""
         self.input_data = input_data
         self.output = output
         self.metrics = metrics
         self.step_started = step_started
     
     def staleness(self, current_step: int) -> int:
+        """Returns the number of steps since this rollout was started."""
         return current_step - self.step_started
 
 class GRPOTrainer:
@@ -100,6 +105,7 @@ class GRPOTrainer:
         self,
         master_config: RLConfig,
     ) -> None:
+        """Initialize the GRPO trainer."""
         self.master_config = master_config
         
         policy_config = self.master_config["policy"]
@@ -459,6 +465,7 @@ class GRPOTrainer:
     # Training
     # ------------------------------------------------------------------
     async def train(self) -> None:
+        """Run training loop until finished."""
         timer = Timer()
 
         step = self.grpo_save_state["step"]
@@ -504,8 +511,6 @@ class GRPOTrainer:
         
         out_of_samples = False
         while True:
-            maybe_gpu_profile_step(self.policy, step + 1)
-
             with timer.time("total_step_time"):
                 # Refill in-flight rollouts up to target.
                 while in_flight < target_in_flight and not out_of_samples:
@@ -593,7 +598,7 @@ class GRPOTrainer:
                 logging.info(f"Training policy (mean staleness={mean_staleness:.2f})...")
                 self._prepare_for_training(timer)
                 with timer.time("policy_training"):
-                    train_results = await self.policy.train(
+                    _train_results = await self.policy.train(
                         dist_bins,
                         self.loss_fn,
                         {

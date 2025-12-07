@@ -1,3 +1,4 @@
+"""SFT-specific configuration options."""
 from typing import TypedDict
 
 from rlkit.config.rl.policy import PolicyConfig
@@ -8,6 +9,7 @@ from rlkit.config.checkpointing import CheckpointingConfig
 
 
 class SFTConfig(TypedDict):
+    """SFT-specific configuration options."""
     max_num_steps: int
     max_num_epochs: int
     val_period: int
@@ -22,6 +24,7 @@ class SFTConfig(TypedDict):
 
 
 class SFTMasterConfig(TypedDict):
+    """Root configuration for SFT runs."""
     policy: PolicyConfig
     data: DataConfig
     sft: SFTConfig

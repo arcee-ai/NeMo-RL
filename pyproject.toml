@@ -45,120 +45,39 @@ dependencies = [
     "plotly",
     "mlflow",
     "verifiers==0.1.8.post1",
-    "vf-exts",
     "flash-attn==2.8.3",
     "vllm==0.12.0",
     "torchao",
     "dion @ https://github.com/samsja/dion.git",
     "cut-cross-entropy @ git+https://github.com/apple/ml-cross-entropy.git",
-    "pytest>=8.4.2",
+    "vf_exts",
 ]
+
+[tool.uv.sources]
+vf_exts = { path = "vf_exts", editable = true }
 
 [dependency-groups]
-
-# This is a default group so that we install these even with bare `uv sync`
-build = [
-    # Build requirement for TE
-    "torch==2.9.0",
-    # Build requirement for TE
-    "setuptools",
-    "packaging",
-    "einops",
-    # Build requirement for nemo_run
-    "hatchling",
-    "pybind11",
-    # Build requirement for flash-attn
-    "psutil",
-]
-docs = [
-    "sphinx",
-    "sphinx-autobuild",  # For live doc serving while editing docs
-    "sphinx-autodoc2",  # For documenting Python API
-    "sphinx-copybutton",  # Adds a copy button for code blocks
-    "myst_parser",  # For our markdown docs
-    "nvidia-sphinx-theme",  # Our NVIDIA theme
-]
-dev = [
-    "pre-commit==3.6.0",
-    "ruff==0.9.9",
-    "types-PyYAML",
-    "types-requests",
-    "pyrefly==0.24.2",
-]
 test = [
-    "pytest>=7.0.0",
+    "pytest>=8.4.2",
     "pytest-timeout",
     "pytest-cov",
     "pytest-asyncio",
 ]
-
-[tool.uv.sources]
-# torch/torchvision/triton all come from the torch index in order to pick up aarch64 wheels
-torch = [
-  { index = "pytorch-cu128" },
+lint = [
+  "ruff",
+  "pyrefly"
 ]
-torchvision = [
-  { index = "pytorch-cu128" },
-]
-triton = [
-  { index = "pytorch-cu128" },
-]
-causal-conv1d = { git = "https://github.com/Dao-AILab/causal-conv1d", tag = "v1.5.0.post8" }
-mamba-ssm = { git = "https://github.com/state-spaces/mamba.git", rev = "2e16fc3062cdcd4ebef27a9aa4442676e1c7edf4" }
-vf-exts = { workspace = true }
-
-[tool.uv.workspace]
-members = [
-    "env_api/vf_exts",
-]
-
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
 
 [tool.uv]
-no-build-isolation-package = ["transformer-engine-torch", "transformer-engine", "flash-attn", "mamba-ssm", "causal-conv1d"]
-# Always apply the build group since dependencies like TE require build dependencies
-# and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
-# avoid including these in the default dependency set, but for now it's required.
-default-groups = ["dev", "build"]
-# Users may use different link-modes depending on their scenario:
-#  --link-mode=hardlink (default on linux; may get warnings about switching to --link-mode copy if uv cache and venv on different file-systems)
-#  --link-mode=copy (slower but more reliable; supresses warning)
-#  --link-mode=symlink (fastest option when uv cache and venv on different file-system; caveat: venv is brittle since it depends on the environment/container)
+no-build-isolation-package = ["flash-attn"]
+default-groups = ["test", "lint"]
+# This makes running multiple machines from the same shared venv a bit easier.
 link-mode = "copy"
-# Prevent using both vLLM and vLLM-http backends in the same venv
-conflicts = [
-  [
-    { extra = "vllm" },
-    { extra = "vllm_http" },
-  ],
-]
-
-# Needed when building from source
-[[tool.uv.dependency-metadata]]
-name = "flash-attn"
-requires-dist = ["torch", "einops", "setuptools", "psutil", "ninja"]
-
-[tool.black]
-line-length = 120
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.venv
-  | build
-)/
-'''
 
 [tool.pytest.ini_options]
 addopts = "--durations=15 -s -rA -x"
 testpaths = ["tests"]
 python_files = "*.py"
-markers = [
-    "hf_gated: marks tests that require HuggingFace token access for gated models",
-]
 
 [tool.pyrefly]
 project-includes = ["**/*"]
@@ -168,28 +87,13 @@ project-excludes = ["**/*venv/**/*"]
 concurrency = ["thread", "multiprocessing"]
 omit = ["/tmp/*"]
 
-[tool.coverage.paths]
-source = ["rlkit/", "/opt/rlkit/rlkit/"]
-
 [tool.ruff.lint]
 # Enable all `pydocstyle` rules, limiting to those that adhere to the
 # Google convention via `convention = "google"`, below.
 select = ["D", "F"]
 
-# - On top of the Google convention, disable `D417`, which requires
-#   documentation for every function parameter.
-# - F841: local variable assigned but never used (exluced to favor readability)
-# TODO: Remove D10 once we are about to release to get all the docstrings written
-ignore = ["D417", "D10", "F841"]
+# Ignore all lint errors in the examples directory
+exclude = ["examples/**/*.py"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-# Section to exclude errors for different file types
-[tool.ruff.per-file-ignores]
-# Ignore all directories named `tests`.
-"tests/**" = ["D"]
-# Ignore all files that end in `_test.py`.
-"*_test.py" = ["D"]
-# Ignore F401 (import but unused) in __init__.py
-"__init__.py" = ["F401"]

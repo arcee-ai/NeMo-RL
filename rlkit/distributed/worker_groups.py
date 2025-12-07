@@ -1,3 +1,4 @@
+"""Classes to manage Ray worker groups."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -107,9 +108,12 @@ class MultiWorkerFuture:
 
 
 class RayWorkerBuilder:
+    """Builder for Ray workers."""
     @ray.remote
     class IsolatedWorkerInitializer:
+        """Isolated worker initializer."""
         def __init__(self, ray_actor_class_fqn: str, *init_args, **init_kwargs):
+            """Initialize the isolated worker initializer."""
             self.ray_actor_class_fqn = ray_actor_class_fqn
             self.init_args = init_args
             self.init_kwargs = init_kwargs
@@ -188,6 +192,7 @@ class RayWorkerBuilder:
             return worker
 
     def __init__(self, ray_actor_class_fqn: str, *args, **kwargs):
+        """Initialize the worker builder."""
         self.ray_actor_class_fqn = ray_actor_class_fqn
         self.args = args
         self.kwargs = kwargs
@@ -313,6 +318,7 @@ class RayWorkerGroup:
                                Each tuple defines a tied group of workers placed on the same node.
                                If provided, workers_per_node is ignored.
             sharding_annotations: NamedSharding object representing mapping of named axes to ranks (i.e. for TP, PP, etc.)
+            env_vars: Environment variables to pass to all workers.
         """
         self._workers: list[ray.actor.ActorHandle] = []
         self._worker_metadata: list[dict[str, Any]] = []
@@ -398,10 +404,10 @@ class RayWorkerGroup:
 
         Args:
             remote_worker_builder: Builder function for Ray actors
-
             bundle_indices_list: List of (node_idx, local_bundle_indices) tuples, where each tuple
                                 specifies a tied group with its node and local bundle indices. If the local_bundle_indices
                                 spans multiple nodes, the node_idx will be the first node's index in the tied group.
+            env_vars: Environment variables to pass to all workers.
         """
         self.master_address, self.master_port = (
             self.cluster.get_master_address_and_port()
@@ -535,10 +541,12 @@ class RayWorkerGroup:
 
     @property
     def workers(self) -> list[ray.actor.ActorHandle]:
+        """List Ray actor handles for all workers."""
         return self._workers
 
     @property
     def worker_metadata(self) -> list[dict[str, Any]]:
+        """List metadata for all workers."""
         return self._worker_metadata
 
     @property
@@ -558,7 +566,8 @@ class RayWorkerGroup:
         Args:
             method_name: Name of the method to call on the worker.
             worker_idx: The index of the worker to run the method on.
-            *args, **kwargs: Arguments to pass to the method.
+            *args: Positional arguments to pass to the method.
+            **kwargs: Keyword arguments to pass to the method.
 
         Returns:
             ray.ObjectRef: A Ray future for the result.
@@ -681,7 +690,8 @@ class RayWorkerGroup:
 
         Args:
             method_name: Name of the method to call on each worker
-            *args, **kwargs: Arguments to pass to the method
+            *args: Positional arguments to pass to the method
+            **kwargs: Keyword arguments to pass to the method
             run_rank_0_only_axes: List of named axes for which only rank 0 should run the method.
 
         Returns:

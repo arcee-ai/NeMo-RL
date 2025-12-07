@@ -1,3 +1,4 @@
+"""Class to manage a virtual distributed cluster using Ray placement groups."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +15,7 @@
 import logging
 import os
 import time
-from typing import Optional, TypedDict
+from typing import Optional
 
 import ray
 from ray.util.placement_group import (
@@ -26,12 +27,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-class ClusterConfig(TypedDict):
-    gpus_per_node: int
-    num_nodes: int
-
 
 # Get the directory path of the current module and the root of the package
 dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -313,6 +308,7 @@ class RayVirtualCluster:
         return placement_groups
 
     def get_placement_groups(self) -> list[PlacementGroup]:
+        """Get or create placement groups."""
         # Initialize placement groups if not already created
         if self._node_placement_groups is None:
             self._init_placement_groups()
@@ -323,9 +319,11 @@ class RayVirtualCluster:
         return [pg for pg in self._node_placement_groups if pg.bundle_specs]
 
     def world_size(self) -> int:
+        """Get the total number of workers in the virtual cluster."""
         return self._world_size
 
     def node_count(self) -> int:
+        """Get the number of nodes in the virtual cluster."""
         return sum(1 for count in self._bundle_ct_per_node_list if count > 0)
 
     def get_master_address_and_port(self) -> tuple[str, int]:

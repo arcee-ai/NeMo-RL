@@ -1,3 +1,4 @@
+"""Abstraction for logging backends."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,16 +20,13 @@ import logging
 import os
 import re
 import subprocess
-import tempfile
 import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Mapping, Optional, TypedDict
 
-import mlflow
 import ray
 import requests
-import torch
 import wandb
 from matplotlib import pyplot as plt
 from prometheus_client.parser import text_string_to_metric_families
@@ -69,6 +67,7 @@ class WandbLogger(LoggerInterface):
     """Weights & Biases logger backend."""
 
     def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None):
+        """Initialize the Weights & Biases logger."""
         self.run = wandb.init(**cfg, dir=log_dir)
         self._log_code()
         self._log_diffs()
@@ -249,6 +248,7 @@ class WandbLogger(LoggerInterface):
         Args:
             figure: Matplotlib figure to log
             step: Global step value
+            name: Name of the plot
         """
         self.run.log({name: figure}, step=step)
     
@@ -338,6 +338,7 @@ class WandbLogger(LoggerInterface):
 
 
 class GpuMetricSnapshot(TypedDict):
+    """Snapshot of GPU metrics."""
     step: int
     metrics: dict[str, Any]
 
@@ -358,6 +359,7 @@ class RayGpuMonitorLogger:
         Args:
             collection_interval: Interval in seconds to collect GPU metrics
             flush_interval: Interval in seconds to flush metrics to parent logger
+            metric_prefix: Prefix for the metric names
             step_metric: Name of the field to use as the step metric
             parent_logger: Logger to receive the collected metrics
         """
@@ -575,12 +577,13 @@ class RayGpuMonitorLogger:
 
     def _fetch_and_parse_metrics(
         self, node_idx: int, metric_address: str, parser_fn: Callable
-    ):
+    ) -> dict[str, Any]:
         """Fetch metrics from a node and parse GPU metrics.
 
         Args:
             node_idx: Index of the node
             metric_address: Address of the metrics endpoint
+            parser_fn: Function to parse the metrics
 
         Returns:
             Dictionary of GPU metrics

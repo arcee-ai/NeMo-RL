@@ -1,3 +1,4 @@
+"""Utilities for training algorithms."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,12 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import random
-import warnings
-from functools import wraps
 from typing import Optional
 
 import numpy as np
 import torch
+import torch.cuda
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from rlkit.config import TokenizerConfig
@@ -66,17 +66,6 @@ def calculate_kl_penalty_joschu2020(
     """
     r = logprobs_reference - logprobs_policy
     return torch.exp(r) - r - 1
-
-
-def surpress_user_warnings(f):  # type: ignore
-    @wraps(f)
-    def wrapper(*args, **kwargs):  # type: ignore
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            output = f(*args, **kwargs)
-        return output
-
-    return wrapper
 
 
 def masked_mean(

@@ -1,3 +1,4 @@
+"""Utility functions for worker groups."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,56 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import fnmatch
-import logging
 from copy import deepcopy
 from typing import Any
-
-from rlkit.utils.nsys import RLKIT_NSYS_PROFILE_STEP_RANGE, RLKIT_NSYS_WORKER_PATTERNS
-
-
-def get_nsight_config_if_pattern_matches(worker_name: str) -> dict[str, Any]:
-    """Check if worker name matches patterns in RLKIT_NSYS_WORKER_PATTERNS and return nsight config.
-
-    Args:
-        worker_name: Name of the worker to check against patterns
-
-    Returns:
-        Dictionary containing {"nsight": config} if pattern matches, empty dict otherwise
-    """
-    assert not (bool(RLKIT_NSYS_WORKER_PATTERNS) ^ bool(RLKIT_NSYS_PROFILE_STEP_RANGE)), (
-        "Either both RLKIT_NSYS_WORKER_PATTERNS and RLKIT_NSYS_PROFILE_STEP_RANGE must be set, or neither. See https://github.com/NVIDIA/RLKit/tree/main/docs/nsys-profiling.md for more details."
-    )
-
-    patterns_env = RLKIT_NSYS_WORKER_PATTERNS
-    if not patterns_env:
-        return {}
-
-    # Parse CSV patterns
-    patterns = [
-        pattern.strip() for pattern in patterns_env.split(",") if pattern.strip()
-    ]
-
-    # Check if worker name matches any pattern
-    for pattern in patterns:
-        if fnmatch.fnmatch(worker_name, pattern):
-            logging.info(
-                f"Nsight profiling enabled for worker '{worker_name}' (matched pattern '{pattern}')"
-            )
-            return {
-                "nsight": {
-                    "t": "cuda,cudnn,cublas,nvtx",
-                    "o": f"'{worker_name}_{RLKIT_NSYS_PROFILE_STEP_RANGE}_%p'",
-                    "stop-on-exit": "true",
-                    # Capture range is required to control the scope of the profile
-                    # Profile will only start/stop when torch.cuda.profiler.start()/stop() is called
-                    "capture-range": "cudaProfilerApi",
-                    "capture-range-end": "stop",
-                    "cuda-graph-trace": "node",
-                }
-            }
-
-    return {}
 
 
 def recursive_merge_options(

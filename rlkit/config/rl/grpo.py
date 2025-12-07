@@ -1,11 +1,8 @@
+"""Configuration for GRPO."""
 from typing import Any, TypedDict, NotRequired
 
-from rlkit.config.logging import LoggerConfig
-
-class GRPOLoggerConfig(LoggerConfig):
-    num_val_samples_to_print: int
-
 class GRPOConfig(TypedDict):
+    """RL-specific configuration options."""
     num_prompts_per_step: int
     num_generations_per_prompt: int
     max_num_steps: int
@@ -22,5 +19,6 @@ class GRPOConfig(TypedDict):
     run_vram_torture_test: bool  # Ignore environments and run all training on a full context window of nonsense.
 
 class EnvironmentConfig(TypedDict):
+    """Configuration for a verifiers environment."""
     env_name: str
     env_kwargs: dict[str, Any]

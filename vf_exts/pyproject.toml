@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["vf_exts"]
+
+[tool.setuptools.dynamic]
+version = {attr = "vf_exts.package_info.__version__"}
+
+[project]
+name = "vf_exts"
+dynamic = [
+    "version",
+]
+description = "RLKit vf_exts - verifiers environment stdlib for RLKit"
+requires-python = ">=3.13"
+license = {text = "Apache 2.0"}
+dependencies = [
+    "verifiers==0.1.8.post1",
+    "ray[default]==2.52.1",
+]

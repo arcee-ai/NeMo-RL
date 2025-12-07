@@ -4,6 +4,7 @@ from rlkit.data.sequence_packing import pack_sequences, distribute_bins_for_dp
 
 
 def test_pack_sequences():
+    """Test the sequence packing function."""
     SEPARATOR = {"input_ids": 98, "loss_mask": 0, "advantage": 0.0}
     MAX_BIN_SIZE = 20
     NUM_BINS = 2

@@ -1,22 +1,13 @@
-from typing import Any, Union, TypedDict, NotRequired
+"""Common configuration options between inference and training."""
+from typing import Any, TypedDict, NotRequired
 
-from rlkit.config.rl.vllm import GenerationConfig, HttpVllmConfig
+from rlkit.config.rl.vllm import HttpVllmConfig
 
 from .dtv2 import DTensorV2Config
 
-class TokenizerConfig(TypedDict):
-    name: str
-    chat_template: NotRequired[str | None]
-
-
-class SequencePackingConfig(TypedDict):
-    enabled: bool
-    train_mb_tokens: int
-    logprob_mb_tokens: int
-    algorithm: str
-
 
 class PytorchOptimizerConfig(TypedDict):
+    """Configuration for a PyTorch optimizer."""
     name: str
     scalar_optim: NotRequired[str]
     scalar_optim_kwargs: NotRequired[dict[str, Any]]
@@ -26,6 +17,7 @@ class PytorchOptimizerConfig(TypedDict):
 
 
 class SinglePytorchSchedulerConfig(TypedDict):
+    """Configuration for a single Pytorch scheduler."""
     name: str
     kwargs: dict[str, Any]
     milestones: NotRequired[list[int]]
@@ -35,8 +27,8 @@ SchedulerMilestones = dict[str, list[int]]
 
 
 class PolicyConfig(TypedDict):
+    """Common configuration options between inference and training."""
     model_name: str
-    tokenizer: TokenizerConfig
     train_global_batch_size: int
     train_micro_batch_size: int
     precision: str

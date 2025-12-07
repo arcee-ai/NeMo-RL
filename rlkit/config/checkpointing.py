@@ -1,3 +1,4 @@
+"""Configuration for checkpoint management."""
 from typing import Any, Union, TypedDict, NotRequired
 import os
 
