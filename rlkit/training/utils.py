@@ -32,7 +32,7 @@ def get_gpu_info(model: torch.nn.Module) -> dict[str, Any]:
     # Get distributed training info
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 
     # Get device info from CUDA
     device = torch.cuda.current_device()
@@ -259,10 +259,8 @@ def get_logprobs_from_vocab_parallel_logits(
     """Compute log probabilities from vocabulary-parallel logits."""
     device_mesh = vocab_parallel_logits.device_mesh
     if seq_index is not None:
-        assert (
-            device_mesh.mesh_dim_names is not None
-            and "cp" in device_mesh.mesh_dim_names
-        ), "seq_index must be provided for cp sharded logits"
+        assert device_mesh.mesh_dim_names is not None, "device_mesh.mesh_dim_names is not set"
+        assert "cp" in device_mesh.mesh_dim_names, "seq_index must be provided for cp sharded logits"
 
     tp_group = device_mesh.get_group("tp")
     tp_rank = tp_group.rank()

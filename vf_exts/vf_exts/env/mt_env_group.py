@@ -60,7 +60,7 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         datasets = []
         eval_datasets = []
         for env, name in zip(self.envs, self.env_names, strict=False):
-            def add_task(example):
+            def add_task(example, name=name):
                 example["task"] = name
                 return example
 

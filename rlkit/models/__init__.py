@@ -14,7 +14,7 @@ from .attention import AttentionMasksType
 
 
 @dataclass
-class BaseModelArgs(ABC):
+class BaseModelArgs:
     """Abstract base class for all model arguments objects."""
 
     _enforced: str = "This field is used to enforce all fields have defaults."

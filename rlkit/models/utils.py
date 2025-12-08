@@ -29,9 +29,8 @@ def _round_up(x: int, y: int) -> int:
     x_ceil_div_y = (x + y - 1) // y
     return x_ceil_div_y * y
 
-def _permute(x, num_tokens_per_expert, ep_degree, num_local_experts, token_group_align_size: ValidTokenGroupAlignmentSize):
+def _permute(x, num_tokens_per_expert, ep_degree, num_local_experts, token_group_align_size: ValidTokenGroupAlignmentSize = 8):
     """Permute the input."""
-    global TOKEN_GROUP_ALIGN_SIZE_M
     x_padded_per_expert = x.shape[0] + num_local_experts * token_group_align_size
     padded_max_len = _round_up(x_padded_per_expert, token_group_align_size)
     with torch.no_grad():
@@ -40,7 +39,7 @@ def _permute(x, num_tokens_per_expert, ep_degree, num_local_experts, token_group
             num_local_experts,
             ep_degree,
             padded_max_len,
-            TOKEN_GROUP_ALIGN_SIZE_M,
+            token_group_align_size,
         )
 
     x = torch.vstack((x, x.new_zeros(x.shape[-1])))

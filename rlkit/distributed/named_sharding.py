@@ -48,7 +48,7 @@ class NamedSharding:
         except (
             ValueError
         ) as e:  # Catch potential errors during array creation (e.g., ragged arrays)
-            raise ValueError(f"Could not create NumPy array from layout: {e}")
+            raise ValueError(f"Could not create NumPy array from layout: {e}") from e
 
         # Check if the inferred dtype is integer-like or float representing integers
         self._layout: np.ndarray[tuple[int, ...], np.dtype[np.int32]]
@@ -217,10 +217,12 @@ class NamedSharding:
         shape_str = ", ".join([f"{self.shape[name]}" for name in self.names])
         return f"NamedSharding(shape=({shape_str}), names={self.names}, layout={self._layout})"
 
+    def __hash__(self) -> int:
+        """Hash the NamedSharding object."""
+        return hash((self._layout.tobytes(), tuple(self._names)))
+
     def __eq__(self, other: object) -> bool:
         """Check if two NamedSharding objects are equal."""
         if not isinstance(other, NamedSharding):
             return NotImplemented
-        return (
-            np.array_equal(self._layout, other._layout) and self._names == other._names
-        )
+        return np.array_equal(self._layout, other._layout) and self._names == other._names

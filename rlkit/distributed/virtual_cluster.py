@@ -206,7 +206,7 @@ class RayVirtualCluster:
             strategy = self.placement_group_strategy
 
         # Add retry logic that was previously in __init__
-        max_retries = int(os.environ.get("RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES", 6))
+        max_retries = int(os.environ.get("RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES", "6"))
         assert max_retries > 0, (
             f"RLKIT_VIRTUAL_CLUSTER_MAX_RETRIES={max_retries} must be an integer greater than 0"
         )
@@ -266,7 +266,7 @@ class RayVirtualCluster:
         if use_unified_pg:
             # Create a single unified placement group for cross-node model parallelism
             all_bundles = []
-            for node_idx, bundle_count in enumerate(self._bundle_ct_per_node_list):
+            for bundle_count in self._bundle_ct_per_node_list:
                 for _ in range(bundle_count):
                     bundle = {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle}
                     all_bundles.append(bundle)
@@ -296,7 +296,7 @@ class RayVirtualCluster:
             ray.get(
                 [pg.ready() for pg in placement_groups], timeout=180
             )  # 3-minute timeout
-        except (TimeoutError, ray.exceptions.GetTimeoutError):
+        except (TimeoutError, ray.exceptions.GetTimeoutError) as e:
             # Clean up any created placement groups
             for pg in placement_groups:
                 with contextlib.suppress(Exception):
@@ -304,7 +304,7 @@ class RayVirtualCluster:
             raise TimeoutError(
                 "Timed out waiting for placement groups to be ready. The cluster may not have enough resources "
                 "to satisfy the requested configuration, or the resources may be busy with other tasks."
-            )
+            ) from e
 
         return placement_groups
 

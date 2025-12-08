@@ -30,7 +30,7 @@ def nvml_context() -> Generator[None]:
         pynvml.nvmlInit()
         yield
     except pynvml.NVMLError as e:
-        raise RuntimeError(f"Failed to initialize NVML: {e}")
+        raise RuntimeError(f"Failed to initialize NVML: {e}") from e
     finally:
         with contextlib.suppress(Exception):
             pynvml.nvmlShutdown()
@@ -74,7 +74,7 @@ def get_device_uuid(device_idx: int) -> str:
         except pynvml.NVMLError as e:
             raise RuntimeError(
                 f"Failed to get device UUID for device {device_idx} (global index: {global_device_idx}): {e}"
-            )
+            ) from e
 
 
 def get_free_memory_bytes(device_idx: int) -> float:
@@ -87,4 +87,4 @@ def get_free_memory_bytes(device_idx: int) -> float:
         except pynvml.NVMLError as e:
             raise RuntimeError(
                 f"Failed to get free memory for device {device_idx} (global index: {global_device_idx}): {e}"
-            )
+            ) from e

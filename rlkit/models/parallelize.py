@@ -157,14 +157,14 @@ def apply_ac(
     if per_op_sac_force_recompute_mm_shapes_by_fqns is None:
         per_op_sac_force_recompute_mm_shapes_by_fqns = ["moe.router.gate"]
     for layer_id, transformer_block in model.layers.named_children():
-        transformer_block = _apply_ac_to_transformer_block(
+        transformer_block_ac = _apply_ac_to_transformer_block(
             transformer_block,
             ac_mode,
             selective_ac_option,
             per_op_sac_force_recompute_mm_shapes_by_fqns,
             base_fqn=f"layers.{layer_id}"
         )
-        model.layers.register_module(layer_id, transformer_block)
+        model.layers.register_module(layer_id, transformer_block_ac)
 
     logging.info(f"Applied {ac_mode} activation checkpointing to the model")
 
@@ -639,7 +639,7 @@ def apply_compile(model: nn.Module):
         fullgraph = True
         if is_moe_enabled(transformer_block):
             fullgraph = False
-        transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
-        model.layers.register_module(layer_id, transformer_block)
+        transformer_block_compiled = torch.compile(transformer_block, fullgraph=fullgraph)
+        model.layers.register_module(layer_id, transformer_block_compiled)
 
     logging.info("Compiling each TransformerBlock with torch.compile")

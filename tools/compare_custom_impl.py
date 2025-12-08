@@ -72,7 +72,7 @@ model_tt.to(device)
 
 tokenizer.padding_side = "left"
 
-prompt = prompt = """Two generations now had pass'd away,
+prompt = """Two generations now had pass'd away,
 Wise by his rules, and happy by his sway;
 Two ages o'er his native realm he reign'd, [011]
 And now the example of the third remain'd.

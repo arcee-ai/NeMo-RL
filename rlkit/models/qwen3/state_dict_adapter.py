@@ -55,7 +55,7 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
         hf_state_dict: dict[str, Any] = {}
         for key, value in state_dict.items():
             # Strip name mangling from torch.compile
-            key = key.replace("_orig_mod.", "")
+            key = key.replace("_orig_mod.", "") # noqa: PLW2901
             if "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 layer_num = re.search(r"\d+", key).group(0)

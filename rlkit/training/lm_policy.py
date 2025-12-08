@@ -209,10 +209,7 @@ class Policy:
         # Aggregate router statistics across DP ranks
         # Router statistics are already aggregated across EP ranks within each worker
         # We need to sum absolute counts across DP ranks, then convert to fractions
-        router_stats_all_workers = []
-        for r in results:
-            if "router_statistics" in r:
-                router_stats_all_workers.append(r["router_statistics"])
+        router_stats_all_workers = [r["router_statistics"] for r in results]
 
         if router_stats_all_workers:
             # Sum absolute counts across all DP ranks

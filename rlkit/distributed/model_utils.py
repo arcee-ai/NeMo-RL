@@ -568,13 +568,9 @@ class AllGatherCPTensor(torch.autograd.Function):
     ):  # , unpadded_seqlen: Optional[int] = None):
         """Forward pass for allgather_cp_sharded_tensor."""
         cp_size = torch.distributed.get_world_size(cp_group)
-        cp_rank_chunks = []
-        for _ in range(cp_size):
-            cp_rank_chunks.append(torch.empty_like(tensor))
+        cp_rank_chunks = [torch.empty_like(tensor) for _ in range(cp_size)]
 
-        torch.distributed.all_gather(
-            tensor_list=cp_rank_chunks, tensor=tensor, group=cp_group
-        )
+        torch.distributed.all_gather(cp_rank_chunks, tensor, group=cp_group)
 
         # undo the CP load balancing chunking
         tensor_chunks = []

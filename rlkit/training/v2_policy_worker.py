@@ -392,18 +392,17 @@ class DTensorV2PolicyWorker:
             )
 
         # Set up scheduler
-        scheduler_phases = self.cfg.training.optimizer.scheduler.phases
+        optim_cfg = self.cfg.training.optimizer
+        scheduler_phases = optim_cfg.scheduler.phases
         self.scheduler: torch.optim.lr_scheduler.LRScheduler
         if len(scheduler_phases) > 0:
-            schedulers = []
-            for scheduler_cfg in self.cfg.training.optimizer.scheduler.phases:
-                schedulers.append(
-                    import_class_by_name(scheduler_cfg.name)(
-                        self.optimizer, **scheduler_cfg.kwargs
-                    )
-                )
+            schedulers = [
+                import_class_by_name(scheduler_cfg.name)(
+                    self.optimizer, **scheduler_cfg.kwargs
+                ) for scheduler_cfg in scheduler_phases
+            ]
 
-            milestones = self.cfg.training.optimizer.scheduler.milestones
+            milestones = optim_cfg.scheduler.milestones
 
             self.scheduler = torch.optim.lr_scheduler.SequentialLR(
                 self.optimizer, schedulers, milestones
@@ -797,12 +796,9 @@ class DTensorV2PolicyWorker:
 
                 converted_minidict = self.adapter.to_hf(minidict_to_convert)
 
-                collected_tensors = []
-                for hf_key in chunk_info["packed_tensors"]:
-                    collected_tensors.append(converted_minidict[hf_key])
+                collected_tensors = [converted_minidict[hf_key] for hf_key in chunk_info["packed_tensors"]]
             else:
                 collected_tensors = [state_dict[hf_key] for hf_key in chunk_info["packed_tensors"]]
-
             if self.rank == 0:
                 chunk_tensor = torch.stack(collected_tensors)
                 self.model_update_group.broadcast(chunk_tensor, src=0)
