@@ -14,7 +14,7 @@ import verifiers as vf
 from datasets import Dataset
 from openai.types.chat.chat_completion import ChatCompletion
 from rich.console import Console
-from torchdata.stateful_dataloader import StatefulDataLoader
+from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
@@ -45,12 +45,12 @@ TokenizerType = TypeVar("TokenizerType", bound=PreTrainedTokenizerBase)
 class GRPOSaveState(TypedDict):
     """Saved state for GRPO."""
     step: int
-    consumed_samples: int
+    consumed_example_ids: list[int]
 
 def _default_grpo_save_state() -> GRPOSaveState:
     return {
         "step": 0,
-        "consumed_samples": 0,
+        "consumed_example_ids": [],
     }
 
 class RolloutOutputs(TypedDict):
@@ -103,6 +103,9 @@ class GRPOTrainer:
             self.config.checkpointing
         )
 
+        # Get consumed example IDs from save state
+        self.consumed_example_ids: list[int] = self.grpo_save_state["consumed_example_ids"]
+
         # Load tokenizer for prompt filtering.
         self.tokenizer = AutoTokenizer.from_pretrained(self.policy_config.model_name)
 
@@ -111,8 +114,10 @@ class GRPOTrainer:
         self.vf_env = vf.load_environment(self.env_config.env_name, **self.env_config.env_kwargs)
 
         assert self.vf_env.dataset is not None, "vf_env.dataset must be set"
+        dataset = self.vf_env.dataset
+
         dataset = self._filter_dataset_by_prompt_length(
-            self.vf_env.dataset,
+            dataset,
             self.env_config,
             self.policy_config,
         )
@@ -120,7 +125,7 @@ class GRPOTrainer:
         self.dataloader = self._setup_dataloader(
             dataset,
             self.env_config,
-            last_checkpoint_path,
+            self.consumed_example_ids,
         )
 
         logging.info("\n▶ Setting up compute cluster...")
@@ -199,21 +204,26 @@ class GRPOTrainer:
         self,
         dataset: Dataset,
         env_config: EnvironmentConfig,
-        last_checkpoint_path: str | None,
-    ) -> StatefulDataLoader:
-        dataloader = StatefulDataLoader(
-            dataset, # type: ignore[arg-type]
+        consumed_example_ids: list[int],
+    ) -> DataLoader:
+        # Filter out already-consumed samples using example_id
+        if consumed_example_ids:
+            consumed_set = set(consumed_example_ids)
+            original_len = len(dataset)
+            dataset = cast(Dataset, dataset.filter(
+                lambda x: x["example_id"] not in consumed_set,
+                num_proc=os.cpu_count() or 1,
+            ))
+            logging.info(f"  ✓ Filtered out {original_len - len(dataset)} consumed samples, {len(dataset)} remaining")
+
+        dataloader = DataLoader(
+            dataset,  # type: ignore[arg-type]
             batch_size=1,
             shuffle=env_config.shuffle,
             drop_last=False,
             # Default collate function mangles dictionaries. We just want the raw list.
             collate_fn=lambda x: x,
         )
-        if last_checkpoint_path is not None:
-            dataloader_state_dict = torch.load(
-                os.path.join(last_checkpoint_path, "train_dataloader.pt")
-            )
-            dataloader.load_state_dict(dataloader_state_dict)
 
         logging.info(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
 
@@ -359,17 +369,20 @@ class GRPOTrainer:
         timer = Timer()
 
         step = self.grpo_save_state["step"]
-        consumed_samples = self.grpo_save_state["consumed_samples"]
+        # Track example IDs consumed this session (will be merged with self.consumed_example_ids)
+        session_consumed_ids: set[int] = set()
 
         # Call finish generation before training begins to ensure the policy is ready.
         await self.inference.finish_generation()
 
         dataloader_iter = iter(self.dataloader)
-        total_samples = len(self.dataloader.dataset)  # type: ignore[arg-type]
+        remaining_samples = len(self.dataloader.dataset)  # type: ignore[arg-type]
+        # Total = what's left + what we've already consumed (accounts for prompt filtering)
+        total_samples = remaining_samples + len(self.consumed_example_ids)
 
         console = Console()
 
-        if total_samples <= consumed_samples:
+        if remaining_samples == 0:
             console.log("[bold red]No samples left to train on! You may be resuming from a completed training run.[/]")
             return
 
@@ -415,12 +428,13 @@ class GRPOTrainer:
         def get_status_text() -> str:
             """Get the current status text."""
             elapsed = (datetime.now() - step_start).total_seconds()
+            consumed_count = len(self.consumed_example_ids) + len(session_consumed_ids)
             return (
                 f"Waiting for rollouts... | "
                 f"pool=[yellow]{len(packing_pool)}[/] "
                 f"bin=[white]{mean_bin_length:.1f}[/] "
                 f"time=[green]{elapsed:.2f}s[/] "
-                f"left=[blue]{total_samples - consumed_samples}[/] "
+                f"left=[blue]{total_samples - consumed_count}[/] "
             )
 
         out_of_samples = False
@@ -435,7 +449,6 @@ class GRPOTrainer:
                     task = asyncio.create_task(enqueue_rollout(example[0], step))
                     tasks_in_progress.append(task)
                     in_flight += self.rollout_config.group_size
-                    consumed_samples += 1
 
                 # Clear out references to old tasks.
                 tasks_in_progress = [task for task in tasks_in_progress if not task.done()]
@@ -513,8 +526,12 @@ class GRPOTrainer:
                         # Batch incomplete, keep collecting.
                         continue
 
-                step_env_metrics = [x.metrics for x in packing_pool if x.output not in remainder]
-                step_staleness = [x.staleness(step) for x in packing_pool if x.output not in remainder]
+                trained_rollouts = [x for x in packing_pool if x.output not in remainder]
+                step_env_metrics = [x.metrics for x in trained_rollouts]
+                step_staleness = [x.staleness(step) for x in trained_rollouts]
+
+                # Collect unique example_ids that will be trained on (mark as consumed after training)
+                trained_example_ids: list[int] = list({x.input_data["example_id"] for x in trained_rollouts})
 
                 coordinator_metrics = {
                     "reward/mean": np.mean([x["reward"] for x in step_env_metrics]),
@@ -527,9 +544,8 @@ class GRPOTrainer:
                     "staleness/max": np.max(step_staleness),
                 }
 
-                # Rough approximation of the number of samples in the batch.
-                # We can't get the exact number because groups don't necessarily get batched together.
-                num_samples_in_batch = (len(packing_pool) - len(remainder)) // self.rollout_config.group_size
+                # Number of unique examples in the batch
+                num_samples_in_batch = len(trained_example_ids)
 
                 packing_pool = [x for x in packing_pool if x.output in remainder]
 
@@ -553,16 +569,19 @@ class GRPOTrainer:
                         gbs=actual_num_bins,
                     )
 
+                # Mark examples as consumed now that training is complete
+                session_consumed_ids.update(trained_example_ids)
+
                 # Refit policy, temporarily pausing ongoing rollouts mid-generation.
                 status.update("[bold]Refitting vLLM...[/]")
                 with timer.time("refit_policy_generation"):
                     await self._refit_policy_generation()
 
                 if (step+1) % self.checkpointing_config.save_period == 0:
-                    status.update("[bold]Saving checkpoint...[/]")
+                    status.update(f"[bold]Saving checkpoint for step {step+1}...[/]")
                     self._save_checkpoint(
                         step,
-                        consumed_samples,
+                        self.consumed_example_ids + list(session_consumed_ids),
                         timer,
                     )
 
@@ -591,6 +610,7 @@ class GRPOTrainer:
                 mean_staleness = np.mean(step_staleness)
                 mean_reward = np.mean([x["reward"] for x in step_env_metrics])
 
+                consumed_count = len(self.consumed_example_ids) + len(session_consumed_ids)
                 elapsed = (datetime.now() - step_start).total_seconds()
                 console.log(
                     f"[bold green]Step {step + 1:4d}[/] | "
@@ -599,7 +619,7 @@ class GRPOTrainer:
                     f"samples=[white]{num_samples_in_batch}[/] "
                     f"time=[green]{elapsed:.2f}s[/] "
                     f"fly=[magenta]{in_flight}[/] "
-                    f"left=[blue]{total_samples - consumed_samples}[/]"
+                    f"left=[blue]{total_samples - consumed_count}[/]"
                 )
 
                 timer.reset()
@@ -609,7 +629,7 @@ class GRPOTrainer:
         console.log("[bold green]Finished training![/]")
         self._save_checkpoint(
             step,
-            consumed_samples,
+            self.consumed_example_ids + list(session_consumed_ids),
             timer=timer,
         )
 
@@ -760,7 +780,7 @@ class GRPOTrainer:
     def _save_checkpoint(
         self,
         step: int,
-        consumed_samples: int,
+        consumed_example_ids: list[int],
         timer: Timer,
     ) -> None:
         if not self.checkpointing_config.enabled:
@@ -769,7 +789,7 @@ class GRPOTrainer:
         self.policy.prepare_for_training()
 
         self.grpo_save_state["step"] = step + 1
-        self.grpo_save_state["consumed_samples"] = consumed_samples
+        self.grpo_save_state["consumed_example_ids"] = consumed_example_ids
 
         with timer.time("checkpointing"):
             checkpoint_path = self.checkpointer.init_tmp_checkpoint(
@@ -787,10 +807,6 @@ class GRPOTrainer:
                 tokenizer_path=os.path.join(
                     checkpoint_path, "policy", "tokenizer"
                 ),
-            )
-            torch.save(
-                self.dataloader.state_dict(),
-                os.path.join(checkpoint_path, "train_dataloader.pt"),
             )
             self.checkpointer.finalize_checkpoint(checkpoint_path)
 
