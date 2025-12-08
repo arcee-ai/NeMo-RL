@@ -33,7 +33,6 @@ dependencies = [
     "math-verify",
     "accelerate>=0.26",
     "tensorboard",
-    "omegaconf",
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
@@ -51,6 +50,7 @@ dependencies = [
     "dion @ https://github.com/samsja/dion.git",
     "cut-cross-entropy @ git+https://github.com/apple/ml-cross-entropy.git",
     "vf_exts",
+    "pydantic>=2.12.5",
 ]
 
 [tool.uv.sources]
@@ -90,7 +90,7 @@ omit = ["/tmp/*"]
 [tool.ruff.lint]
 # Enable all `pydocstyle` rules, limiting to those that adhere to the
 # Google convention via `convention = "google"`, below.
-select = ["D", "F"]
+select = ["D", "F", "E", "W"]
 
 # Ignore all lint errors in the examples directory
 exclude = ["examples/**/*.py"]

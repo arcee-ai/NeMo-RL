@@ -1,20 +1,25 @@
 """Configuration for logging."""
-from typing import TypedDict, NotRequired
 
-class WandbConfig(TypedDict):
+from pydantic import BaseModel
+
+
+class WandbConfig(BaseModel):
     """Configuration for Weights & Biases logging."""
-    project: NotRequired[str | None]
-    name: NotRequired[str | None]
 
-class GPUMonitoringConfig(TypedDict):
+    project: str
+    name: str
+
+
+class GPUMonitoringConfig(BaseModel):
     """Configuration for GPU monitoring."""
+
     collection_interval: int | float
     flush_interval: int | float
 
-class LoggerConfig(TypedDict):
+
+class LoggingConfig(BaseModel):
     """Configuration for all logging."""
+
     log_dir: str
-    wandb_enabled: bool
     wandb: WandbConfig
-    monitor_gpus: bool
     gpu_monitoring: GPUMonitoringConfig

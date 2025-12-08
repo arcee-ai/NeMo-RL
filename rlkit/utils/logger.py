@@ -25,6 +25,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Mapping, Optional, TypedDict
 
+from omegaconf import OmegaConf
 import ray
 import requests
 import wandb
@@ -37,10 +38,9 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 
 from rlkit.config.logging import (
-    LoggerConfig,
+    LoggingConfig,
     WandbConfig,
 )
-from rlkit.data.messages import APIMessage
 
 # Flag to track if rich logging has been configured
 _rich_logging_configured = False
@@ -68,11 +68,11 @@ class WandbLogger(LoggerInterface):
 
     def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None):
         """Initialize the Weights & Biases logger."""
-        self.run = wandb.init(**cfg, dir=log_dir)
+        self.run = wandb.init(project=cfg.project, name=cfg.name, dir=log_dir)
         self._log_code()
         self._log_diffs()
         print(
-            f"Initialized WandbLogger for project {cfg.get('project')}, run {cfg.get('name')} at {log_dir}"
+            f"Initialized WandbLogger for project {cfg.project}, run {cfg.name} at {log_dir}"
         )
 
     def _log_diffs(self):
@@ -379,7 +379,7 @@ class RayGpuMonitorLogger:
 
     def start(self) -> None:
         """Start the GPU monitoring thread."""
-        if not ray.is_initialized():
+        if not ray.is_initialized(): # type: ignore[arg-type] - pyrefly hallucinates a fake param here
             raise ValueError(
                 "Ray must be initialized with rlkit.distributed.virtual_cluster.init_ray() before the GPU logging can begin."
             )
@@ -520,7 +520,7 @@ class RayGpuMonitorLogger:
         # TODO: We can re-use the same path for metrics because even though both utilization and memory metrics duplicate
         #       the GPU metadata information; since the metadata is the same for each node, we can overwrite it and expect them to
         #       be the same
-        return self._collect(sku=True)
+        return self._collect(collect_sku=True)
 
     def _collect_metrics(self) -> dict[str, Any]:
         """Collect GPU metrics from all Ray nodes.
@@ -528,25 +528,25 @@ class RayGpuMonitorLogger:
         Returns:
             Dictionary of collected metrics
         """
-        return self._collect(metrics=True)
+        return self._collect(collect_metrics=True)
 
-    def _collect(self, metrics: bool = False, sku: bool = False) -> dict[str, Any]:
+    def _collect(self, collect_metrics: bool = False, collect_sku: bool = False) -> dict[str, Any]:
         """Collect GPU metrics from all Ray nodes.
 
         Returns:
             Dictionary of collected metrics
         """
-        assert metrics ^ sku, (
-            f"Must collect either metrics or sku, not both: {metrics=}, {sku=}"
+        assert collect_metrics ^ collect_sku, (
+            f"Must collect either metrics or sku, not both: {collect_metrics=}, {collect_sku=}"
         )
-        parser_fn = self._parse_metric if metrics else self._parse_gpu_sku
+        parser_fn = self._parse_metric if collect_metrics else self._parse_gpu_sku
 
-        if not ray.is_initialized():
+        if not ray.is_initialized(): # type: ignore[arg-type] - pyrefly hallucinates a fake param here
             print("Ray is not initialized. Cannot collect GPU metrics.")
             return {}
 
         try:
-            nodes = ray.nodes()
+            nodes = ray.nodes() # type: ignore[arg-type] - pyrefly hallucinates a fake param here
             if not nodes:
                 print("No Ray nodes found.")
                 return {}
@@ -641,7 +641,7 @@ class RayGpuMonitorLogger:
 class Logger(LoggerInterface):
     """Main logger class that delegates to multiple backend loggers."""
 
-    def __init__(self, cfg: LoggerConfig):
+    def __init__(self, cfg: LoggingConfig):
         """Initialize the logger.
 
         Args:
@@ -656,33 +656,32 @@ class Logger(LoggerInterface):
         self.loggers: list[LoggerInterface] = []
         self.wandb_logger = None
 
-        self.base_log_dir = cfg["log_dir"]
+        self.base_log_dir = cfg.log_dir
         os.makedirs(self.base_log_dir, exist_ok=True)
 
-        if cfg["wandb_enabled"]:
-            wandb_log_dir = os.path.join(self.base_log_dir, "wandb")
-            os.makedirs(wandb_log_dir, exist_ok=True)
-            self.wandb_logger = WandbLogger(cfg["wandb"], log_dir=wandb_log_dir)
-            self.loggers.append(self.wandb_logger)
+        wandb_log_dir = os.path.join(self.base_log_dir, "wandb")
+        os.makedirs(wandb_log_dir, exist_ok=True)
+        self.wandb_logger = WandbLogger(cfg.wandb, log_dir=wandb_log_dir)
+        self.loggers.append(self.wandb_logger)
 
         # Initialize GPU monitoring if requested
         self.gpu_monitor = None
-        if cfg["monitor_gpus"]:
-            metric_prefix = "ray"
-            step_metric = f"{metric_prefix}/ray_step"
-            if cfg["wandb_enabled"] and self.wandb_logger:
-                self.wandb_logger.define_metric(
-                    f"{metric_prefix}/*", step_metric=step_metric
-                )
+        
+        metric_prefix = "ray"
+        step_metric = f"{metric_prefix}/ray_step"
 
-            self.gpu_monitor = RayGpuMonitorLogger(
-                collection_interval=cfg["gpu_monitoring"]["collection_interval"],
-                flush_interval=cfg["gpu_monitoring"]["flush_interval"],
-                metric_prefix=metric_prefix,
-                step_metric=step_metric,
-                parent_logger=self,
-            )
-            self.gpu_monitor.start()
+        self.wandb_logger.define_metric(
+            f"{metric_prefix}/*", step_metric=step_metric
+        )
+
+        self.gpu_monitor = RayGpuMonitorLogger(
+            collection_interval=cfg.gpu_monitoring.collection_interval,
+            flush_interval=cfg.gpu_monitoring.flush_interval,
+            metric_prefix=metric_prefix,
+            step_metric=step_metric,
+            parent_logger=self,
+        )
+        self.gpu_monitor.start()
 
         if not self.loggers:
             print("No loggers initialized")
@@ -717,7 +716,7 @@ class Logger(LoggerInterface):
 
     def __del__(self) -> None:
         """Clean up resources when the logger is destroyed."""
-        if self.gpu_monitor:
+        if hasattr(self, "gpu_monitor") and self.gpu_monitor is not None:
             self.gpu_monitor.stop()
 
 
@@ -808,7 +807,7 @@ def configure_rich_logging(
 
 
 def print_message_log_samples(
-    message_logs: list[list[APIMessage]],
+    message_logs: list[list[dict]],
     rewards: list[float],
     num_samples: int = 5,
     step: int = 0,

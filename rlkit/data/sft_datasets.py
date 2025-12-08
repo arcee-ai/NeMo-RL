@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from rlkit.config.sft import DatasetType
 import json
 from typing import Callable, Any, cast
 
@@ -93,7 +94,7 @@ transformations: dict[str, SFTDataTransformFn] = {
     "openai": _transform_oai,
 }
 
-def transform_dataset(dataset: Dataset, dataset_type: str, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
+def transform_dataset(dataset: Dataset, dataset_type: DatasetType, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
     """Transform a dataset into the RLKit native format."""
     if dataset_type != "native":
         if dataset_type not in transformations:

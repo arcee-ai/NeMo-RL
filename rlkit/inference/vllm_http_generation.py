@@ -1,4 +1,5 @@
 """vLLM server coordinator."""
+from rlkit.config.policy import PolicyConfig
 import os
 import sys
 import time
@@ -8,7 +9,6 @@ import openai
 import ray
 
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.config.rl.vllm import HttpVllmConfig
 from rlkit.inference.vllm_http import VLLMOpenAIServe
 
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
@@ -16,10 +16,12 @@ from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 class VllmHttpGeneration:
     """vLLM server coordinator."""
-    def __init__(self, cluster: RayVirtualCluster, config: HttpVllmConfig):
+    def __init__(self, cluster: RayVirtualCluster, config: PolicyConfig):
         """Initialize the vLLM server coordinator."""
         # Save config for later use
         self.cfg = config
+        
+        assert config.inference is not None, "RL requires an inference configuration."
     
         runtime_env = {
             "py_executable": sys.executable,
@@ -27,21 +29,19 @@ class VllmHttpGeneration:
         }
 
         # Use Ray Serve replicas for data parallelism, and keep vLLM's internal DP at 1.
-        self.tp_size = config["vllm_cfg"]["tensor_parallel_size"]
-        self.pp_size = config["vllm_cfg"]["pipeline_parallel_size"]
+        self.tp_size = config.inference.tp_size
         
         # Calculate DP size from total GPUs and TP/PP size
-        num_nodes = config["resources"].get("num_nodes", 1)
-        self.num_nodes = 1 if num_nodes is None else int(num_nodes)
-        gpus_per_node = config["resources"].get("gpus_per_node", 1)
+        self.num_nodes = config.inference.resources.num_nodes
+        gpus_per_node = config.inference.resources.gpus_per_node
         gpus_per_node = 1 if gpus_per_node is None else int(gpus_per_node)
-        self.dp_size = gpus_per_node // (self.tp_size * self.pp_size)
+        self.dp_size = gpus_per_node // self.tp_size
 
         self.actors = []
         
         # Get list of available Ray nodes to schedule actors on different nodes
         # Filter to only alive nodes with GPUs
-        all_nodes = ray.nodes()
+        all_nodes = ray.nodes() # type: ignore[arg-type] - pyrefly hallucinates a fake param here
         available_nodes = [
             n for n in all_nodes 
             if n.get("Alive", False) and n.get("Resources", {}).get("GPU", 0) > 0
@@ -54,11 +54,11 @@ class VllmHttpGeneration:
             )
         
         # Get node IDs for scheduling
-        node_ids = [n["NodeID"] for n in available_nodes[:num_nodes]]
+        node_ids = [n["NodeID"] for n in available_nodes[:self.num_nodes]]
         print(f"Scheduling {self.num_nodes} vLLM actors across nodes: {node_ids}")
         
         # Create all actors in parallel - each is on a different node so no GPU competition
-        server_timeout = config.get("server_timeout", 60)
+        server_timeout = config.inference.server_timeout
         
         for i in range(self.num_nodes):
             # Use NodeAffinitySchedulingStrategy to force this actor to a specific node
@@ -72,11 +72,11 @@ class VllmHttpGeneration:
                 runtime_env=runtime_env,
                 scheduling_strategy=scheduling_strategy,
             ).remote(
-                model=config["model_name"],
+                model=config.model_name,
                 tensor_parallel_size=self.tp_size,
-                pipeline_parallel_size=self.pp_size,
-                max_model_len=config["vllm_cfg"]["max_model_len"],
-                gpu_memory_utilization=config["vllm_cfg"]["gpu_memory_utilization"],
+                pipeline_parallel_size=1,
+                max_model_len=config.max_total_sequence_length,
+                gpu_memory_utilization=config.inference.gpu_memory_utilization,
                 data_parallel_size=self.dp_size,
             )
             self.actors.append(actor)
@@ -129,7 +129,7 @@ class VllmHttpGeneration:
         Returns:
             list[ray.ObjectRef]: Futures to await alongside training futures for setting up collective communication.
         """
-        return [actor.admin_init_collective.remote(i * self.dp_size * self.tp_size * self.pp_size, ip, port, world_size) for i, actor in enumerate(self.actors)]
+        return [actor.admin_init_collective.remote(i * self.dp_size * self.tp_size, ip, port, world_size) for i, actor in enumerate(self.actors)]
 
     async def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         """Reset prefix cache on all vLLM servers."""

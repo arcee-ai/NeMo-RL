@@ -32,21 +32,23 @@ from torch.distributed.checkpoint.state_dict import (
     set_model_state_dict,
 )
 from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor import distribute_tensor
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
+    PreTrainedTokenizerBase,
 )
 from rlkit.algorithms.loss_functions import LossFunction
 from rlkit.algorithms.utils import masked_mean, _pad_tensor
-from rlkit.config import PolicyConfig
+from rlkit.config.policy import PolicyConfig
 from rlkit.models import BaseModel
-from rlkit.models.utils import (
+from rlkit.training.utils import (
     configure_dynamo_cache,
     configure_expandable_segments,
     get_gpu_info,
-    import_class_from_path,
+    import_class_by_name,
     clip_grad_by_total_norm_,
     get_grad_norm,
     sliding_window_overwrite,
@@ -113,7 +115,7 @@ class RLSample(PackedSample):
     advantages: list[float]
     generation_logprobs: list[float]
 
-@ray.remote()
+@ray.remote
 class DTensorV2PolicyWorker:
     """Training worker."""
     
@@ -130,7 +132,7 @@ class DTensorV2PolicyWorker:
     def __init__(
         self,
         config: PolicyConfig,
-        tokenizer: AutoTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         weights_path: Optional[str] = None,
         optimizer_path: Optional[str] = None,
         use_hf_checkpoint: bool = False,
@@ -158,18 +160,18 @@ class DTensorV2PolicyWorker:
         torch.distributed.init_process_group(backend="nccl") # type: ignore[attr-defined]
         self.rank = torch.distributed.get_rank() # type: ignore[attr-defined]
         world_size = torch.distributed.get_world_size() # type: ignore[attr-defined]
-        model_name = self.cfg["model_name"]
+        model_name = self.cfg.model_name
 
-        self.max_grad_norm = self.cfg["max_grad_norm"]
+        self.max_grad_norm = self.cfg.training.max_grad_norm
 
-        if self.cfg["precision"] == "float32":
+        if self.cfg.training.dtype == "float32":
             self.dtype = torch.float32
-        elif self.cfg["precision"] == "bfloat16":
+        elif self.cfg.training.dtype == "bfloat16":
             self.dtype = torch.bfloat16
-        elif self.cfg["precision"] == "float16":
+        elif self.cfg.training.dtype == "float16":
             self.dtype = torch.float16
         else:
-            raise ValueError(f"Unknown precision: {self.cfg['precision']}")
+            raise ValueError(f"Unknown dtype: {self.cfg.training.dtype}")
 
         print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
 
@@ -229,11 +231,11 @@ class DTensorV2PolicyWorker:
         # 3) Move to GPU + Apply parallelism strategies
         # ------------------------------------------------
 
-        self.tp_size = self.cfg["dtensor_v2_cfg"].get("tensor_parallel_size", 1)
-        self.cp_size = self.cfg["dtensor_v2_cfg"].get("context_parallel_size", 1)
-        self.pp_size = self.cfg["dtensor_v2_cfg"].get("pipeline_parallel_size", 1)
-        self.ep_size = self.cfg["dtensor_v2_cfg"].get("expert_parallel_size", 1)
-        self.dp_replicate = self.cfg["dtensor_v2_cfg"].get("dp_replicate", 1)
+        self.tp_size = self.cfg.training.parallelism.tp_size
+        self.cp_size = 1
+        self.pp_size = 1
+        self.ep_size = self.cfg.training.parallelism.ep_size
+        self.dp_replicate = self.cfg.training.parallelism.dp_replicate
 
         if self.ep_size > 1:
             assert (
@@ -260,8 +262,8 @@ class DTensorV2PolicyWorker:
 
         device_mesh = torch.distributed.device_mesh.init_device_mesh( # type: ignore[attr-defined]
             "cuda",
-            mesh_shape,
-            mesh_dim_names=mesh_dim_names,
+            tuple(mesh_shape),
+            mesh_dim_names=tuple(mesh_dim_names),
         )
 
         self.dp_mesh = device_mesh[tuple(dp_names)]._flatten(mesh_dim_name="dp")
@@ -272,7 +274,7 @@ class DTensorV2PolicyWorker:
             mesh_dim_name="dp_cp"
         )
         if self.ep_size != 1:
-            self.ep_mesh = device_mesh[tuple(ep_names)]._flatten(mesh_dim_name="ep")
+            self.ep_mesh: DeviceMesh | None = device_mesh[tuple(ep_names)]._flatten(mesh_dim_name="ep")
         else:
             self.ep_mesh = None
 
@@ -288,9 +290,8 @@ class DTensorV2PolicyWorker:
         self.dp_size = self.dp_mesh.size()
         self.device_mesh = device_mesh
 
-        activation_checkpointing = self.cfg["dtensor_v2_cfg"].get(
-            "activation_checkpointing", False
-        )
+        activation_checkpointing = self.cfg.training.activation_checkpointing
+        
         self.model = parallelize_model(  # type: ignore[operator]
             model=self.model,
             # Mesh info
@@ -320,21 +321,19 @@ class DTensorV2PolicyWorker:
             ),
         )
 
-        optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
+        optimizer_cls = import_class_by_name(self.cfg.training.optimizer.name)
         
         # Set up optimizer - if we are using the Muon optimizer, we need to gather the params by tensor type
         # Otherwise, just init the optimizer as normal
-        if self.cfg["optimizer"].get("scalar_optim") is not None:
-            scalar_param_optim = self.cfg["optimizer"]["scalar_optim"]
+        if self.cfg.training.optimizer.scalar_optim is not None:
+            scalar_param_optim = self.cfg.training.optimizer.scalar_optim
             
             # Gather all params by tensor type
             muon_params = []
             non_muon_params = []
             
-            # For convenience, include a sensible default.
-            default_extra_params: list[str] = ["output.weight", "tok_embeddings.weight"]
-            
-            scalar_optim_extra_params = self.cfg["optimizer"].get("non_muon_params", default_extra_params)
+            # Default: ["output.weight", "tok_embeddings.weight"]
+            scalar_optim_extra_params = self.cfg.training.optimizer.non_muon_params
             
             found_extra_params = []
             
@@ -356,50 +355,53 @@ class DTensorV2PolicyWorker:
                 if extra_param not in found_extra_params:
                     raise ValueError(f"Did not find '{extra_param}' in model parameters, but it was specified for exclusion from Muon. Please specify your own non_muon_params in the config.")
             
-            param_groups = [dict(params=muon_params)]
-            param_groups.append(
-                dict(
-                    params=non_muon_params,
-                    algorithm=scalar_param_optim,
-                    **self.cfg["optimizer"].get("scalar_optim_kwargs", {})
-                )
-            )
+            param_groups = [
+                {
+                    "params": muon_params,
+                },
+                {
+                    "params": non_muon_params,
+                    "algorithm": scalar_param_optim,
+                    **self.cfg.training.optimizer.scalar_optim_kwargs,
+                },
+            ]
             
-            # Create optimizer
-            if self.cfg["optimizer"]["pass_device_mesh"]:
-                self.optimizer = optimizer_cls(
-                    param_groups,
-                    self.device_mesh["dp"],
-                    **self.cfg["optimizer"]["kwargs"],
-                )
-            else:
-                self.optimizer = optimizer_cls(
-                    param_groups,
-                    **self.cfg["optimizer"]["kwargs"],
-                )
+            # Create optimizer, check for TypeError to helpfully suggest config option
+            try:
+                if self.cfg.training.optimizer.pass_device_mesh:
+                    self.optimizer = optimizer_cls(
+                        param_groups,
+                        self.device_mesh["dp"],
+                        **self.cfg.training.optimizer.kwargs,
+                    )
+                else:
+                    self.optimizer = optimizer_cls(
+                        param_groups,
+                        **self.cfg.training.optimizer.kwargs,
+                    )
+            except TypeError as e:
+                raise TypeError("Got TypeError trying to create optimizer. You might need to change `pass_device_mesh` in your optimizer config.") from e
         else:
-            if "muon" in self.cfg["optimizer"]["name"].lower():
-                raise ValueError("Please specify policy.optimizer.scalar_optim to use the Muon optimizer.")
+            if "muon" in self.cfg.training.optimizer.name.lower():
+                raise ValueError("Tried to instantiate Muon optimizer, but policy.optimizer.scalar_optim is not set.")
+            
             self.optimizer = optimizer_cls(
-                self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
+                self.model.parameters(), **self.cfg.training.optimizer.kwargs
             )
 
         # Set up scheduler
-        if len(self.cfg["scheduler"]) > 0:
+        scheduler_phases = self.cfg.training.optimizer.scheduler.phases
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler
+        if len(scheduler_phases) > 0:
             schedulers = []
-            for scheduler_cfg in self.cfg["scheduler"]:
-                if "name" in scheduler_cfg:
-                    schedulers.append(
-                        import_class_from_path(scheduler_cfg["name"])(
-                            self.optimizer, **scheduler_cfg["kwargs"]
-                        )
+            for scheduler_cfg in self.cfg.training.optimizer.scheduler.phases:
+                schedulers.append(
+                    import_class_by_name(scheduler_cfg.name)(
+                        self.optimizer, **scheduler_cfg.kwargs
                     )
-                else:
-                    assert "milestones" in scheduler_cfg, (
-                        "unknown scheduler config: ",
-                        scheduler_cfg,
-                    )
-                    milestones: list[int] = scheduler_cfg["milestones"]
+                )
+            
+            milestones = self.cfg.training.optimizer.scheduler.milestones
 
             self.scheduler = torch.optim.lr_scheduler.SequentialLR(
                 self.optimizer, schedulers, milestones
@@ -506,17 +508,17 @@ class DTensorV2PolicyWorker:
         Returns:
             dict[str, Any]: Metrics from the training step.
         """
-        gbs = self.cfg["train_global_batch_size"]
-        mbs = self.cfg["train_micro_batch_size"]
+        gbs = self.cfg.training.global_batch_size
+        mbs = self.cfg.training.micro_batch_size
         
         # Sanity-check input samples
         assert len(data) > 0, "Data must contain at least one sample"
         assert len(data) % mbs == 0, f"Local batch size ({len(data)}) must be a multiple of the microbatch size ({mbs})"
         assert all("token_ids" in sample for sample in data), f"Data must contain 'token_ids' in each sample, got {data[0].keys()}"
         assert all("token_mask" in sample for sample in data), f"Data must contain 'token_mask' in each sample, got {data[0].keys()}"
+        
         if all("advantages" in sample for sample in data):
             data_type = "rl"
-            data: list[RLSample] = cast(list[RLSample], data)
         elif all("targets" in sample for sample in data):
             data_type = "sft"
             # SFT just uses token_ids and token_mask so we don't need to cast it.
@@ -536,7 +538,7 @@ class DTensorV2PolicyWorker:
             if hasattr(self.model, "layers"):
                 for layer in self.model.layers.values():
                     if hasattr(layer, "moe") and layer.moe is not None:
-                        layer.moe.reset_router_statistics()
+                        layer.moe.reset_router_statistics() # type: ignore[attr-defined] - we know it has this
 
             all_mb_metrics = []
 
@@ -554,7 +556,7 @@ class DTensorV2PolicyWorker:
                     values = [sample[key] for sample in microbatch_samples] # type: ignore - key will always be in the sample
                     max_len = max([len(value) for value in values])
                     
-                    assert max_len <= self.cfg["max_total_sequence_length"], f"Max sequence length {max_len} is greater than the max total sequence length {self.cfg['max_total_sequence_length']}"
+                    assert max_len <= self.cfg.max_total_sequence_length, f"Max sequence length {max_len} is greater than the max total sequence length {self.cfg.max_total_sequence_length}"
                     padded_values = [
                         _pad_tensor(
                             torch.tensor(value, device="cuda"),
@@ -663,7 +665,7 @@ class DTensorV2PolicyWorker:
                 for k, v in m.items():
                     mb_metrics[k].append(v)
 
-            metrics = {
+            metrics: dict[str, Any] = {
                 "grad_norm": grad_norm,
                 "loss": torch.tensor(mb_losses).sum(),
                 "rank": torch.distributed.get_rank(), # type: ignore[attr-defined]

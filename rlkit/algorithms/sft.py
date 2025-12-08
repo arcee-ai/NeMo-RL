@@ -34,7 +34,7 @@ from rlkit.config import (
     DataConfig,
     LoggerConfig,
     PolicyConfig,
-    SFTConfig,
+    SFTTrainerConfig,
     SFTMasterConfig as MasterConfig,
 )
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
@@ -151,7 +151,7 @@ class SFTTrainer:
         val_dataset: Optional[Dataset],
         data_config: DataConfig,
         policy_config: PolicyConfig,
-        sft_config: SFTConfig,
+        sft_config: SFTTrainerConfig,
         last_checkpoint_path: Optional[str],
     ) -> tuple[
         StatefulDataLoader,

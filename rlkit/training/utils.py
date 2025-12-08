@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 import os
 from typing import Any, Iterable, Optional, Union
 
@@ -168,7 +169,7 @@ def configure_dynamo_cache() -> None:
     Disable autotune_local_cache as a workaround.
     See https://github.com/pytorch/pytorch/issues/153791 for more details.
     """
-    torch._inductor.config.autotune_local_cache = False
+    torch._inductor.config.autotune_local_cache = False # type: ignore[attr-defined]
 
 
 def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
@@ -374,3 +375,9 @@ def get_device_mesh_info(
         "dp_cp_names": dp_cp_names,
         "ep_names": ep_names,
     }
+
+def import_class_by_name(name: str) -> Any:
+    """Import a class by name."""
+    module_name, class_name = name.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)

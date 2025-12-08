@@ -1,4 +1,3 @@
-"""Wrapper class for all of the training workers."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from rlkit.config.policy import PolicyConfig
 import os
 from collections import defaultdict
 from typing import Any, Optional, Union
@@ -26,13 +24,13 @@ from rlkit.algorithms.loss_functions import LossFunction
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
-from rlkit.training.utils import get_device_mesh_info
+from rlkit.config import PolicyConfig
+from rlkit.models.policy.v2_policy_worker import get_device_mesh_info
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
 
 class Policy:
-    """Wrapper class for all of the training workers."""
     def __init__(
         self,
         cluster: RayVirtualCluster,
@@ -47,19 +45,22 @@ class Policy:
         use_hf_checkpoint: bool = False,
         use_cut_cross_entropy: bool = False,
     ):
-        """Initialize all training workers."""
         if weights_path:
             weights_path = os.path.abspath(weights_path)
         if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
+
+        dtensor_v2_cfg = config["dtensor_v2_cfg"]
         
-        worker_builder_cls = "rlkit.training.v2_policy_worker.DTensorV2PolicyWorker"
-        tp_size = config.training.parallelism.tp_size
-        # TODO: Fully remove this or add it back in
-        cp_size = 1
-        pp_size = 1
-        ep_size = config.training.parallelism.ep_size
-        dp_replicate = config.training.parallelism.dp_replicate
+        assert dtensor_v2_cfg is not None, "DTensorV2Config is required"
+
+        worker_builder_cls = "rlkit.models.policy.v2_policy_worker.DTensorV2PolicyWorker"
+        tp_size = dtensor_v2_cfg.get("tensor_parallel_size", 1)
+        cp_size = dtensor_v2_cfg.get("context_parallel_size", 1)
+        pp_size = dtensor_v2_cfg.get("pipeline_parallel_size", 1)
+        ep_size = dtensor_v2_cfg.get("expert_parallel_size", 1)
+        dp_replicate = dtensor_v2_cfg.get("dp_replicate", 1)
+        env_vars = dtensor_v2_cfg.get("env_vars", {})
 
         # Build a flattened DP axis for DTensorV2: dp = dp_replicate * dp_shard_mod_ep * dp_shard_in_ep
         mesh_info = get_device_mesh_info(
@@ -122,7 +123,7 @@ class Policy:
             name_prefix=name_prefix,
             workers_per_node=workers_per_node,
             sharding_annotations=self.sharding_annotations,
-            env_vars={},
+            env_vars=env_vars,
         )
 
         self.cfg = config
@@ -131,19 +132,11 @@ class Policy:
     def init_collective(
         self, ip: str, port: int, world_size: int
     ) -> list[ray.ObjectRef]:
-        """Initialize the collective communication.
-        
-        Args:
-            ip: The IP address of the head node.
-            port: The port to use for collective communication.
-            world_size: The total number of workers in the collective (train rank0 + inference workers).
-        
-        Returns:
-            list[ray.ObjectRef]: Futures to await alongside vLLM futures for setting up collective communication.
-        """
+        """Initialize the collective communication."""
         futures = self.worker_group.run_all_workers_single_data(
             "init_collective", ip=ip, port=port, world_size=world_size
         )
+        # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
     async def train(
@@ -159,11 +152,8 @@ class Policy:
             sharded_data: List of shards (one per DP rank), where each shard is a list
                 of packed samples (dicts with token_ids, token_mask, etc.).
             loss_fn: Loss function to use for training.
-            pad_values: Dictionary mapping field names to the placeholder value to use when padding tensors.
+            pad_values: Dictionary mapping field names to their pad values.
             eval_mode: Whether to run in evaluation mode (no gradient updates).
-        
-        Returns:
-            dict[str, Any]: A dictionary containing the metrics from the training step.
         """
         assert len(sharded_data) > 0, "Data must contain at least one shard"
         
@@ -265,16 +255,26 @@ class Policy:
 
         return aggregated_results
 
+    def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
+        # We don't need to do anything here
+        return True
+
     def prepare_for_training(self, *args: Any, **kwargs: Any) -> None:
-        """Prepares the workers for a training step, onloading everything to the GPU."""
+        # onload everything to the GPU
         futures = self.worker_group.run_all_workers_single_data("prepare_for_training")
+        ray.get(futures)
+
+    def prepare_for_lp_inference(self, *args: Any, **kwargs: Any) -> None:
+        futures = self.worker_group.run_all_workers_single_data(
+            "prepare_for_lp_inference"
+        )
         ray.get(futures)
 
     def prepare_refit_info(self) -> dict[str, Any]:
         """Prepare the info for refit.
 
         Returns:
-            dict[str, Any]: A dictionary containing the info for refit.
+            dict: A dictionary containing the info for refit.
         """
         futures = self.worker_group.run_all_workers_single_data("prepare_refit_info")
         results = ray.get(futures)
@@ -282,16 +282,11 @@ class Policy:
         return results[0]
 
     def broadcast_weights_for_collective(self) -> list[ray.ObjectRef]:
-        """Start futures for broadcasting model weights to inference workers.
-        
-        These futures should be awaited alongside the vLLM futures for receiving the weight.
-        
-        Returns:
-            list[ray.ObjectRef]: Futures to await alongside vLLM futures for broadcasting model weights.
-        """
+        """Broadcast the weights for collective communication."""
         futures = self.worker_group.run_all_workers_single_data(
             "broadcast_weights_for_collective"
         )
+        # this function should co-work with vllm, so we should wait for all futures to complete outside
         return futures
 
     def save_checkpoint(

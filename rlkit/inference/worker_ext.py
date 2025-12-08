@@ -1,4 +1,6 @@
+# pyrefly: ignore-errors
 """vLLM worker extension."""
+
 from collections import defaultdict
 from typing import Any, Optional
 import asyncio
@@ -9,6 +11,7 @@ from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
 class VllmHttpWorkerExtension:
     """vLLM worker extension."""
+    
     def init_collective(
         self, rank_prefix: int, ip: str, port: int, world_size: int
     ) -> None:
@@ -69,15 +72,12 @@ class VllmHttpWorkerExtension:
         """
         try:
             is_tensor_packed = local_device_ipc_handles[0]
-            if is_tensor_packed:
-                _, all_handles, list_keys = local_device_ipc_handles
-            else:
-                _, name_and_handle_list = local_device_ipc_handles
 
             device_id = self.device.index
             weights = []
 
             if is_tensor_packed:
+                _, all_handles, list_keys = local_device_ipc_handles
                 assert self.state_dict_info is not None, (
                     "state_dict_info is not prepared. "
                     "Please call prepare_refit_info when initializing the worker."
@@ -116,6 +116,7 @@ class VllmHttpWorkerExtension:
                     f"This indicates the keys list order doesn't match the order used when packing tensors."
                 )
             else:
+                _, name_and_handle_list = local_device_ipc_handles
                 # Process each handle to get the tensor
                 for name, handle in name_and_handle_list:
                     func = rebuild_cuda_tensor

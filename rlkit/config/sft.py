@@ -1,15 +1,17 @@
 """SFT-specific configuration options."""
-from typing import TypedDict
 
-from rlkit.config.rl.policy import PolicyConfig
-from rlkit.config.data import DataConfig
-from rlkit.config.logging import LoggerConfig
-from rlkit.config.cluster import ClusterConfig
-from rlkit.config.checkpointing import CheckpointingConfig
+from typing import Literal
+
+from pydantic import BaseModel
+
+from .checkpointing import CheckpointingConfig
+from .logging import LoggingConfig
+from .policy import PolicyConfig
 
 
-class SFTConfig(TypedDict):
+class SFTTrainerConfig(BaseModel):
     """SFT-specific configuration options."""
+
     max_num_steps: int
     max_num_epochs: int
     val_period: int
@@ -18,16 +20,27 @@ class SFTConfig(TypedDict):
     val_micro_batch_size: int
     val_at_start: bool
     seed: int
-    
-    run_vram_torture_test: bool  # Ignore prompts and run all training on a full context window of nonsense.
-    use_cut_cross_entropy: bool  # Use cut-cross-entropy loss kernel
+
+    vram_torture_test: bool  # Ignore prompts and run all training on a full context window of nonsense.
 
 
-class SFTMasterConfig(TypedDict):
+DatasetType = Literal["axolotl", "openai_prompt_completion", "openai", "sharegpt", "native"]
+
+
+class DatasetConfig(BaseModel):
+    """Configuration for datasets."""
+
+    dataset_name: str
+    dataset_type: DatasetType = "native"
+    hf_dataset_format: Literal["hub", "disk"] = "hub"
+    shuffle: bool = False
+
+
+class SFTConfig(BaseModel):
     """Root configuration for SFT runs."""
+
+    sft: SFTTrainerConfig
     policy: PolicyConfig
-    data: DataConfig
-    sft: SFTConfig
-    logger: LoggerConfig
-    cluster: ClusterConfig
+    data: DatasetConfig
+    logging: LoggingConfig
     checkpointing: CheckpointingConfig

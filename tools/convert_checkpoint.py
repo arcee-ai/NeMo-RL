@@ -62,20 +62,13 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, pu
     if not os.path.exists(dcp_path):
         raise FileNotFoundError(f"DCP checkpoint not found: {dcp_path}")
 
-    if not push_to_hub:
-        output_dir = os.path.abspath(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
-    else:
-        # Use output_dir as the repo name (extract basename if it's a path)
-        repo_name = os.path.basename(output_dir.rstrip('/'))
-
     # Load native model and state
     print("Loading native model and state")
     native_state, hf_config = _load_native_model_and_state(dcp_path, hf_model_name)
 
     # Build adapter to map native -> HF keys
     print("Building adapter")
-    _, model_args, adapter_class, _ = get_model_config(hf_config)
+    _, model_args, adapter_class = get_model_config(hf_config)
     adapter = adapter_class(model_args=model_args, hf_assets_path=hf_model_name)
 
     # Convert keys to HF format
@@ -94,11 +87,14 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, pu
     tokenizer = AutoTokenizer.from_pretrained(hf_model_name, trust_remote_code=True)
 
     if push_to_hub:
+        repo_name = os.path.basename(output_dir.rstrip('/'))
         print(f"Pushing model to HuggingFace Hub as private repository: {repo_name}")
         hf_model.push_to_hub(repo_name, private=True, safe_serialization=True)
         tokenizer.push_to_hub(repo_name, private=True)
         print(f"Successfully pushed model to HuggingFace Hub: {repo_name}")
     else:
+        output_dir = os.path.abspath(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
         print("Saving HF model")
         # Save full HF checkpoint
         hf_model.save_pretrained(output_dir, safe_serialization=True)

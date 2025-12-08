@@ -21,7 +21,6 @@ import glob
 import json
 import os
 import shutil
-import warnings
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union
 
@@ -60,15 +59,13 @@ class CheckpointManager:
         Args:
             config (CheckpointingConfig): User-supplied configuration for checkpoint management.
         """
-        self.checkpoint_dir = Path(config["checkpoint_dir"])
-        self.metric_name = config["metric_name"]
-        self.higher_is_better = config["higher_is_better"]
-        self.keep_top_k = config["keep_top_k"]
+        self.checkpoint_dir = Path(config.checkpoint_dir)
+        self.keep_top_k = config.keep_top_k
 
     def init_tmp_checkpoint(
         self,
         step: int,
-        training_info: Mapping[str, Any],
+        training_info: dict[str, Any],
         run_config: Optional[Mapping[str, Any]] = None,
     ) -> PathLike:
         """Initialize a temporary checkpoint directory.
@@ -159,31 +156,10 @@ class CheckpointManager:
             else None
         )
 
-        if self.metric_name is None:
-            checkpoint_history.sort(key=lambda x: x[0], reverse=True)
-        else:
-            try:
-                assert self.metric_name is not None  # Type checker hint
-                # sort by metric value first, then by step number (for equal metrics, prefer more recent)
-                if self.higher_is_better:
-                    # For higher_is_better=True: higher metric values first, then higher step numbers
-                    checkpoint_history.sort(
-                        key=lambda x: (x[2][self.metric_name], x[0]), reverse=True
-                    )
-                else:
-                    # For higher_is_better=False: lower metric values first, then higher step numbers for equal values
-                    checkpoint_history.sort(
-                        key=lambda x: (x[2][self.metric_name], -x[0])
-                    )
-            except KeyError:
-                warnings.warn(
-                    f"Metric {self.metric_name} not found in checkpoint history. Keeping most recent k checkpoints."
-                )
-                checkpoint_history.sort(key=lambda x: x[0], reverse=True)
+        # Sort by step number
+        checkpoint_history.sort(key=lambda x: x[0], reverse=True)
 
-                self.metric_name = None
-
-        # remove checkpoints that are not in the top-k
+        # Remove checkpoints that are not in the top-k
         for checkpoint in checkpoint_history[self.keep_top_k :]:
             if exclude_latest and checkpoint[0] == latest_step:
                 continue
@@ -191,30 +167,6 @@ class CheckpointManager:
                 f"Removing checkpoint {checkpoint[1]} due to being outside top-{self.keep_top_k}"
             )
             shutil.rmtree(checkpoint[1])
-
-    def get_best_checkpoint_path(self) -> Optional[str]:
-        """Get the path to the best checkpoint based on the metric.
-
-        Returns the path to the checkpoint with the best metric value. If no checkpoints
-        exist, returns None. If the metric isn't found, we warn and return the latest checkpoint.
-
-        Returns:
-            Optional[str]: Path to the best checkpoint, or None if no valid checkpoints exist.
-        """
-        checkpoint_history = _load_checkpoint_history(self.checkpoint_dir)
-        if len(checkpoint_history) == 0:
-            return None
-        # sort by metric value
-        if self.metric_name not in checkpoint_history[0][2]:
-            warnings.warn(
-                f"Metric {self.metric_name} not found in checkpoint history. Returning last"
-            )
-            return self.get_latest_checkpoint_path()
-
-        checkpoint_history.sort(
-            key=lambda x: x[2][self.metric_name], reverse=self.higher_is_better
-        )
-        return str(checkpoint_history[0][1])
 
     def get_latest_checkpoint_path(self) -> Optional[str]:
         """Get the path to the latest checkpoint.

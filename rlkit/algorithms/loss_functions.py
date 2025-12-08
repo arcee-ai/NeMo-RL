@@ -22,8 +22,8 @@ from rlkit.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
 )
-from rlkit.config.rl.loss import CISPOLossConfig, ClippedPGLossConfig
-from rlkit.models.policy.utils import get_logprobs_from_vocab_parallel_logits
+from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig
+from rlkit.training.utils import get_logprobs_from_vocab_parallel_logits
 
 Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
@@ -123,7 +123,7 @@ class ClippedPGLossFn(LossFunction):
     
     ratio_clip_min: float
     ratio_clip_max: float
-    ratio_clip_c: float
+    ratio_clip_c: float | None
     reference_policy_kl_penalty: float
     disable_ppo_ratio: bool
     use_on_policy_kl_approximation: bool
@@ -131,15 +131,15 @@ class ClippedPGLossFn(LossFunction):
 
     def __init__(self, cfg: ClippedPGLossConfig):
         """Initialize the Clipped Policy Gradient loss function."""
-        self.ratio_clip_min = cfg["ratio_clip_min"]
-        self.ratio_clip_max = cfg["ratio_clip_max"]
-        self.ratio_clip_c = cfg["ratio_clip_c"]  # set to None to disable dual-clipping
-        self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
-        self.disable_ppo_ratio = cfg.get("disable_ppo_ratio", False)
-        self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
-        self.use_importance_sampling_correction = cfg[
-            "use_importance_sampling_correction"
-        ]
+        self.ratio_clip_min = cfg.ratio_clip_min
+        self.ratio_clip_max = cfg.ratio_clip_max
+        self.ratio_clip_c = cfg.ratio_clip_c
+        # self.reference_policy_kl_penalty = cfg.reference_policy_kl_penalty
+        self.reference_policy_kl_penalty = 0.0 # reference KL disabled for now
+        self.disable_ppo_ratio = cfg.disable_ppo_ratio
+        # self.use_on_policy_kl_approximation = cfg.use_on_policy_kl_approximation
+        self.use_on_policy_kl_approximation = False # reference KL disabled for now
+        self.use_importance_sampling_correction = cfg.use_importance_sampling_correction
 
     def __call__(
         self,
@@ -362,9 +362,9 @@ class CISPOLossFn(LossFunction):
 
     def __init__(self, cfg: CISPOLossConfig):
         """Initialize the CISPO loss function."""
-        self.epsilon_max = cfg["epsilon_max"]
-        self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
-        self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
+        self.epsilon_max = cfg.epsilon_max
+        self.reference_policy_kl_penalty = 0.0 # reference KL disabled for now
+        self.use_on_policy_kl_approximation = False # reference KL disabled for now
 
     def __call__(
         self,

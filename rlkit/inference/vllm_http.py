@@ -21,7 +21,7 @@ class VLLMOpenAIServe:
         gpu_memory_utilization: float = 0.7,
         data_parallel_size: int = 1,
         extra_cli_args: Optional[list[str]] = None,
-        worker_extension_cls: str = "rlkit.models.generation.worker_ext.VllmHttpWorkerExtension",
+        worker_extension_cls: str = "rlkit.inference.worker_ext.VllmHttpWorkerExtension",
         tool_call_parser: str | None = None,
     ):
         """Initialize a vLLM HTTP server on one node."""
@@ -51,7 +51,9 @@ class VLLMOpenAIServe:
 
         parser = FlexibleArgumentParser(description="vLLM OAI app for Ray Serve")
         parser = make_arg_parser(parser)
-        self._args = parser.parse_args(args=args)
+        _args = parser.parse_args(args=args)
+        assert _args is not None, "Failed to parse arguments"
+        self._args = _args
         validate_parsed_serve_args(self._args)
         
         # Track engine initialization status
@@ -73,7 +75,8 @@ class VLLMOpenAIServe:
         engine_args.worker_extension_cls = worker_extension_cls
 
         self._engine_client_ctx = build_async_engine_client_from_engine_args(
-            engine_args, disable_frontend_multiprocessing=self._args.disable_frontend_multiprocessing
+            engine_args, # type: ignore[arg-type] - appears to be type hinting issue in vLLM
+            disable_frontend_multiprocessing=self._args.disable_frontend_multiprocessing
         )
         self._engine_client = await self._engine_client_ctx.__aenter__()
         
