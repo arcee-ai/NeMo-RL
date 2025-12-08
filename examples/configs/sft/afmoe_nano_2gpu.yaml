@@ -1,117 +1,77 @@
-# SFT Algorithm Configuration
 sft:
-  ## total number of steps to train will equal
-  ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
-  max_num_epochs: 1
-  max_num_steps: 9999999
-
+  max_steps: 9999999  # Train until data exhausted or this limit
   val_period: 100
   val_batches: 8
-  val_global_batch_size: 16
-  val_micro_batch_size: 1
   val_at_start: true
   seed: 42
 
-  run_vram_torture_test: false
+policy:
+  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v4"
+  max_total_sequence_length: 4096
 
-  use_cut_cross_entropy: true
+  training:
+    global_batch_size: 128
+    micro_batch_size: 1
+    dtype: "bfloat16"
+    activation_checkpointing: true
+    max_grad_norm: 1.0
+
+    parallelism:
+      tp_size: 1
+      ep_size: 1
+      dp_replicate: 2
+
+    optimizer:
+      name: "torchao.optim.AdamW8bit"
+      kwargs:
+        lr: 3.0e-6
+        weight_decay: 0.01
+        betas: [0.9, 0.999]
+        eps: 1.0e-8
+      scheduler:
+        phases:
+          - name: "torch.optim.lr_scheduler.LinearLR"
+            kwargs:
+              start_factor: 1.0e-6
+              end_factor: 1.0
+              total_iters: 100
+          - name: "torch.optim.lr_scheduler.LinearLR"
+            kwargs:
+              start_factor: 1.0
+              end_factor: 0.7
+              total_iters: 700
+          - name: "torch.optim.lr_scheduler.LinearLR"
+            kwargs:
+              start_factor: 0.7
+              end_factor: 1.0e-6
+              total_iters: 633
+        milestones: [100, 800]
+
+    loss:
+      loss_fn: cut_cross_entropy
+
+    resources:
+      gpus_per_node: 2
+      num_nodes: 1
+
+data:
+  train_dataset: "arcee-train/AFMoE-SFT-v0.1.9-64k-RLKit-Fixed"
+  val_dataset: null
+  dataset_type: "native"
+  from_disk: false
+  shuffle: false
+
+logging:
+  log_dir: "logs"
+  wandb:
+    project: "AFMoE-6b-SFT-Debug"
+    name: "afmoe-nano-sft"
+  gpu_monitoring:
+    collection_interval: 10
+    flush_interval: 10
 
 checkpointing:
   enabled: true
   checkpoint_dir: "results/sft"
-  metric_name: null
-  higher_is_better: false
-  keep_top_k: 3
   save_period: 200
-  checkpoint_must_save_by: null
-  hf_checkpoint: true
-
-policy:
-  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v4"
-  tokenizer:
-    name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 128
-  train_micro_batch_size: 1
-  max_total_sequence_length: 4096
-  precision: "bfloat16"
-
-  dtensor_v2_cfg:
-    enabled: true
-    cpu_offload: false
-    sequence_parallel: false
-    activation_checkpointing: true
-    tensor_parallel_size: 1
-    context_parallel_size: 1
-    expert_parallel_size: 1
-    dp_replicate: 2
-    custom_parallel_plan: null
-
-  dynamic_batching:
-    enabled: true
-    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
-    algorithm: "modified_first_fit_decreasing"
-    sequence_length_round: 64
-
-  sequence_packing:
-    enabled: false
-    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
-    algorithm: "modified_first_fit_decreasing"
-    sequence_length_round: 64
-
-  # makes the training sequence length divisible by the tensor parallel size
-  # this is useful for sequence parallel training
-  make_sequence_length_divisible_by: ${policy.dtensor_v2_cfg.tensor_parallel_size}
-  max_grad_norm: 1.0
-
-  optimizer:
-    name: "torchao.optim.AdamW8bit"
-    kwargs:
-      lr: 3.0e-6
-      weight_decay: 0.01
-      betas: [0.9, 0.999]
-      eps: 1e-8
-
-  scheduler:
-    - name: "torch.optim.lr_scheduler.LinearLR"
-      kwargs:
-        start_factor: 1.0e-6
-        end_factor: 1.0
-        total_iters: 100
-    - name: "torch.optim.lr_scheduler.LinearLR"
-      kwargs:
-        start_factor: 1.0
-        end_factor: 0.7
-        total_iters: 700
-    - name: "torch.optim.lr_scheduler.LinearLR"
-      kwargs:
-        start_factor: 0.7
-        end_factor: 1.0e-6
-        total_iters: 633
-    - milestones: [100, 800]
-
-data:
-  dataset_name: "arcee-train/AFMoE-SFT-v0.1.9-64k-RLKit-Fixed"
-  dataset_type: "native"
-  on_disk: false
-  shuffle: false
-
-logger:
-  log_dir: "logs"  # Base directory for all logs
-  wandb_enabled: true # Make sure you do a ``wandb login [Your API key]'' before running
-  tensorboard_enabled: false
-  mlflow_enabled: false
-  monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
-  num_val_samples_to_print: 0  # Number of validation samples to pretty print on terminal
-  wandb:
-    project: "AFMoE-6b-SFT-Debug"
-    name: "${data.dataset_name}"
-    entity: "arcee-ai"
-  tensorboard:
-  mlflow:
-  gpu_monitoring:
-    collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
-    flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
-
-cluster:
-  gpus_per_node: 2
-  num_nodes: 1
+  keep_top_k: 3
