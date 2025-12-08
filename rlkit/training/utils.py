@@ -163,16 +163,6 @@ def configure_expandable_segments() -> None:
                         )
 
 
-def configure_dynamo_cache() -> None:
-    """Disable dynamo autotune_local_cache.
-
-    Dynamo may fail at cached_autotune when there's already a cache with different order of node_bundles.
-    Disable autotune_local_cache as a workaround.
-    See https://github.com/pytorch/pytorch/issues/153791 for more details.
-    """
-    torch._inductor.config.autotune_local_cache = False # type: ignore[attr-defined]
-
-
 def to_local_if_dtensor(tensor: torch.Tensor | DTensor) -> torch.Tensor:
     """Return the local shard of a DTensor, or the tensor itself if already local."""
     with torch.no_grad():
@@ -253,14 +243,10 @@ def get_grad_norm(
 def get_logprobs_from_vocab_parallel_logits(
     vocab_parallel_logits: DTensor,
     input_ids: torch.Tensor | DTensor,
-    seq_index: torch.Tensor | None = None,
     chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Compute log probabilities from vocabulary-parallel logits."""
     device_mesh = vocab_parallel_logits.device_mesh
-    if seq_index is not None:
-        assert device_mesh.mesh_dim_names is not None, "device_mesh.mesh_dim_names is not set"
-        assert "cp" in device_mesh.mesh_dim_names, "seq_index must be provided for cp sharded logits"
 
     tp_group = device_mesh.get_group("tp")
     tp_rank = tp_group.rank()
@@ -275,7 +261,6 @@ def get_logprobs_from_vocab_parallel_logits(
         (tp_rank + 1) * vocab_interval_per_rank,
         tp_group,
         inference_only=not torch.is_grad_enabled(),
-        seq_index=seq_index,
         chunk_size=chunk_size,
     )
 

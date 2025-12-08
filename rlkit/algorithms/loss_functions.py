@@ -160,11 +160,9 @@ class ClippedPGLossFn(LossFunction):
             reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
         else:
             reference_policy_logprobs = None
-        seq_index = data.get("seq_index")
-
         if isinstance(next_token_logits, DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["token_ids"], seq_index=seq_index
+                next_token_logits, data["token_ids"]
             )
         else:
             next_token_logits = next_token_logits.to(torch.float32)
@@ -385,12 +383,10 @@ class CISPOLossFn(LossFunction):
             reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
         else:
             reference_policy_logprobs = None
-        seq_index = data.get("seq_index")
-
         # Get current policy logprobs
         if isinstance(next_token_logits, DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["token_ids"], seq_index=seq_index
+                next_token_logits, data["token_ids"]
             )
         else:
             next_token_logits = next_token_logits.to(torch.float32)
@@ -547,12 +543,11 @@ class NLLLoss(LossFunction):
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         mask = data["token_mask"][:, 1:]
-        seq_index = data.get("seq_index")
 
         # Gather the logprobs for the actual next tokens
         if isinstance(next_token_logits, DTensor):
             token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["token_ids"], seq_index=seq_index
+                next_token_logits, data["token_ids"]
             )
         else:
             next_tokens = data["token_ids"][:, 1:].cuda()  # Skip first token

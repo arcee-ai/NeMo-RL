@@ -48,7 +48,6 @@ from rlkit.models.parallelize import parallelize_model
 from rlkit.models.state_dict_adapter import BaseStateDictAdapter
 from rlkit.training.utils import (
     clip_grad_by_total_norm_,
-    configure_dynamo_cache,
     configure_expandable_segments,
     get_gpu_info,
     get_grad_norm,
@@ -151,7 +150,7 @@ class DTensorV2PolicyWorker:
 
         # Disable dynamo autotune_local_cache to avoid crash when there's already a cache
         # with different order of node_bundles
-        configure_dynamo_cache()
+        torch._inductor.config.autotune_local_cache = False # type: ignore[attr-defined]
 
         # Only enable expandable_segments on Hopper and newer architectures (compute capability 9.x+)
         configure_expandable_segments()
