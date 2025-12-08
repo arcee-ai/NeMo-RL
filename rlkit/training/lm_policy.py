@@ -138,10 +138,7 @@ class Policy:
         Returns:
             list[ray.ObjectRef]: Futures to await alongside vLLM futures for setting up collective communication.
         """
-        futures = self.worker_group.run_all_workers_single_data(
-            "init_collective", ip=ip, port=port, world_size=world_size
-        )
-        return futures
+        return self.worker_group.run_all("init_collective", ip=ip, port=port, world_size=world_size)
 
     async def train(
         self,
@@ -167,20 +164,12 @@ class Policy:
         assert len(sharded_data) > 0, "Data must contain at least one shard"
 
         # Train each shard in parallel
-        futures = self.worker_group.run_all_workers_sharded_data(
+        futures = self.worker_group.run_sharded(
             "train",
             data=sharded_data,
-            in_sharded_axes=["data_parallel"],
-            replicate_on_axes=[
-                "context_parallel",
-                "tensor_parallel",
-                "pipeline_parallel",
-            ],
-            output_is_replicated=[
-                "context_parallel",
-                "tensor_parallel",
-                "pipeline_parallel",
-            ],
+            sharded_axes=["data_parallel"],
+            replicate_axes=["context_parallel", "tensor_parallel", "pipeline_parallel"],
+            output_replicated_axes=["context_parallel", "tensor_parallel", "pipeline_parallel"],
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
@@ -188,7 +177,7 @@ class Policy:
                 "gbs": gbs,
             },
         )
-        results = await self.worker_group.get_all_worker_results_async(futures)
+        results = await self.worker_group.get_results_async(futures)
 
         # Aggregate the results
         aggregated_results = {
@@ -262,10 +251,9 @@ class Policy:
 
         return aggregated_results
 
-    def prepare_for_training(self, *args: Any, **kwargs: Any) -> None:
+    def prepare_for_training(self) -> None:
         """Prepares the workers for a training step, onloading everything to the GPU."""
-        futures = self.worker_group.run_all_workers_single_data("prepare_for_training")
-        ray.get(futures)
+        ray.get(self.worker_group.run_all("prepare_for_training"))
 
     def prepare_refit_info(self) -> dict[str, Any]:
         """Prepare the info for refit.
@@ -273,23 +261,16 @@ class Policy:
         Returns:
             dict[str, Any]: A dictionary containing the info for refit.
         """
-        futures = self.worker_group.run_all_workers_single_data("prepare_refit_info")
-        results = ray.get(futures)
-        # Only get the first worker's info since all workers will have the same result
-        return results[0]
+        results = ray.get(self.worker_group.run_all("prepare_refit_info"))
+        return results[0]  # All workers return the same info
 
     def broadcast_weights_for_collective(self) -> list[ray.ObjectRef]:
         """Start futures for broadcasting model weights to inference workers.
 
-        These futures should be awaited alongside the vLLM futures for receiving the weight.
-
         Returns:
-            list[ray.ObjectRef]: Futures to await alongside vLLM futures for broadcasting model weights.
+            list[ray.ObjectRef]: Futures to await alongside vLLM futures.
         """
-        futures = self.worker_group.run_all_workers_single_data(
-            "broadcast_weights_for_collective"
-        )
-        return futures
+        return self.worker_group.run_all("broadcast_weights_for_collective")
 
     def save_checkpoint(
         self,
@@ -298,13 +279,12 @@ class Policy:
         tokenizer_path: str | None = None,
     ) -> None:
         """Save a checkpoint of the model."""
-        futures = self.worker_group.run_all_workers_single_data(
+        ray.get(self.worker_group.run_all(
             "save_checkpoint",
             weights_path=weights_path,
             optimizer_path=optimizer_path,
             tokenizer_path=tokenizer_path,
-        )
-        ray.get(futures)
+        ))
 
     def shutdown(self) -> bool:
         """Shut down all HF workers and clean up resources."""
@@ -326,10 +306,8 @@ class Policy:
 
     def start_gpu_profiling(self) -> None:
         """Start GPU profiling."""
-        futures = self.worker_group.run_all_workers_single_data("start_gpu_profiling")
-        ray.get(futures)
+        ray.get(self.worker_group.run_all("start_gpu_profiling"))
 
     def stop_gpu_profiling(self) -> None:
         """Stop GPU profiling."""
-        futures = self.worker_group.run_all_workers_single_data("stop_gpu_profiling")
-        ray.get(futures)
+        ray.get(self.worker_group.run_all("stop_gpu_profiling"))
