@@ -18,7 +18,7 @@ import numpy as np
 
 
 class NamedSharding:
-    """Represents an N-dimensional arrangement of ranks with named axes, facilitating data sharding, replication, and collection based on these axes.
+    """Represents an N-dimensional arrangement of ranks with named axes, facilitating data sharding, replication, and collection.
 
     Example:
         layout = [

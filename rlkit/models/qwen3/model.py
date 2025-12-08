@@ -14,7 +14,9 @@ from torch.nn.attention.flex_attention import BlockMask, and_masks
 import torch.nn.functional as F
 from torch import nn
 
-from rlkit.models.attention import AttentionMasksType, FlexAttentionWrapper, ScaledDotProductAttentionWrapper, create_attention_mask, get_causal_mask_mod, get_document_mask_mod
+from rlkit.models.attention import (AttentionMasksType,
+                                    FlexAttentionWrapper, ScaledDotProductAttentionWrapper,
+                                    create_attention_mask, get_causal_mask_mod, get_document_mask_mod)
 
 from .args import Qwen3ModelArgs
 from rlkit.models import BaseModel
@@ -23,7 +25,7 @@ def precompute_rope_cache(
     dim: int, max_seq_len: int, base: float = 1_000_000.0
 ) -> torch.Tensor:
     """Precompute the cosine and sine frequencies for rotary embeddings.
-    
+
     Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
     """
     freqs = 1.0 / (base ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
@@ -79,7 +81,7 @@ def apply_rotary_emb(
     xq: torch.Tensor, xk: torch.Tensor, rope_cache: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Apply rotary embeddings to the input tensors.
-    
+
     Args:
         xq: The input query tensor.
         xk: The input key tensor.
@@ -185,7 +187,7 @@ class Attention(nn.Module):
             x (torch.Tensor): Input tensor.
             rope_cache (torch.Tensor): Precomputed cosine and sine frequencies.
             attention_masks (AttentionMasksType | None): Attention masks.
-        
+
         Returns:
             torch.Tensor: Output tensor after attention.
         """
@@ -283,7 +285,7 @@ class TransformerBlock(nn.Module):
         attention_norm (RMSNorm): Layer normalization for attention output.
         ffn_norm (RMSNorm): Layer normalization for feedforward output.
     """
-    
+
     def __init__(self, layer_id: int, model_args: Qwen3ModelArgs):
         """Initialize the transformer block."""
         super().__init__()
@@ -398,27 +400,27 @@ class Qwen3Model(BaseModel):
             h = layer(h, self.rope_cache, attention_masks)
 
         h = self.norm(h) if self.norm else h
-        
+
         if self.skip_logits:
             return h
         else:
             output = self.output(h) if self.output else h
             return output
-    
+
     def get_attention_masks(
         self,
         input_batch: torch.Tensor,
         separator_value: int,
     ) -> AttentionMasksType | None:
         """Generate attention masks for a given sequence.
-        
+
         Args:
             input_batch (torch.Tensor): The input batch read from the dataloader.
                 This will always be the input batch regardless of the pipeline stage.
                 This field is required for non-first PP stages to perform document
                 masking attention (to analyze the boundary of the document).
             separator_value (int): The token ID separating packed documents.
-        
+
         Returns:
             AttentionMasksType | None: Attention masks, or None if FlexAttention is not used.
         """

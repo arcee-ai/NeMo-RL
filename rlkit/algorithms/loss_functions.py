@@ -120,7 +120,7 @@ class ClippedPGLossFn(LossFunction):
 
     Due to potential numerical instability, we cast the logits to float32 before computing the loss.
     """
-    
+
     ratio_clip_min: float
     ratio_clip_max: float
     ratio_clip_c: float | None
@@ -176,7 +176,7 @@ class ClippedPGLossFn(LossFunction):
             )
             next_tokens = data["token_ids"][:, 1:].cuda()  # Skip first token
             if next_tokens.dtype != torch.int64:
-                raise ValueError("next_tokens must be of type int64, got " + str(next_tokens.dtype) + " with shape " + str(next_tokens.shape) + " and " + str(next_tokens))
+                raise ValueError(f"next_tokens must be of type int64, got {next_tokens.dtype} with shape {next_tokens.shape}")
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
@@ -289,7 +289,7 @@ class ClippedPGLossFn(LossFunction):
                 mask,
                 global_normalization_factor=global_valid_toks,
             ).item()
-        
+
         # token_mult_prob_error
         # See more details and other metrics in docs/guides/grpo.md#metrics
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
@@ -330,30 +330,30 @@ class CISPOLossDataDict(TypedDict):
 
 class CISPOLossFn(LossFunction):
     """CISPO (Clipped IS-weight Policy Optimization) loss function.
-    
+
     CISPO implements truncated importance-sampling REINFORCE by clipping the IS weight
     and stopping its gradient. Unlike PPO/GRPO/DAPO which clip the token update
     (potentially zeroing gradients on clipped tokens), CISPO clips the weight that
     scales the REINFORCE term, keeping gradients for all tokens while bounding their
     magnitude.
-    
+
     Formula:
         L(θ) = -E_t [ sg(clip(r_t, r_min, r_max)) * A_t * log π_θ(a_t|s_t) ] - β * KL(π_θ || π_ref)
-    
+
     where:
         - r_t = π_θ(a_t|s_t) / π_old(a_t|s_t) is the importance-sampling ratio
         - sg() denotes stop-gradient (detach)
         - clip(r_t, r_min, r_max) bounds the IS weight
         - A_t is the advantage estimate
         - β is the KL penalty coefficient
-    
+
     Key differences from PPO/GRPO/DAPO:
         1. Clips the IS weight, not the token update (rA)
         2. Stop-gradient on the clipped weight is mandatory
         3. All tokens contribute gradients (no gradient suppression on high-ratio tokens)
         4. More robust to clipping-ratio hyperparameter choices
         5. Helps prevent entropy collapse by keeping rare-token gradients
-    
+
     References:
         - ScaleRL (Oct 2025): https://arxiv.org/abs/2510.08475
         - MiniMax-M1 (Jun 2025): https://arxiv.org/abs/2506.09419

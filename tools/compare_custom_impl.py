@@ -141,7 +141,7 @@ with torch.no_grad():
             logits_hf = model_hf(input_ids.cpu()).logits
     print("run tt model")
     with torch.inference_mode():
-        
+
         if device == "cuda":
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits_tt = model_tt(input_ids, attention_masks=model_tt.get_attention_masks(input_ids, tokenizer))

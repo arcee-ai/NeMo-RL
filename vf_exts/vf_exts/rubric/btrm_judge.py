@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Bradley-Terry pairwise judge rubric."""
 
 import logging
@@ -36,7 +37,7 @@ Reply with no other text.
 
 class PairwiseJudgeRubric(vf.Rubric):
     """Bradley-Terry pairwise judge rubric."""
-    
+
     def __init__(
         self,
         judge_client: OpenAI | None = None,
@@ -68,21 +69,21 @@ class PairwiseJudgeRubric(vf.Rubric):
         assert len(completions) % 2 == 0, "Number of completions must be even for pairwise comparison"
 
         was_judge_malformed = []
-        
+
         rewards = []
         for i in range(0, len(completions), 2):
             a = completions[i][-1]["content"]
             b = completions[i+1][-1]["content"]
             prompt = self.judge_prompt.format(self.rubric_prompt, a, b)
-            
+
             response = self.judge_client.chat.completions.create(
                 model=self.judge_model,
                 messages=[{"role": "user", "content": prompt}],
                 **self.judge_sampling_args
             )
-            
+
             was_malformed = False
-            
+
             match = re.search(r"<answer>(.*?)</answer>", response.choices[0].message.content)
             if match is None:
                 logging.error(f"No answer found in response: {response.choices[0].message.content}")
@@ -95,18 +96,17 @@ class PairwiseJudgeRubric(vf.Rubric):
                     logging.error(f"Model gave invalid opinion: {match.group(1)}")
                     was_malformed = True
                     opinion = 4
-            
+
             if opinion < 1 or opinion > 7:
                 logging.error(f"Model gave invalid opinion: {opinion}")
                 was_malformed = True
                 opinion = 4
-            
+
             # We have to do this twice so the resulting metric is the same size as the group.
             was_judge_malformed.append(was_malformed)
             was_judge_malformed.append(was_malformed)
-            
+
             rewards.append(4 - opinion) # A is highest when opinion is 1
             rewards.append(opinion - 4) # B is highest when opinion is 7
-            
+
         return RolloutScores(reward=rewards, metrics={"was_judge_malformed": was_judge_malformed})
-            

@@ -29,18 +29,18 @@ def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
     assert tokenizer is not None, "Tokenizer is required for OpenAI dataset transformation"
     conversation = x["conversations"]
     sample_mask = x.get("sample_mask", 1.0)
-    
+
     if isinstance(conversation, str):
         conversation = json.loads(conversation)
-    
+
     has_assistant_messages = any(message["role"] == "assistant" for message in conversation)
     if not has_assistant_messages:
         raise ValueError("No assistant messages found in the conversation!")
-    
+
     oai_tools = x.get("oai_tools", None)
     if isinstance(oai_tools, str):
         oai_tools = json.loads(oai_tools)
-    
+
     tokenized = cast(dict[str, Any], tokenizer.apply_chat_template(
         conversation,
         tokenize=True,
@@ -49,7 +49,7 @@ def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
         return_assistant_tokens_mask=True,
         tools=oai_tools
     ))
-    
+
     input_ids = tokenized["input_ids"]
     token_mask = tokenized["assistant_masks"]
     if 1 not in token_mask:
@@ -104,7 +104,7 @@ def transform_dataset(dataset: Dataset, dataset_type: DatasetType, tokenizer: Pr
         new_cols = list(transformations[dataset_type](tokenizer, dataset[0]).keys())
         old_cols = list(dataset.column_names)
         drop_cols = [col for col in old_cols if col not in new_cols]
-        
+
         transform_fn = transformations[dataset_type]
         dataset = dataset.map(lambda x: transform_fn(tokenizer, x), num_proc=num_proc, remove_columns=drop_cols)
     return dataset

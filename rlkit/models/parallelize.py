@@ -226,11 +226,8 @@ def parallelize_model(
     #         loss_parallel=not job_config.parallelism.disable_loss_parallel,
     #         enable_float8_tensorwise_tp=enable_float8_tensorwise_tp,
     #     )
-    #     
+    #
     #     # maybe_enable_async_tp(job_config, world_mesh["tp"])
-
-    if ep_size > 1 and not hasattr(torch, "_grouped_mm"):
-        raise RuntimeError("EP is currently not supported with stable torch versions. See docs/guides/torch-nightly.md for more information.")
 
     if tp_size > 1 or ep_size > 1:
         apply_moe_ep_tp(
@@ -457,7 +454,8 @@ def apply_fsdp(
                 dp_mod_ep_mesh.size() * ep_degree
                 > transformer_block.moe.experts.num_experts
             ):
-                _experts_shard_placement_fn = lambda param: Shard(1)
+                def _experts_shard_placement_fn(param):
+                    return Shard(1)
 
             fully_shard(
                 transformer_block.moe.experts,
@@ -630,7 +628,7 @@ def apply_moe_ep_tp(
 
 def apply_compile(model: nn.Module):
     """Apply torch.compile to each TransformerBlock.
-    
+
     This makes compilation efficient due to the repeated structure.
     Alternatively one can compile the whole model (after applying DP).
     """

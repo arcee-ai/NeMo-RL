@@ -58,7 +58,7 @@ def _load_native_model_and_state(dcp_path: str, hf_model_name: str) -> tuple[dic
 def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, push_to_hub: bool = False) -> None:
     """Convert a Torch DCP checkpoint to a HuggingFace checkpoint."""
     dcp_path = _resolve_dcp_path(dcp_path)
-    
+
     if not os.path.exists(dcp_path):
         raise FileNotFoundError(f"DCP checkpoint not found: {dcp_path}")
 
@@ -79,9 +79,9 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, pu
     hf_model = AutoModelForCausalLM.from_config(hf_config, trust_remote_code=True)
     missing, unexpected = hf_model.load_state_dict(hf_state, strict=False)
     if missing:
-        print(f"[Warning] Missing keys when loading HF state dict: {len(missing)} (showing up to 10): {missing[:10]}")
+        print(f"[Warning] Missing keys when loading HF state dict: {len(missing)} including: {missing[:10]}")
     if unexpected:
-        print(f"[Warning] Unexpected keys when loading HF state dict: {len(unexpected)} (showing up to 10): {unexpected[:10]}")
+        print(f"[Warning] Unexpected keys when loading HF state dict: {len(unexpected)} including: {unexpected[:10]}")
 
     # Save tokenizer (from provided HF model name)
     tokenizer = AutoTokenizer.from_pretrained(hf_model_name, trust_remote_code=True)
@@ -105,10 +105,26 @@ def convert_dcp_to_hf_cli(dcp_path: str, hf_model_name: str, output_dir: str, pu
 def main() -> None:
     """Main function to convert a Torch DCP checkpoint to a HuggingFace checkpoint."""
     parser = argparse.ArgumentParser(description="Convert TorchTitan (DCP) checkpoint to HuggingFace format")
-    parser.add_argument("dcp_path", type=str, help="Path to Torch DCP checkpoint directory or step dir (e.g., checkpoints/step_62 or checkpoints/step_62/policy)")
-    parser.add_argument("hf_model_name", type=str, help="HuggingFace model name or path used for config/tokenizer (e.g., Qwen/Qwen3-0.6B)")
-    parser.add_argument("output_dir", type=str, help="Output directory to write HuggingFace checkpoint, or repo name if using --push-to-hub")
-    parser.add_argument("--push-to-hub", action="store_true", help="Push model to HuggingFace Hub as a private repository instead of saving to disk")
+    parser.add_argument(
+        "dcp_path",
+        type=str,
+        help="Path to Torch DCP checkpoint directory or step dir (e.g., checkpoints/step_62)",
+    )
+    parser.add_argument(
+        "hf_model_name",
+        type=str,
+        help="HuggingFace model name or path used for config/tokenizer (e.g., Qwen/Qwen3-0.6B)",
+    )
+    parser.add_argument(
+        "output_dir",
+        type=str,
+        help="Output directory to write HuggingFace checkpoint, or repo name if using --push-to-hub",
+    )
+    parser.add_argument(
+        "--push-to-hub",
+        action="store_true",
+        help="Push model to HuggingFace Hub as a private repository instead of saving to disk",
+    )
 
     args = parser.parse_args()
 

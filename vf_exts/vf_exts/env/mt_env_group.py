@@ -30,7 +30,7 @@ class _MtEnvGroupRubric(vf.Rubric):
         env = self.env_map.get(tasks[0])
         if env is None:
             raise ValueError(f"No environment found for task {tasks[0]}.")
-        
+
         return await env.rubric.score_rollouts(
             prompts, completions, answers, states, tasks, infos, **kwargs
         )

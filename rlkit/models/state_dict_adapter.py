@@ -5,21 +5,20 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
 
+from . import BaseModelArgs
+
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 logger = logging.getLogger()
 
-from . import BaseModelArgs
-
-
 class BaseStateDictAdapter(ABC):
     """Abstract base class for state dict transformations.
 
     This class defines the interface for converting between native model
     state dict format and other model state dict formats.
-    
+
     Args:
         model_args: for initializing the model's memory space
         hf_assets_path: path to HF assets folder containing tokenizer, model weights, etc.

@@ -106,7 +106,7 @@ def sliding_window_overwrite(model_name: str) -> dict[str, Any]:
     # TODO(@zhiyul): remove this once the bug is fixed https://github.com/huggingface/transformers/issues/38002
     if (
         hasattr(hf_config, "use_sliding_window")
-        and hf_config.use_sliding_window == False
+        and not hf_config.use_sliding_window
     ):
         assert hasattr(hf_config, "sliding_window")
         overwrite_dict = {

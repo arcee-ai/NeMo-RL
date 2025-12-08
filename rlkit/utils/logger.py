@@ -25,7 +25,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Mapping, Optional, TypedDict
 
-from omegaconf import OmegaConf
 import ray
 import requests
 import wandb
@@ -62,7 +61,7 @@ class LoggerInterface(ABC):
     def log_hyperparams(self, params: Mapping[str, Any]) -> None:
         """Log dictionary of hyperparameters."""
         pass
-    
+
 class WandbLogger(LoggerInterface):
     """Weights & Biases logger backend."""
 
@@ -217,14 +216,14 @@ class WandbLogger(LoggerInterface):
                 f"{prefix}/{k}" if k != step_metric else k: v
                 for k, v in metrics.items()
             }
-        
+
         # Try to find our custom rollout log items in metrics, and if we do log them as HTML instead.
         for k, v in metrics.items():
             if self.is_rollout_log(v):
                 # TODO: Temporary fix for https://github.com/wandb/wandb/issues/10369
                 # Inject proper UTF-8 encoding header.
                 metrics[k] = wandb.Html(
-                    f"<head><meta charset=\"utf-8\"><style>pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, Menlo, 'Liberation Mono', Consolas, monospace; font-size: 12px; margin: 0.25em 0; }} table {{ border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 4px; text-align: left; vertical-align: top; }} h2, h3 {{ margin: 8px 0 4px; }} p {{ margin: 4px 0; }}</style></head><body>{self.render_rollout_log(v)}</body>"
+                    f"<head><meta charset=\"utf-8\"><style>pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, Menlo, 'Liberation Mono', Consolas, monospace; font-size: 12px; margin: 0.25em 0; }} table {{ border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 4px; text-align: left; vertical-align: top; }} h2, h3 {{ margin: 8px 0 4px; }} p {{ margin: 4px 0; }}</style></head><body>{self.render_rollout_log(v)}</body>" # noqa: E501
                 )
 
         # If step_metric is provided, use the corresponding value from metrics as step
@@ -251,14 +250,14 @@ class WandbLogger(LoggerInterface):
             name: Name of the plot
         """
         self.run.log({name: figure}, step=step)
-    
+
     def is_rollout_log(self, value: Any) -> bool:
         """Check if a value is a rollout log."""
         if isinstance(value, list):
             if len(value) >= 1 and isinstance(value[0], dict) and "grpo_group_id" in value[0].keys():
                 return True
         return False
-    
+
     def render_html_table(self, data: dict[str, Any]) -> str:
         """Render a dictionary as an HTML table."""
         header = ""
@@ -269,17 +268,17 @@ class WandbLogger(LoggerInterface):
                 row += f"<td>{v:.4f}</td>"
             else:
                 row += f"<td>{v}</td>"
-        
+
         return f"<table><tr>{header}</tr>{row}</table>"
-    
+
     def render_rollout_log(self, rollouts: list[dict]) -> str:
         """Render a list of rollout logs as HTML.
-        
+
         Args:
             rollouts: List of rollout logs
         """
         content = ""
-        
+
         # Split by groups
         rollouts_by_group = {}
         for rollout in rollouts:
@@ -287,7 +286,7 @@ class WandbLogger(LoggerInterface):
             if group_id not in rollouts_by_group:
                 rollouts_by_group[group_id] = []
             rollouts_by_group[group_id].append(rollout)
-        
+
         # Render each group
         for group_id, group_rollouts in rollouts_by_group.items():
             content += f"<h2>Group {group_id}</h2>"
@@ -297,16 +296,16 @@ class WandbLogger(LoggerInterface):
                 for message in rollout["messages"]:
                     if message["role"] == "tool":
                         tool_results[message["tool_call_id"]] = message["content"]
-                
+
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
                     message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;")
-                                        
+
                     if message["role"] == "tool":
                         continue
-                    
+
                     content += f"<div><b>[{message['role']}]:</b><pre>{message_fixed}</pre></div>"
-                
+
                     tool_calls = message.get("tool_calls", [])
                     if len(tool_calls) > 0:
                         content += "<div style='margin-left: 20px;'>"
@@ -321,19 +320,19 @@ class WandbLogger(LoggerInterface):
                             response = tool_results.get(call_id, "[N/A]")
                             content += f"<p><b>{func_obj.name}:</b> <pre>{args_formatted}</pre>Response: <pre>{response}</pre></p>"
                         content += "</div>"
-                
+
                 content += "<p><b>Metrics:</b></p>"
                 content += self.render_html_table(
                     {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
                 )
-                
+
                 # If any group metrics are group-wise, index them here.
                 env_metrics = rollout["env_metrics"].copy()
                 for k, v in env_metrics.items():
                     if isinstance(v, list) and len(v) == len(group_rollouts):
                         env_metrics[k] = v[i]
                 content += self.render_html_table(env_metrics)
-        
+
         return content
 
 
@@ -666,7 +665,7 @@ class Logger(LoggerInterface):
 
         # Initialize GPU monitoring if requested
         self.gpu_monitor = None
-        
+
         metric_prefix = "ray"
         step_metric = f"{metric_prefix}/ray_step"
 

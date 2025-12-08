@@ -87,6 +87,10 @@ project-excludes = ["**/*venv/**/*"]
 concurrency = ["thread", "multiprocessing"]
 omit = ["/tmp/*"]
 
+[tool.ruff]
+line-length = 140
+extend-safe-fixes = ["W293"]
+
 [tool.ruff.lint]
 # Enable all `pydocstyle` rules, limiting to those that adhere to the
 # Google convention via `convention = "google"`, below.

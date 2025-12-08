@@ -34,7 +34,7 @@ def nvml_context() -> Generator[None, None, None]:
     finally:
         try:
             pynvml.nvmlShutdown()
-        except:
+        except Exception:
             pass
 
 
@@ -47,7 +47,8 @@ def device_id_to_physical_device_id(device_id: int) -> int:
             return physical_device_id
         except ValueError:
             raise RuntimeError(
-                f"Failed to convert logical device ID {device_id} to physical device ID. Available devices are: {device_ids}."
+                f"Failed to convert logical device ID {device_id} to physical device ID. " + \
+                "Available devices are: {device_ids}."
             )
     else:
         return device_id

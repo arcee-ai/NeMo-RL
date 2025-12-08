@@ -9,7 +9,7 @@ from rlkit.models.state_dict_adapter import BaseStateDictAdapter
 
 class AFMoEStateDictAdapter(BaseStateDictAdapter):
     """State dict adapter for AFMoE models. Converts weight names as well as restructuring weights for efficient MoE support."""
-    
+
     def __init__(self, model_args, hf_assets_path: str | None):
         """Initialize the state dict adapter."""
         super().__init__(model_args, hf_assets_path)

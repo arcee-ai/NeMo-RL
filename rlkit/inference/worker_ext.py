@@ -11,7 +11,7 @@ from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
 class VllmHttpWorkerExtension:
     """vLLM worker extension."""
-    
+
     def init_collective(
         self, rank_prefix: int, ip: str, port: int, world_size: int
     ) -> None:
@@ -21,13 +21,13 @@ class VllmHttpWorkerExtension:
 
         local_rank = torch.distributed.get_rank()
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster
-        
-        print(f"vLLM worker ext @ init_collective: rank_prefix={rank_prefix}, ip={ip}, port={port}, world_size={world_size} on device {self.device} and rank {rank}")
+
+        print(f"vLLM worker ext @ init_collective: {rank_prefix=}, {ip=}, {port=}, {world_size=} on device {self.device} and rank {rank}")
 
         pg = StatelessProcessGroup.create(
             host=ip, port=port, rank=rank, world_size=world_size
         )
-        self.model_update_group = PyNcclCommunicator(  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__ so assignments like this should be ignored
+        self.model_update_group = PyNcclCommunicator(  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__
             pg, device=self.device
         )
 
@@ -46,7 +46,7 @@ class VllmHttpWorkerExtension:
             colocated inference: state_dict_info is None
             non-colocated inference: state_dict_info is a dict of {tensor_name: (shape, dtype)}
         """
-        self.state_dict_info = state_dict_info  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__ so assignments like this should be ignored
+        self.state_dict_info = state_dict_info  # pyrefly: ignore[implicitly-defined-attribute]  This class does not define __init__
 
     def update_weights_from_global_ipc_handles(self, global_device_ipc_handles):
         """Update weights from global IPC handles.
@@ -112,8 +112,9 @@ class VllmHttpWorkerExtension:
                     for dtype, tensor in dtype_to_packed_tensor.items()
                 }
                 assert dtype_to_offset == expected_sizes, (
-                    f"Packed tensor size mismatch: expected sizes from keys list {expected_sizes} != actual packed tensor sizes {dtype_to_offset}. "
-                    f"This indicates the keys list order doesn't match the order used when packing tensors."
+                    "Packed tensor size mismatch: "
+                    f"expected sizes from keys list {expected_sizes} != actual packed tensor sizes {dtype_to_offset}. "
+                    "This indicates the keys list order doesn't match the order used when packing tensors."
                 )
             else:
                 _, name_and_handle_list = local_device_ipc_handles
@@ -134,7 +135,7 @@ class VllmHttpWorkerExtension:
                 f"Error in VllmInternalWorkerExtension.update_weights_from_ipc_handles: {e}"
             )
             return False
-    
+
     def reset_prefix_cache(self) -> bool:
         """Reset the engine's prefix cache on this worker.
 
@@ -152,7 +153,7 @@ class VllmHttpWorkerExtension:
                 return False
         except Exception:
             return False
-    
+
     async def reset_prefix_cache_async(self) -> bool:
         """Reset the engine's prefix cache on this worker asynchronously."""
         try:
@@ -173,16 +174,16 @@ class VllmHttpWorkerExtension:
                 chunk_shape = chunk_info["shape"]
                 chunk_dtype = chunk_info["dtype"]
                 chunk_tensors = chunk_info["packed_tensors"]
-                
+
                 chunk = torch.empty(chunk_shape, dtype=chunk_dtype, device="cuda")
                 self.model_update_group.broadcast(chunk, src=0)
-                
+
                 weights_to_load = []
-                
+
                 for i, weight_name in enumerate(chunk_tensors):
                     weight_tensor = chunk[i]
                     weights_to_load.append((weight_name, weight_tensor))
-                
+
                 self.model_runner.model.load_weights(weights=weights_to_load)
         except Exception as e:
             print(

@@ -118,16 +118,17 @@ def init_ray(log_dir: Optional[str] = None) -> None:
         pass
 
     # Start a brand-new local cluster
-    # Reuse `runtime_env` but drop `working_dir` to avoid packaging the whole repo (prevents ray OSError: Failed to download runtime_env file package issue)
+    # Reuse `runtime_env` but drop `working_dir` to avoid packaging the whole repo.
     local_runtime_env = dict(runtime_env)
     local_runtime_env.pop("working_dir", None)
 
-    ray.init(
-        log_to_driver=True,
-        include_dashboard=True,
-        runtime_env=local_runtime_env,
-        _temp_dir=os.path.abspath(log_dir) if log_dir else None,
-        resources={cvd_tag: 1},
+    # Bunch of type ignores because pyrefly hallucinates fake params for Ray sometimes
+    ray.init( # type: ignore
+        log_to_driver=True, # type: ignore
+        include_dashboard=True, # type: ignore
+        runtime_env=local_runtime_env, # type: ignore
+        _temp_dir=os.path.abspath(log_dir) if log_dir else None, # type: ignore
+        resources={cvd_tag: 1}, # type: ignore
     )
     logger.info(
         f"Started local cluster with tag '{cvd_tag}': {ray.cluster_resources()}"
@@ -224,7 +225,9 @@ class RayVirtualCluster:
                 time.sleep(2**i)
                 continue
         raise ResourceInsufficientError(
-            f"Maximum number of retries reached ({max_retries}). Cluster resources may be insufficient or cluster itself is highly unstable. Please check your cluster configuration and your cluster logs."
+            f"Maximum number of retries reached ({max_retries}). "
+            "Cluster resources may be insufficient or cluster itself is highly unstable. "
+            "Please check your cluster configuration and your cluster logs."
         )
 
     def _create_placement_groups_internal(
@@ -247,12 +250,12 @@ class RayVirtualCluster:
         # Validate resources
         if self.use_gpus and total_requested_gpus > total_available_gpus:
             raise ResourceInsufficientError(
-                f"Not enough GPUs available. Requested {total_requested_gpus} GPUs, but only {total_available_gpus} are available in the cluster."
+                f"Not enough GPUs available. Requested {total_requested_gpus} GPUs, but only {total_available_gpus} are available."
             )
 
         if total_requested_cpus > total_available_cpus:
             raise ResourceInsufficientError(
-                f"Not enough CPUs available. Requested {total_requested_cpus} CPUs, but only {total_available_cpus} are available in the cluster."
+                f"Not enough CPUs available. Requested {total_requested_cpus} CPUs, but only {total_available_cpus} are available."
             )
 
         num_cpus_per_bundle = self.max_colocated_worker_groups

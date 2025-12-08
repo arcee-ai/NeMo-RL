@@ -81,14 +81,14 @@ class QueuedRollout:
     output: RolloutOutputs
     metrics: dict[str, float]
     step_started: int
-    
+
     def __init__(self, input_data: vf.RolloutInput, output: RolloutOutputs, metrics: dict[str, float], step_started: int):
         """Initialize the queued rollout."""
         self.input_data = input_data
         self.output = output
         self.metrics = metrics
         self.step_started = step_started
-    
+
     def staleness(self, current_step: int) -> int:
         """Returns the number of steps since this rollout was started."""
         return current_step - self.step_started
@@ -103,7 +103,7 @@ class GRPOTrainer:
     ) -> None:
         """Initialize the GRPO trainer."""
         self.config = config
-        
+
         self.policy_config = self.config.policy
         assert self.policy_config.inference is not None, "RL requires an inference configuration."
         self.inference_config = self.policy_config.inference
@@ -117,14 +117,14 @@ class GRPOTrainer:
         self.checkpointer, self.grpo_save_state, last_checkpoint_path = self._setup_checkpointing(
             self.config.checkpointing
         )
-        
+
         # Load tokenizer for prompt filtering.
         self.tokenizer = AutoTokenizer.from_pretrained(self.policy_config.model_name)
-        
+
         # Load verifiers environment.
         logging.info(f"Loading verifiers environment '{self.env_config.env_name}'.")
         self.vf_env = vf.load_environment(self.env_config.env_name, **self.env_config.env_kwargs)
-        
+
         assert self.vf_env.dataset is not None, "vf_env.dataset must be set"
         dataset = self._filter_dataset_by_prompt_length(
             self.vf_env.dataset,
@@ -157,7 +157,7 @@ class GRPOTrainer:
         else:
             weights_path = None
             optimizer_path = None
-        
+
         self.policy = Policy(
             cluster=train_cluster,
             config=self.policy_config,
@@ -167,7 +167,7 @@ class GRPOTrainer:
             init_optimizer=True,
             use_hf_checkpoint=self.config.checkpointing.hf_checkpoint,
         )
-        
+
         self._initialize_collective_communication(
             train_cluster,
             inference_cluster,
@@ -188,7 +188,7 @@ class GRPOTrainer:
             self.loss_fn = ClippedPGLossFn(loss_cfg)
         else:
             raise ValueError(f"Unsupported loss function: {loss_cfg.loss_fn}")
-        
+
         self.rollout_clients = []
         self.next_rollout_client = 0
 
@@ -233,7 +233,7 @@ class GRPOTrainer:
         logging.info(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
 
         return dataloader
-    
+
     def _filter_dataset_by_prompt_length(
         self,
         dataset: Dataset,
@@ -243,7 +243,7 @@ class GRPOTrainer:
         # 1.0 is equivalent to doing nothing, so do nothing.
         if env_config.max_prompt_length_ratio == 1.0:
             return dataset
-    
+
         max_prompt_tokens = int(policy_config.max_total_sequence_length * env_config.max_prompt_length_ratio)
 
         def keepBatch(batch):
@@ -251,7 +251,7 @@ class GRPOTrainer:
             if texts is None:
                 # Try "question" as a fallback.
                 questions = batch.get("question")
-            
+
                 if questions is None:
                     # If both are none, raise an error.
                     raise KeyError("Dataset is missing both 'prompt' and 'question' fields, when one is required.")
@@ -381,21 +381,21 @@ class GRPOTrainer:
 
         # Call finish generation before training begins to ensure the policy is ready.
         await self.inference.finish_generation()
-        
+
         dataloader_iter = iter(self.dataloader)
         total_samples = len(self.dataloader.dataset)  # type: ignore[arg-type]
-        
+
         console = Console()
-        
+
         refit_status = console.status("Running initial vLLM refit...", spinner="dots")
         await self._refit_policy_generation()
         refit_status.stop()
-        
+
         # Queue of pending rollout tasks.
         awaiting_packing: asyncio.Queue[QueuedRollout] = asyncio.Queue()
         # List of rollouts that are waiting to be packed into a batch and trained on.
         packing_pool: list[QueuedRollout] = []
-        
+
         # Closure to asynchronously populate finished queue when a rollout is finished.
         async def enqueue_rollout(example: vf.RolloutInput, step: int, num_failed_attempts: int = 0, max_failed_attempts: int = 3) -> None:
             try:
@@ -403,11 +403,11 @@ class GRPOTrainer:
             except Exception as e:
                 if num_failed_attempts > max_failed_attempts:
                     raise RuntimeError(f"Failed to run rollout after {max_failed_attempts} attempts.") from e
-                
+
                 logging.error(f"Error running rollout (attempt {num_failed_attempts}/{max_failed_attempts}): {e}")
                 await enqueue_rollout(example, step, num_failed_attempts + 1)
                 return
-            
+
             if is_valid:
                 for i, output in enumerate(outputs):
                     cur_metrics = {k: metrics[k][i] for k in metrics}
@@ -415,15 +415,15 @@ class GRPOTrainer:
             else:
                 # TODO: Add a retry mechanism for invalid rollouts.
                 logging.warning("Ignoring an invalid rollout.")
-        
+
         target_in_flight = self.rollout_config.max_concurrent_rollouts or self.training_config.global_batch_size
         assert target_in_flight % self.rollout_config.group_size == 0, "max_concurrent_rollouts must be divisible by group_size"
         max_staleness = self.rollout_config.max_staleness
         in_flight = 0
-        
+
         mean_bin_length = 0.0
         step_start = datetime.now()
-        
+
         def get_status_text() -> str:
             """Get the current status text."""
             elapsed = (datetime.now() - step_start).total_seconds()
@@ -434,7 +434,7 @@ class GRPOTrainer:
                 f"time=[green]{elapsed:.2f}s[/] "
                 f"left=[blue]{total_samples - consumed_samples}[/] "
             )
-        
+
         out_of_samples = False
         with console.status(get_status_text(), spinner="dots") as status:
             while True:
@@ -447,17 +447,17 @@ class GRPOTrainer:
                     asyncio.create_task(enqueue_rollout(example[0], step))
                     in_flight += self.rollout_config.group_size
                     consumed_samples += 1
-                
+
                 status.update(get_status_text())
-                
+
                 # Wait for one or more rollouts to be finished
                 num_ready = awaiting_packing.qsize()
                 for _ in range(max(1, num_ready)):
                     packing_pool.append(await awaiting_packing.get())
                     in_flight -= 1
-                
+
                 status.update(get_status_text())
-                
+
                 # Filter out rollouts that are too stale.
                 filtered = 0
                 for rollout in list(packing_pool):
@@ -466,10 +466,10 @@ class GRPOTrainer:
                         in_flight -= self.rollout_config.group_size
                         packing_pool.remove(rollout)
                         await enqueue_rollout(rollout.input_data, step)
-                
+
                 if filtered > 0:
                     console.log(f"[yellow]Retrying {filtered} rollouts with staleness > {max_staleness}[/]")
-                
+
                 # Try packing the rollouts into a fixed number of bins.
                 bins, remainder = pack_sequences(
                     documents=[x.output for x in packing_pool], # type: ignore[arg-type]
@@ -485,9 +485,9 @@ class GRPOTrainer:
                 )
                 bin_lengths = [len(bin["token_ids"]) for bin in bins]
                 mean_bin_length = sum(bin_lengths) / len(bin_lengths)
-                
+
                 status.update(get_status_text())
-                
+
                 if len(remainder) == 0:
                     if in_flight == 0 and out_of_samples:
                         # We are out of samples and there are none left generating.
@@ -495,10 +495,10 @@ class GRPOTrainer:
                         break
                     # Batch incomplete, keep collecting.
                     continue
-                
+
                 step_env_metrics = [x.metrics for x in packing_pool if x.output not in remainder]
                 step_staleness = [x.staleness(step) for x in packing_pool if x.output not in remainder]
-                
+
                 coordinator_metrics = {
                     "reward/mean": np.mean([x["reward"] for x in step_env_metrics]),
                     "reward/std": np.std([x["reward"] for x in step_env_metrics]),
@@ -509,18 +509,18 @@ class GRPOTrainer:
                     "staleness/min": np.min(step_staleness),
                     "staleness/max": np.max(step_staleness),
                 }
-                
+
                 # Rough approximation of the number of samples in the batch.
                 # We can't get the exact number because groups don't necessarily get batched together.
                 num_samples_in_batch = (len(packing_pool) - len(remainder)) // self.rollout_config.group_size
-                
+
                 packing_pool = [x for x in packing_pool if x.output in remainder]
-                
+
                 dist_bins = distribute_bins_for_dp(
                     bins=bins,
                     num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
                 )
-                
+
                 status.update("[bold]Training policy...[/]")
                 self._prepare_for_training(timer)
                 with timer.time("policy_training"):
@@ -534,12 +534,12 @@ class GRPOTrainer:
                             "generation_logprobs": -9999.0,
                         },
                     )
-                
+
                 # Refit policy, temporarily pausing ongoing rollouts mid-generation.
                 status.update("[bold]Refitting vLLM...[/]")
                 with timer.time("refit_policy_generation"):
                     await self._refit_policy_generation()
-                
+
                 if (step+1) % self.checkpointing_config.save_period == 0:
                     status.update("[bold]Saving checkpoint...[/]")
                     self._save_checkpoint(
@@ -547,32 +547,32 @@ class GRPOTrainer:
                         consumed_samples,
                         timer,
                     )
-                
+
                 # Collate metrics
                 collated_metrics: dict[str, list[float]] = {}
-                
+
                 for x in step_env_metrics:
                     for k, v in x.items():
                         if k not in collated_metrics:
                             collated_metrics[k] = []
                         collated_metrics[k].append(v)
-                
+
                 summary_metrics = {}
-                
+
                 for k, v in collated_metrics.items():
                     summary_metrics[f"{k}/mean"] = np.mean(v)
                     summary_metrics[f"{k}/std"] = np.std(v)
                     summary_metrics[f"{k}/min"] = np.min(v)
                     summary_metrics[f"{k}/max"] = np.max(v)
-                
+
                 self.logger.log_metrics({
                     "env_metrics": summary_metrics,
                     "coordinator_metrics": coordinator_metrics,
                 }, step)
-                
+
                 mean_staleness = np.mean(step_staleness)
                 mean_reward = np.mean([x["reward"] for x in step_env_metrics])
-                
+
                 elapsed = (datetime.now() - step_start).total_seconds()
                 console.log(
                     f"[bold green]Step {step + 1:4d}[/] | "
@@ -587,7 +587,7 @@ class GRPOTrainer:
                 timer.reset()
                 step_start = datetime.now()
                 step += 1
-        
+
         console.log("[bold green]Finished training![/]")
         self._save_checkpoint(
             step,
@@ -600,17 +600,17 @@ class GRPOTrainer:
         example: vf.RolloutInput
     ) -> tuple[list[RolloutOutputs], dict[str, list[float]], bool]:
         """Runs rollouts for a batch of repeated prompts.
-        
+
         Args:
             example: Prompt to generate rollouts for.
-        
+
         Returns:
             Tuple of (rollout outputs, rollout metrics, is_valid) where is_valid is True if group has non-zero variance.
         """
         # Lazy-initialize rollout clients on first call.
         if len(self.rollout_clients) == 0:
             self.rollout_clients = [openai.AsyncOpenAI(api_key="n/a", base_url=f"http://{ip}:8000/v1") for ip in self.inference.get_ips()]
-        
+
         # Mandatory sampling args for vLLM, plus user-specified ones
         sampling_args = {
             "logprobs": 1,
@@ -628,18 +628,18 @@ class GRPOTrainer:
             sampling_args=sampling_args,
             use_tqdm=False
         )
-        
+
         # Increment to next client for round-robin load balancing.
         self.next_rollout_client = (self.next_rollout_client + 1) % len(self.rollout_clients)
 
         # Reset prefix cache on vLLM actors now that this rollout step is done
         await self.inference.finish_generation()
-        
+
         output = []
-        
+
         # Calculate response-level advantages.
         advantages, is_valid = self._compute_advantages(results["reward"], self.rollout_config.use_leave_one_out_baseline)
-        
+
         # Stich returned trajectories into full tokenized responses.
         for i, state in enumerate(results["state"]):
             token_ids, generation_logprobs, completion_mask = self._stitch_trajectory_steps(state["trajectory"])
@@ -649,39 +649,39 @@ class GRPOTrainer:
                 "token_mask": completion_mask,
                 "advantages": [advantages[i]] * len(token_ids),
             })
-        
+
         metrics = {
             "reward": results["reward"],
             **results["metrics"],
         }
-        
+
         return output, metrics, is_valid
-    
+
     def _stitch_trajectory_steps(self, steps: list[vf.TrajectoryStep]) -> tuple[list[int], list[float], list[bool]]:
         """Stitch trajectory steps into token IDs and generation logprobs.
-        
+
         Args:
             steps: List of trajectory steps.
-            
+
         Returns:
             Tuple of list of token IDs, list of generation logprobs, and the completion mask.
         """
         token_ids: list[int] = []
         generation_logprobs: list[float] = []
         completion_mask: list[bool] = []
-        
+
         # Go over backwards, overwriting parts of the mask and logprobs as we go to get the full sequence.
         for step in reversed(steps):
             assert isinstance(step["response"], ChatCompletion), f"Expected ChatCompletion, got {type(step['response'])}"
             response: ChatCompletion = step["response"]
             prompt_token_ids: list[int] = response.prompt_token_ids # type: ignore[attr-defined]
             completion_token_ids: list[int] = response.choices[0].token_ids # type: ignore[attr-defined]
-            
+
             assert hasattr(response.choices[0].logprobs, "content"), "Expected logprobs in response"
             assert response.choices[0].logprobs.content is not None, "Expected logprobs in response"
-            
+
             completion_logprobs = [x.logprob for x in response.choices[0].logprobs.content]
-            
+
             # Last response, which should have the full sequence.
             if len(token_ids) == 0:
                 token_ids = prompt_token_ids + completion_token_ids
@@ -689,18 +689,18 @@ class GRPOTrainer:
                 completion_mask = [False] * len(prompt_token_ids) + [True] * len(completion_token_ids)
             else:
                 total_len = len(prompt_token_ids) + len(completion_token_ids)
-                
+
                 # Ensure that new turns are append-only in this chat template.
                 assert token_ids[0:total_len] == prompt_token_ids + completion_token_ids, "Tokenization is not consistent between turns."
-                
+
                 # Slice indices for the completion logprobs/mask
                 completion_start = len(prompt_token_ids)
                 completion_end = completion_start + len(completion_token_ids)
-                
+
                 # Use above indices to overwrite the -9999 and False values with the new completion logprobs and True values.
                 generation_logprobs[completion_start:completion_end] = completion_logprobs
                 completion_mask[completion_start:completion_end] = [True] * len(completion_token_ids)
-        
+
         return token_ids, generation_logprobs, completion_mask
 
     def _compute_advantages(
@@ -709,17 +709,17 @@ class GRPOTrainer:
         leave_one_out_baseline: bool = False,
     ) -> tuple[list[float], bool]:
         """Compute response-level advantages from rewards (all assumed to be in the same group).
-        
+
         Args:
             rewards: List of rewards for a single prompt group
             leave_one_out_baseline: If True, baseline for each response excludes that response
-            
+
         Returns:
             Tuple of (advantages, is_valid) where is_valid is True if group has non-zero variance
         """
         rewards_tensor = torch.tensor(rewards)
         n = len(rewards)
-        
+
         if leave_one_out_baseline and n > 1:
             # For each response, baseline = mean of other responses
             group_sum = rewards_tensor.sum()
@@ -727,9 +727,9 @@ class GRPOTrainer:
         else:
             # Baseline = mean of all responses
             baselines = rewards_tensor.mean()
-        
+
         advantages = (rewards_tensor - baselines).tolist()
-        
+
         # Mark as invalid if all rewards are identical (zero variance)
         return advantages, rewards_tensor.std().item() > 0
 

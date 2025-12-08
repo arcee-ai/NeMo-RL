@@ -44,23 +44,23 @@ def parse_args():
 def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
     """Preprocess the data for the SFT trainer."""
     logging.info("Setting up data...")
-    
+
     dataset_name = data_config["dataset_name"]
     dataset_type = data_config.get("dataset_type", "pretokenized")
     on_disk = data_config.get("on_disk", False)
-    
+
     if on_disk:
         dataset = load_from_disk(dataset_name)
     else:
         dataset = load_dataset(dataset_name)
-    
+
     assert "train" in dataset.keys(), "Dataset must contain a train split"
     train_dataset = dataset["train"]
     val_dataset = dataset.get("validation", None)
 
     if dataset_type != "native":
         logging.info(f"Using non-native '{dataset_type}' dataset type, applying transformation (this may take a while)")
-    
+
     train_dataset = transform_dataset(train_dataset, dataset_type, tokenizer)
     if val_dataset is not None:
         val_dataset = transform_dataset(val_dataset, dataset_type, tokenizer)
@@ -85,12 +85,15 @@ def main():
 
     config: MasterConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
-    
+
     if not torch.cuda.can_device_access_peer(0, 1):
         os.environ["NCCL_SHM_DISABLE"] = "1"
         logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
         if not config["checkpointing"].get("hf_checkpoint", False):
-            raise ValueError("Running on a system configuration with bugged DCP checkpointing. Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints.")
+            raise ValueError(
+                "Running on a system configuration with bugged DCP checkpointing. " + \
+                "Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints."
+            )
 
     # Print config
     print("Final config:")
@@ -115,7 +118,7 @@ def main():
     ) = setup_data(tokenizer, config["data"])
 
     trainer = SFTTrainer(config, tokenizer, dataset, val_dataset)
-    
+
     asyncio.run(trainer.train())
 
 

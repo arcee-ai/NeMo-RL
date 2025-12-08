@@ -26,7 +26,7 @@ from .utils import _permute, _unpermute
 
 class TensorParallel(ParallelStyle):
     """Tensor parallel for the GroupedExperts in MoE."""
-    
+
     def _prepare_input_fn(self, mod, inputs, device_mesh):
         """Prepare the input for tensor parallel."""
         routed_input, num_tokens_per_expert = inputs

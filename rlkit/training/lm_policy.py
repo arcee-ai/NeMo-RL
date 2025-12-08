@@ -52,7 +52,7 @@ class Policy:
             weights_path = os.path.abspath(weights_path)
         if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
-        
+
         worker_builder_cls = "rlkit.training.v2_policy_worker.DTensorV2PolicyWorker"
         tp_size = config.training.parallelism.tp_size
         # TODO: Fully remove this or add it back in
@@ -132,12 +132,12 @@ class Policy:
         self, ip: str, port: int, world_size: int
     ) -> list[ray.ObjectRef]:
         """Initialize the collective communication.
-        
+
         Args:
             ip: The IP address of the head node.
             port: The port to use for collective communication.
             world_size: The total number of workers in the collective (train rank0 + inference workers).
-        
+
         Returns:
             list[ray.ObjectRef]: Futures to await alongside vLLM futures for setting up collective communication.
         """
@@ -154,19 +154,19 @@ class Policy:
         eval_mode: bool = False,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function.
-        
+
         Args:
             sharded_data: List of shards (one per DP rank), where each shard is a list
                 of packed samples (dicts with token_ids, token_mask, etc.).
             loss_fn: Loss function to use for training.
             pad_values: Dictionary mapping field names to the placeholder value to use when padding tensors.
             eval_mode: Whether to run in evaluation mode (no gradient updates).
-        
+
         Returns:
             dict[str, Any]: A dictionary containing the metrics from the training step.
         """
         assert len(sharded_data) > 0, "Data must contain at least one shard"
-        
+
         # Train each shard in parallel
         futures = self.worker_group.run_all_workers_sharded_data(
             "train",
@@ -210,7 +210,7 @@ class Policy:
         for r in results:
             if "router_statistics" in r:
                 router_stats_all_workers.append(r["router_statistics"])
-        
+
         if router_stats_all_workers:
             # Sum absolute counts across all DP ranks
             aggregated_router_stats = {}
@@ -231,13 +231,13 @@ class Policy:
                         layer_stats[layer_key][expert_idx] = sum(
                             stats.get(expert_key, 0) for stats in router_stats_all_workers
                         )
-                
+
                 # Convert to fractions per layer and calculate expert balance
                 for layer_key, expert_counts in layer_stats.items():
                     total_counts = sum(expert_counts.values())
                     layer_id = layer_key.replace("layer_", "")
                     expert_fractions = []
-                    
+
                     if total_counts > 0:
                         for expert_idx, count in expert_counts.items():
                             # Reconstruct expert key
@@ -251,7 +251,7 @@ class Policy:
                             expert_key = f"expert_{layer_id}_{expert_idx}"
                             aggregated_router_stats[expert_key] = 0.0
                             expert_fractions.append(0.0)
-                    
+
                     # Calculate expert balance metric (standard deviation of expert fractions)
                     # Lower values indicate better balance (more even distribution)
                     if len(expert_fractions) > 1:
@@ -283,9 +283,9 @@ class Policy:
 
     def broadcast_weights_for_collective(self) -> list[ray.ObjectRef]:
         """Start futures for broadcasting model weights to inference workers.
-        
+
         These futures should be awaited alongside the vLLM futures for receiving the weight.
-        
+
         Returns:
             list[ray.ObjectRef]: Futures to await alongside vLLM futures for broadcasting model weights.
         """

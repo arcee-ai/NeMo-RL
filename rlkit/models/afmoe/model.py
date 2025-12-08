@@ -5,7 +5,9 @@ from torch.nn.attention.flex_attention import and_masks
 import torch.nn.functional as F
 from torch import nn
 
-from rlkit.models.attention import AttentionMasksType, FlexAttentionWrapper, ScaledDotProductAttentionWrapper, create_attention_mask, get_causal_mask_mod, get_document_mask_mod, get_sliding_window_mask_mod
+from rlkit.models.attention import (AttentionMasksType, FlexAttentionWrapper, ScaledDotProductAttentionWrapper,
+                                    create_attention_mask, get_causal_mask_mod,
+                                    get_document_mask_mod, get_sliding_window_mask_mod)
 from rlkit.models import BaseModel
 
 from .args import AFMoEModelArgs
@@ -65,16 +67,16 @@ def apply_rotary_emb(
     """
     # Get sequence length from query tensor
     seqlen = xq.shape[1]
-    
+
     # Slice cos/sin to match sequence length and reshape for broadcasting
     # cos/sin: (seqlen, head_dim) -> (1, seqlen, 1, head_dim)
     cos = cos[:seqlen].unsqueeze(0).unsqueeze(2)
     sin = sin[:seqlen].unsqueeze(0).unsqueeze(2)
-    
+
     # Apply rotary embeddings: x_embed = (x * cos) + (rotate_half(x) * sin)
     xq_out = (xq * cos) + (rotate_half(xq) * sin)
     xk_out = (xk * cos) + (rotate_half(xk) * sin)
-    
+
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
@@ -271,7 +273,7 @@ class TransformerBlock(nn.Module):
             x (torch.Tensor): Input tensor.
             freqs_cis (tuple[torch.Tensor, torch.Tensor]): Precomputed cosine and sine frequencies.
             attention_masks (AttentionMasksType | None): Attention masks.
-        
+
         Returns:
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
@@ -369,18 +371,18 @@ class AFMoEModel(BaseModel):
         else:
             output = self.output(h) if self.output else h
             return output
-    
+
     def get_attention_masks(
         self,
         input_batch: torch.Tensor,
         separator_value: int,
     ) -> AttentionMasksType:
         """Generate attention masks for a given sequence.
-        
+
         Args:
             input_batch (torch.Tensor): The input batch read from the dataloader.
             separator_value (int): The token ID separating packed documents.
-        
+
         Returns:
             AttentionMasksType: Attention masks for full and sliding-window attention layers.
         """
@@ -412,34 +414,34 @@ class AFMoEModel(BaseModel):
         self, ep_mesh=None, as_fractions: bool = False
     ) -> dict[str, float]:
         """Collect router statistics from all MoE layers.
-        
+
         Args:
             ep_mesh: Optional DeviceMesh for expert parallel group. If provided,
                     statistics will be aggregated across EP ranks.
             as_fractions: If True, return fractions (0.0-1.0) normalized per layer.
                          If False, return absolute token counts.
-        
+
         Returns:
             Dictionary mapping "expert_{layer_id}_{expert_idx}" to either token counts
             or fractions depending on as_fractions parameter.
         """
         router_stats = {}
-        
+
         for layer_id_str, layer in self.layers.items():
             if hasattr(layer, "moe") and layer.moe is not None:
                 layer_id = layer.moe.layer_id
                 if layer_id is None:
                     # Fallback to layer_id_str if layer_id not set
                     layer_id = int(layer_id_str)
-                
+
                 # Get router statistics for this layer
                 stats = layer.moe.router_stats.clone()
-                
+
                 # Aggregate across EP ranks if EP is enabled
                 if ep_mesh is not None and ep_mesh.size() > 1:
                     import torch.distributed as dist
                     dist.all_reduce(stats, op=dist.ReduceOp.SUM, group=ep_mesh.get_group())
-                
+
                 # Convert to fractions if requested
                 if as_fractions:
                     total_tokens_routed = stats.sum().item()
@@ -449,12 +451,12 @@ class AFMoEModel(BaseModel):
                     else:
                         # If no tokens were routed, set all fractions to 0
                         stats = torch.zeros_like(stats)
-                
+
                 # Store statistics with expert_{layer}_{idx} naming
                 for expert_idx in range(stats.shape[0]):
                     key = f"expert_{layer_id}_{expert_idx}"
                     router_stats[key] = stats[expert_idx].item()
-                
+
                 # Calculate expert balance metric (standard deviation of expert fractions)
                 # Lower values indicate better balance (more even distribution)
                 # For perfect balance with N experts, each gets 1/N, so std = 0
@@ -466,8 +468,8 @@ class AFMoEModel(BaseModel):
                         # Single expert case - perfect balance by definition
                         expert_balance = 0.0
                     router_stats[f"expert_balance_{layer_id}"] = expert_balance
-                
+
                 # Reset router statistics after collection
                 layer.moe.reset_router_statistics()
-        
+
         return router_stats

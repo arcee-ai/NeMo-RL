@@ -55,11 +55,11 @@ class VLLMOpenAIServe:
         assert _args is not None, "Failed to parse arguments"
         self._args = _args
         validate_parsed_serve_args(self._args)
-        
+
         # Track engine initialization status
         self._engine_initialized = False
         asyncio.create_task(self._init_app(worker_extension_cls))
-    
+
     async def _init_app(self, worker_extension_cls: str):
         """Async task to start vLLM HTTP app."""
         from vllm.engine.arg_utils import AsyncEngineArgs
@@ -68,9 +68,9 @@ class VLLMOpenAIServe:
             build_async_engine_client_from_engine_args,
             init_app_state,
         )
-        
+
         self._worker_extension_cls = worker_extension_cls
-        
+
         engine_args = AsyncEngineArgs.from_cli_args(self._args)
         engine_args.worker_extension_cls = worker_extension_cls
 
@@ -79,22 +79,22 @@ class VLLMOpenAIServe:
             disable_frontend_multiprocessing=self._args.disable_frontend_multiprocessing
         )
         self._engine_client = await self._engine_client_ctx.__aenter__()
-        
+
         # Mark engine as initialized
         self._engine_initialized = True
-        
+
         self._tokenizer = await self._engine_client.get_tokenizer()
 
         vllm_app = build_vllm_app(self._args)
-        
+
         await init_app_state(self._engine_client, vllm_app.state, self._args)
         vllm_app.state.engine_client = self._engine_client
-        
+
         # Create the root FastAPI app inside the actor (not at module level)
         # to avoid serialization issues with Ray
         serve_app = FastAPI()
         serve_app.mount("/", vllm_app)
-        
+
         config = uvicorn.Config(
             serve_app,
             host="0.0.0.0",
@@ -108,28 +108,28 @@ class VLLMOpenAIServe:
         )
         server = uvicorn.Server(config)
         await server.serve()
-    
+
     async def admin_engine_ready(self) -> bool:
         """Check if vLLM engine has finished initializing."""
         return getattr(self, '_engine_initialized', False)
-    
+
     async def admin_get_ip(self) -> str:
         """Get the IP address of this node."""
         return ray.util.get_node_ip_address()
-    
+
     async def admin_reset_prefix_cache(self) -> bool:
         """Reset prefix cache on all vLLM workers."""
         await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
         return True
-    
+
     async def admin_reset_prefix_cache_async(self) -> bool:
         """Reset prefix cache on all vLLM workers asynchronously."""
         await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
         return True
-        
+
     async def admin_init_collective(self, rank_prefix: int, ip: str, port: int, world_size: int) -> Literal[True]:
         """Initialize collective communication between vLLM workers and the training rank0 for weight refits.
-        
+
         Args:
             rank_prefix: The prefix to add to our local rank to get the global rank.
             ip: The IP address of the head node.

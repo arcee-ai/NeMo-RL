@@ -78,14 +78,14 @@ class SFTTrainer:
         self.tokenizer = tokenizer
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
-        
+
         policy_config = self.master_config["policy"]
         cluster_config = self.master_config["cluster"]
 
         set_seed(master_config["sft"]["seed"])
 
         self.logger = self._setup_logger(master_config["logger"])
-        
+
         (
             self.checkpointer,
             self.sft_save_state,
@@ -103,20 +103,20 @@ class SFTTrainer:
             sft_config=master_config["sft"],
             last_checkpoint_path=last_checkpoint_path,
         )
-        
+
         logging.info("Setting up compute cluster...")
 
         self.cluster = self._setup_cluster(cluster_config)
-        
+
         if last_checkpoint_path:
             weights_path = Path(last_checkpoint_path) / "policy" / "weights"
             optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
         else:
             weights_path = None
             optimizer_path = None
-        
+
         self.use_hf_checkpoint = self.master_config["checkpointing"].get("hf_checkpoint", False)
-        
+
         self.policy = self._initialize_policy(
             self.cluster,
             policy_config,
@@ -124,7 +124,7 @@ class SFTTrainer:
             weights_path,
             optimizer_path
         )
-        
+
         self.loss_fn = NLLLoss()
 
     def _setup_logger(self, logger_config: LoggerConfig) -> Logger:
@@ -207,7 +207,7 @@ class SFTTrainer:
         use_cce = self.master_config["sft"].get("use_cut_cross_entropy", False)
         if use_cce:
             logging.info("Using cut cross-entropy loss kernel")
-        
+
         return Policy(
             cluster=train_cluster,
             config=policy_config,
@@ -222,28 +222,28 @@ class SFTTrainer:
 
     def _sample_to_document(self, sample: dict[str, list]) -> dict[str, list] | None:
         """Convert a single sample to the document format expected by pack_sequences.
-        
+
         Args:
             sample: Dictionary with 'input_ids' and 'token_mask' keys.
-        
+
         Returns:
             Document dict with 'token_ids', 'token_mask', and 'targets' keys,
             or None if the sample is invalid.
         """
         max_seq_len = self.master_config["policy"]["max_total_sequence_length"]
-        
+
         input_ids = sample["input_ids"]
         token_mask = sample["token_mask"]
-        
+
         if len(input_ids) > max_seq_len:
             # Truncate if too long
             input_ids = input_ids[:max_seq_len]
             token_mask = token_mask[:max_seq_len]
             logging.warning(f"Truncated sample from {len(sample['input_ids'])} to {max_seq_len} tokens")
-        
+
         if len(input_ids) == 0:
             return None
-        
+
         # Convert to the format expected by pack_sequences
         # 'targets' is a marker field to indicate SFT data (actual targets derived from token_ids)
         return {
@@ -260,7 +260,7 @@ class SFTTrainer:
 
         timer = Timer()
         sft_config = self.master_config["sft"]
-        
+
         pad_values = {
             "token_ids": self.tokenizer.pad_token_id,
             "token_mask": False,
@@ -274,11 +274,11 @@ class SFTTrainer:
             num_valid_batches = 0
 
             self.policy.prepare_for_training()
-            
+
             val_dataloader_iter = iter(self.val_dataloader)
             packing_pool: list[dict[str, list]] = []
             out_of_samples = False
-            
+
             while num_valid_batches < sft_config["val_batches"] or sft_config["val_batches"] <= 0:
                 # Pull samples until we can fill all bins
                 while not out_of_samples:
@@ -286,11 +286,11 @@ class SFTTrainer:
                     if sample is None:
                         out_of_samples = True
                         break
-                    
+
                     doc = self._sample_to_document(sample[0])
                     if doc is not None:
                         packing_pool.append(doc)
-                    
+
                     # Try packing
                     bins, remainder = pack_sequences(
                         documents=packing_pool,
@@ -298,12 +298,12 @@ class SFTTrainer:
                         num_bins=sft_config["val_global_batch_size"],
                         separator_value=pad_values,
                     )
-                    
+
                     # If we have remainder, bins are full
                     if len(remainder) > 0:
                         packing_pool = list(remainder)
                         break
-                
+
                 # Check if we ran out of samples without filling bins
                 if len(remainder) == 0:
                     if out_of_samples:
@@ -311,7 +311,7 @@ class SFTTrainer:
                         break
                     # Keep waiting for more samples
                     continue
-                
+
                 # Distribute bins for DP
                 dist_bins = distribute_bins_for_dp(
                     bins=bins,
@@ -379,7 +379,7 @@ class SFTTrainer:
         sft_config = self.master_config["sft"]
         val_period = sft_config["val_period"]
         val_at_start = sft_config["val_at_start"]
-        
+
         pad_values = {
             "token_ids": self.tokenizer.pad_token_id,
             "token_mask": False,
@@ -397,11 +397,11 @@ class SFTTrainer:
                 )
 
         self.policy.prepare_for_training()
-        
+
         dataloader_iter = iter(self.train_dataloader)
         packing_pool: list[dict[str, list]] = []
         out_of_samples = False
-        
+
         while step < sft_config["max_num_steps"]:
             with timer.time("total_step_time"):
                 # Pull samples from dataloader until bins are full
@@ -411,12 +411,12 @@ class SFTTrainer:
                         if sample is None:
                             out_of_samples = True
                             break
-                        
+
                         doc = self._sample_to_document(sample[0])
                         if doc is not None:
                             packing_pool.append(doc)
                             consumed_samples += 1
-                        
+
                         # Try packing
                         bins, remainder = pack_sequences(
                             documents=packing_pool,
@@ -424,12 +424,12 @@ class SFTTrainer:
                             num_bins=self.master_config["policy"]["train_global_batch_size"],
                             separator_value=pad_values,
                         )
-                        
+
                         # If we have remainder, bins are full - proceed with training
                         if len(remainder) > 0:
                             packing_pool = list(remainder)
                             break
-                    
+
                     # Check if we ran out of samples without filling bins
                     if len(remainder) == 0:
                         if out_of_samples:
@@ -438,13 +438,16 @@ class SFTTrainer:
                             break
                         # Keep waiting for more samples
                         continue
-                    
+
                     bin_lengths = [len(bin["token_ids"]) for bin in bins]
                     min_bin_length = min(bin_lengths)
                     max_bin_length = max(bin_lengths)
                     mean_bin_length = sum(bin_lengths) / len(bin_lengths)
-                    logging.info(f"Step {step + 1}: Packed sequences into {len(bins)} bins: min={min_bin_length}, max={max_bin_length}, mean={mean_bin_length:.1f}")
-                    
+                    logging.info(
+                        f"Step {step + 1}: Packed sequences into {len(bins)} bins: "
+                        f"min={min_bin_length}, max={max_bin_length}, mean={mean_bin_length:.1f}"
+                    )
+
                     # Distribute bins for DP
                     dist_bins = distribute_bins_for_dp(
                         bins=bins,
@@ -501,7 +504,7 @@ class SFTTrainer:
                     metrics[k] = np.mean(v).item()
                 else:
                     metrics[k] = np.sum(v).item()
-            
+
             # Add router statistics if available
             expert_balance_metrics = {}
             router_stats_metrics = {}
@@ -513,21 +516,21 @@ class SFTTrainer:
                         expert_balance_metrics[layer_id] = count
                     else:
                         router_stats_metrics[expert_key] = count
-                
+
                 if expert_balance_metrics:
                     full_model_balance = np.mean(list(expert_balance_metrics.values()))
                     metrics["expert_balance"] = full_model_balance
-            
+
             self._log_step(metrics, timer, train_results, step, expert_balance_metrics, router_stats_metrics)
 
             timer.reset()
             step += 1
-        
+
         # Final checkpoint
         logging.info("Finished training!")
         if self.master_config["checkpointing"]["enabled"]:
             self._save_checkpoint(step, consumed_samples, None, timer)
-    
+
     def _save_checkpoint(
         self,
         step: int,
@@ -545,7 +548,8 @@ class SFTTrainer:
         if self.master_config["checkpointing"]["metric_name"] is not None:
             if self.master_config["checkpointing"]["metric_name"] not in self.sft_save_state:
                 warnings.warn(
-                    f"You asked to save checkpoints based on {self.master_config['checkpointing']['metric_name']} but the metric is not found in the save state. "
+                    f"You asked to save checkpoints based on {self.master_config['checkpointing']['metric_name']} "
+                    "but the metric is not found in the save state. "
                     "Saving most recent k checkpoints instead."
                 )
                 self.master_config["checkpointing"]["metric_name"] = None
@@ -555,7 +559,7 @@ class SFTTrainer:
             checkpoint_path = self.checkpointer.init_tmp_checkpoint(
                 step + 1, self.sft_save_state, self.master_config
             )
-            
+
             self.policy.save_checkpoint(
                 weights_path=os.path.join(checkpoint_path, "policy", "weights"),
                 optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
@@ -566,7 +570,7 @@ class SFTTrainer:
                 os.path.join(checkpoint_path, "train_dataloader.pt"),
             )
             self.checkpointer.finalize_checkpoint(checkpoint_path)
-    
+
     def _log_step(
         self,
         metrics: dict[str, Any],
@@ -600,7 +604,7 @@ class SFTTrainer:
         self.logger.log_metrics(
             timing_metrics, total_steps + 1, prefix="timing/train"
         )
-        
+
         # Log expert balance metrics separately under expert/balance/
         if expert_balance_metrics:
             balance_metrics = {
@@ -609,7 +613,7 @@ class SFTTrainer:
             self.logger.log_metrics(
                 balance_metrics, total_steps + 1, prefix="expert"
             )
-        
+
         # Log router statistics (expert fractions) separately under expert/router_stats/
         if router_stats_metrics:
             stats_metrics = {

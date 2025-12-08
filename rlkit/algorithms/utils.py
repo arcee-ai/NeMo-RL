@@ -18,7 +18,6 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.cuda
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 def _pad_tensor(
     tensor: torch.Tensor,

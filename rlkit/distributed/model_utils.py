@@ -64,7 +64,7 @@ class DistributedLogprob(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(  # pyrefly: ignore[bad-override]  Always ignore torch.autograd.Function.forward's type since it's always more specific than the base class
+    def forward(  # pyrefly: ignore[bad-override] Ignore torch.autograd.Function.forward's type since it's more specific than the base class
         ctx: Any,
         vocab_parallel_logits: torch.Tensor,
         target: torch.Tensor,
@@ -155,7 +155,7 @@ class ChunkedDistributedLogprob(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(  # pyrefly: ignore[bad-override]  Always ignore torch.autograd.Function.forward's type since it's always more specific than the base class
+    def forward(  # pyrefly: ignore[bad-override] Ignore torch.autograd.Function.forward's type since it's more specific than the base class
         ctx: Any,
         vocab_parallel_logits: torch.Tensor,
         target: torch.Tensor,

@@ -87,7 +87,7 @@ class MultiWorkerFuture:
         has_generator = False
         for idx, fut in enumerate(self.futures):
             if isinstance(fut, ObjectRefGenerator):
-                # ray.get cannot be called directly on the generator object – it must be iterated to obtain the individual ObjectRef instances first.
+                # ray.get cannot be called directly on the generator object – it must be iterated to obtain the individual ObjectRefs
                 for generated_ref in fut:
                     object_refs.append(generated_ref)
                     has_generator = True
@@ -739,7 +739,7 @@ class RayWorkerGroup:
     ) -> MultiWorkerFuture:
         """Run a method on all workers in parallel with sharded data.
 
-        Axes in in_sharded_axes: Data is already split across these axes, so we just send the appropriate slice to each worker (along this axis)
+        Axes in in_sharded_axes: Data is already split across these axes, so just send the appropriate slice to each worker along this axis
         Axes in replicate_on_axes: Data is replicated to all workers along these dimensions
         Free axes (axes not in either list): Data is only sent to workers at index 0 of these axes
 

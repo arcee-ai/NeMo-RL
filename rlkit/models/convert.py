@@ -16,11 +16,11 @@ from .state_dict_adapter import BaseStateDictAdapter
 def get_model_config(config: PretrainedConfig) -> tuple[type[BaseModel], BaseModelArgs, type[BaseStateDictAdapter]]:
     """Get the model class, native model arguments, and state dict adapter class for a given HuggingFace config."""
     mt = config.model_type
-    
+
     if mt == "afmoe":
         layer_types = config.layer_types
         glob_attn_every_n = layer_types.index("full_attention") + 1
-        
+
         return AFMoEModel, AFMoEModelArgs(
             dim = config.hidden_size,
             inter_dim = config.intermediate_size,

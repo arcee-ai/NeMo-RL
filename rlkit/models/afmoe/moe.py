@@ -25,7 +25,7 @@ class FeedForward(nn.Module):
         hidden_dim: int,
     ):
         """Initialize the feedforward module.
-        
+
         Args:
         dim (int): Input dimension.
         hidden_dim (int): Hidden dimension of the feedforward layer.
@@ -154,7 +154,9 @@ class GroupedExperts(nn.Module):
 
 
 class TokenChoiceTopKRouter(nn.Module):
-    """This class implements token-choice routing. In token-choice top-K routing, each token is routed to top K experts based on the router scores.
+    """Implements token-choice routing.
+
+    In token-choice top-K routing, each token is routed to top K experts based on the router scores.
 
     Args:
         dim (int): Dimension of input tokens.
@@ -189,7 +191,7 @@ class TokenChoiceTopKRouter(nn.Module):
         self, scores: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Balanced round-robin expert assignment.
-        
+
         Returns (selected_experts_indices [N, K] LongTensor, top_scores [N, K] FloatTensor).
         """
         n_tokens = scores.size(0)
@@ -207,7 +209,7 @@ class TokenChoiceTopKRouter(nn.Module):
         self, x: torch.Tensor, expert_bias: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass.
-        
+
         Args:
             x (torch.Tensor): Input tensor with shape ``(bs*slen, dim)``.
             expert_bias (torch.Tensor | None, optional): Optional bias tensor for experts with shape ``(num_experts,)``.
@@ -272,7 +274,7 @@ class TokenChoiceTopKRouter(nn.Module):
 
 class TokenReorderer(nn.Module):
     """This module reorders token indices to match the order of experts, enabling efficient parallel processing of tokens by experts.
-    
+
     The reason we make this a stateless module is to support expert_tensor_parallel_degree=1 with consistent TP/EP APIs.
     """
     def __init__(self, num_experts: int, top_k: int):
@@ -388,7 +390,7 @@ class MoE(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for the MoE module.
-        
+
         Args:
             x (torch.Tensor): Input tensor with shape ``(bs, slen, dim)``.
 

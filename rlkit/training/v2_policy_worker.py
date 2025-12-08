@@ -37,7 +37,6 @@ from torch.distributed._tensor import distribute_tensor
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
-    AutoTokenizer,
     PreTrainedTokenizerBase,
 )
 from rlkit.algorithms.loss_functions import LossFunction
@@ -118,7 +117,7 @@ class RLSample(PackedSample):
 @ray.remote
 class DTensorV2PolicyWorker:
     """Training worker."""
-    
+
     def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
 
@@ -139,7 +138,10 @@ class DTensorV2PolicyWorker:
         use_cut_cross_entropy: bool = False,
         **kwargs: Any,
     ):
-        """Set up the training worker. Loads and parallelizes the model, sets up the optimizer and scheduler, and loads checkpoint if provided."""
+        """Set up the training worker.
+
+        Loads and parallelizes the model, sets up the optimizer and scheduler, and loads checkpoint if provided.
+        """
         self.use_hf_checkpoint = use_hf_checkpoint
         self.use_cut_cross_entropy = use_cut_cross_entropy
 
@@ -155,7 +157,7 @@ class DTensorV2PolicyWorker:
         configure_expandable_segments()
 
         self.cfg = config
-        
+
         # torch distributed init. Env vars for rank, world_size, and master_addr and master_port are set from the ray remote call
         torch.distributed.init_process_group(backend="nccl") # type: ignore[attr-defined]
         self.rank = torch.distributed.get_rank() # type: ignore[attr-defined]
@@ -176,7 +178,7 @@ class DTensorV2PolicyWorker:
         print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
 
         self.model_name = model_name
-        
+
         # If we are checkpointing to HF format, we can just load a checkpoint directly from the weights path
         if self.use_hf_checkpoint:
             hf_model_name = model_name if weights_path is None else weights_path
@@ -198,7 +200,7 @@ class DTensorV2PolicyWorker:
         full_state_dict = None
         logging.info(f"Using custom model implementation for {model_name}")
         custom_model_class, self.custom_model_args, adapter_class = get_model_config(self.model_config)
-        
+
         self.adapter: BaseStateDictAdapter = adapter_class(
             model_args=self.custom_model_args, hf_assets_path=model_name
         )
@@ -212,7 +214,7 @@ class DTensorV2PolicyWorker:
                 trust_remote_code=True,
                 config=self.model_config,
             )
-            
+
             hf_state_dict = model.state_dict()
             full_state_dict = self.adapter.from_hf(hf_state_dict)
             assert (
@@ -291,7 +293,7 @@ class DTensorV2PolicyWorker:
         self.device_mesh = device_mesh
 
         activation_checkpointing = self.cfg.training.activation_checkpointing
-        
+
         self.model = parallelize_model(  # type: ignore[operator]
             model=self.model,
             # Mesh info
@@ -322,21 +324,21 @@ class DTensorV2PolicyWorker:
         )
 
         optimizer_cls = import_class_by_name(self.cfg.training.optimizer.name)
-        
+
         # Set up optimizer - if we are using the Muon optimizer, we need to gather the params by tensor type
         # Otherwise, just init the optimizer as normal
         if self.cfg.training.optimizer.scalar_optim is not None:
             scalar_param_optim = self.cfg.training.optimizer.scalar_optim
-            
+
             # Gather all params by tensor type
             muon_params = []
             non_muon_params = []
-            
+
             # Default: ["output.weight", "tok_embeddings.weight"]
             scalar_optim_extra_params = self.cfg.training.optimizer.non_muon_params
-            
+
             found_extra_params = []
-            
+
             for name, param in self.model.named_parameters():
                 if param.ndim == 2:
                     found = False
@@ -350,11 +352,11 @@ class DTensorV2PolicyWorker:
                         muon_params.append(param)
                 else:
                     non_muon_params.append(param)
-            
+
             for extra_param in scalar_optim_extra_params:
                 if extra_param not in found_extra_params:
-                    raise ValueError(f"Did not find '{extra_param}' in model parameters, but it was specified for exclusion from Muon. Please specify your own non_muon_params in the config.")
-            
+                    raise ValueError(f"Did not find '{extra_param}' in model parameters, but it was specified for exclusion from Muon.")
+
             param_groups = [
                 {
                     "params": muon_params,
@@ -365,7 +367,7 @@ class DTensorV2PolicyWorker:
                     **self.cfg.training.optimizer.scalar_optim_kwargs,
                 },
             ]
-            
+
             # Create optimizer, check for TypeError to helpfully suggest config option
             try:
                 if self.cfg.training.optimizer.pass_device_mesh:
@@ -380,11 +382,11 @@ class DTensorV2PolicyWorker:
                         **self.cfg.training.optimizer.kwargs,
                     )
             except TypeError as e:
-                raise TypeError("Got TypeError trying to create optimizer. You might need to change `pass_device_mesh` in your optimizer config.") from e
+                raise TypeError("TypeError trying to create optimizer. Try changing `pass_device_mesh` in your optimizer config.") from e
         else:
             if "muon" in self.cfg.training.optimizer.name.lower():
                 raise ValueError("Tried to instantiate Muon optimizer, but policy.optimizer.scalar_optim is not set.")
-            
+
             self.optimizer = optimizer_cls(
                 self.model.parameters(), **self.cfg.training.optimizer.kwargs
             )
@@ -400,7 +402,7 @@ class DTensorV2PolicyWorker:
                         self.optimizer, **scheduler_cfg.kwargs
                     )
                 )
-            
+
             milestones = self.cfg.training.optimizer.scheduler.milestones
 
             self.scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -410,7 +412,7 @@ class DTensorV2PolicyWorker:
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(
                 self.optimizer, lr_lambda=lambda epoch: 1
             )
-        
+
         # Load remainder of checkpoint state
         if weights_path and optimizer_path:
             if self.use_hf_checkpoint:
@@ -420,7 +422,7 @@ class DTensorV2PolicyWorker:
                 self.load_dcp_checkpoint(weights_path, optimizer_path)
 
         self.refit_param_info = None
-        
+
         # Used for streaming refits
         self._refit_metadata: Optional[
             dict[str, dict[str, Any]]
@@ -428,12 +430,12 @@ class DTensorV2PolicyWorker:
 
     def _build_forward_kwargs(self, input_ids: torch.Tensor) -> dict[str, Any]:
         """Build keyword arguments for the model forward pass.
-        
+
         Builds appropriate attention masks based on the model's attention mask function.
-        
+
         Args:
             input_ids: A tensor of input IDs.
-        
+
         Returns:
             dict[str, Any]: Keyword arguments for the model forward pass.
         """
@@ -450,10 +452,10 @@ class DTensorV2PolicyWorker:
         metadata: dict[str, tuple[torch.Size, torch.dtype]],
     ) -> dict[tuple[torch.Size, torch.dtype], list[str]]:
         """Group parameter names by shape and dtype.
-        
+
         Args:
             metadata: A dictionary mapping parameter names to their shape and dtype.
-        
+
         Returns:
             dict[tuple[torch.Size, torch.dtype], list[str]]: A dictionary mapping shape and dtype tuples to lists of parameter names.
         """
@@ -466,7 +468,7 @@ class DTensorV2PolicyWorker:
         """Initialize collective communication with vLLM training workers."""
         from vllm.distributed.utils import StatelessProcessGroup
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-        
+
         if self.rank == 0:
             logging.info(f"Initializing collective communication on trainer using PyNCCL (rank {self.rank}, world_size {world_size})")
             pg = StatelessProcessGroup.create(
@@ -498,25 +500,25 @@ class DTensorV2PolicyWorker:
         eval_mode: bool = False,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function.
-        
+
         Args:
             data: A list of PackedSample objects, each representing a packed sequence of at most seq_len tokens.
             loss_fn: A LossFunction object.
             pad_values: A dictionary mapping keys in data to the correct placeholder value to use when padding tensors.
             eval_mode: A boolean indicating whether to run in evaluation mode.
-        
+
         Returns:
             dict[str, Any]: Metrics from the training step.
         """
         gbs = self.cfg.training.global_batch_size
         mbs = self.cfg.training.micro_batch_size
-        
+
         # Sanity-check input samples
         assert len(data) > 0, "Data must contain at least one sample"
         assert len(data) % mbs == 0, f"Local batch size ({len(data)}) must be a multiple of the microbatch size ({mbs})"
         assert all("token_ids" in sample for sample in data), f"Data must contain 'token_ids' in each sample, got {data[0].keys()}"
         assert all("token_mask" in sample for sample in data), f"Data must contain 'token_mask' in each sample, got {data[0].keys()}"
-        
+
         if all("advantages" in sample for sample in data):
             data_type = "rl"
         elif all("targets" in sample for sample in data):
@@ -544,19 +546,20 @@ class DTensorV2PolicyWorker:
 
             self.optimizer.zero_grad()
             mb_losses = []
-            
+
             total_microbatches = len(data) // mbs
-            
+
             for mb_idx in range(total_microbatches):
                 microbatch_samples = data[mb_idx * mbs:(mb_idx + 1) * mbs]
-                                
+
                 # Pad and stack microbatch
                 microbatch = {}
                 for key in microbatch_samples[0].keys():
                     values = [sample[key] for sample in microbatch_samples] # type: ignore - key will always be in the sample
                     max_len = max([len(value) for value in values])
-                    
-                    assert max_len <= self.cfg.max_total_sequence_length, f"Max sequence length {max_len} is greater than the max total sequence length {self.cfg.max_total_sequence_length}"
+
+                    assert max_len <= self.cfg.max_total_sequence_length, \
+                        f"Max sequence length {max_len} is greater than the max total sequence length {self.cfg.max_total_sequence_length}"
                     padded_values = [
                         _pad_tensor(
                             torch.tensor(value, device="cuda"),
@@ -566,26 +569,26 @@ class DTensorV2PolicyWorker:
                         ) for value in values
                     ]
                     microbatch[key] = torch.stack(padded_values)
-                
+
                 microbatch["token_ids"] = microbatch["token_ids"].long()
                 token_ids = microbatch["token_ids"]
                 token_mask = microbatch["token_mask"]
-                
+
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
                     forward_kwargs = self._build_forward_kwargs(input_ids=token_ids)
                     # Depending on how the model is configured, this is either output logits or the final hidden state
                     output: torch.Tensor = self.model(**forward_kwargs)
-                
+
                 if self.use_cut_cross_entropy:
                     assert self.cp_size == 1, "Liger's cross-entropy loss kernel is not supported with context parallel"
                     assert data_type == "sft", "Liger's cross-entropy loss kernel is only supported for SFT data"
-                    
-                    with torch.autocast(device_type="cuda", dtype=self.dtype):                        
+
+                    with torch.autocast(device_type="cuda", dtype=self.dtype):
                         from cut_cross_entropy import linear_cross_entropy
                         lm_head_weight = self.model.output.weight
                         if isinstance(lm_head_weight, DTensor):
                             lm_head_weight = lm_head_weight.full_tensor()
-                        
+
                         token_loss = linear_cross_entropy(
                             output,
                             lm_head_weight,
@@ -594,10 +597,10 @@ class DTensorV2PolicyWorker:
                             shift=True,
                             reduction="none"
                         )
-                        
+
                         # Shift the mask to match the shifted loss output (shift=True removes first position)
                         shifted_token_mask = token_mask[:, 1:]
-                        
+
                         loss = masked_mean(
                             token_loss,
                             shifted_token_mask,
@@ -616,7 +619,7 @@ class DTensorV2PolicyWorker:
                             gbs,
                             token_mask.sum(),
                         )
-                
+
                 del output
 
                 # Backward pass
@@ -654,11 +657,11 @@ class DTensorV2PolicyWorker:
                 # Update parameters
                 self.optimizer.step()
                 self.scheduler.step()
-            
+
             # dynamic batch and sequence dims causes alot of fragmentation, so clear
             # the memory allocator before moving on
             torch.cuda.empty_cache()
-            
+
             # Aggregate metrics across all microbatches
             mb_metrics = defaultdict(list)
             for m in all_mb_metrics:
@@ -710,7 +713,7 @@ class DTensorV2PolicyWorker:
     @torch.no_grad()
     def prepare_refit_info(self) -> dict[str, Any]:
         """Prepare information for refitting to inference workers.
-        
+
         Returns:
             dict: Information on tensor packing, dtype, and shape.
         """
@@ -721,24 +724,24 @@ class DTensorV2PolicyWorker:
                 state_dict_info = self._collect_hf_metadata(state_dict)
             finally:
                 del state_dict
-        
+
             # Find all same-size (and same dtype) tensors
             similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
-            
+
             TENSOR_PACK_MAX = 1000
-            
+
             new_metadata: dict[str, dict[str, Any]] = {}
-            
+
             for refit_info, tensors in similar_tensors.items():
                 for i in range(0, len(tensors), TENSOR_PACK_MAX):
                     chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
                     key = "packed_tensor_" + str(refit_info) + "_" + str(i)
                     new_metadata[key] = {
                         "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
-                        "dtype": refit_info[1], 
+                        "dtype": refit_info[1],
                         "packed_tensors": chunk_tensors
                     }
-            
+
             self._refit_metadata = new_metadata
 
         return self._refit_metadata
@@ -759,13 +762,13 @@ class DTensorV2PolicyWorker:
     @torch.no_grad()
     def broadcast_weights_for_collective(self) -> None:
         """Broadcast the current model weights to inference workers.
-        
+
         This uses streaming conversion to avoid OOM: converts and broadcasts
         one tensor at a time instead of materializing the entire converted
         state dict, which would double memory usage.
         """
         state_dict = self.model.state_dict()
-        
+
         # First, build a mapping from hf keys to real state dict keys if necessary
         # TODO: We assume TT -> HF is always 1 -> [1, inf). This may be incorrect on some future models.
         hf_key_to_native_key = {}
@@ -778,7 +781,7 @@ class DTensorV2PolicyWorker:
         else:
             # No adapter, map hf keys to native keys directly
             hf_key_to_native_key = {k: k for k in state_dict.keys()}
-        
+
         assert self._refit_metadata is not None, "Refit metadata has not been set"
         for _, chunk_info in self._refit_metadata.items():
             # Collect all of the necessary tensors for this chunk
@@ -786,20 +789,20 @@ class DTensorV2PolicyWorker:
                 minidict_to_convert = {}
                 for hf_key in chunk_info["packed_tensors"]:
                     native_key = hf_key_to_native_key[hf_key]
-                    
+
                     native_tensor = state_dict[native_key]
                     if isinstance(native_tensor, DTensor):
                         native_tensor = native_tensor.full_tensor()
                     minidict_to_convert[native_key] = native_tensor
-                
+
                 converted_minidict = self.adapter.to_hf(minidict_to_convert)
-                
+
                 collected_tensors = []
                 for hf_key in chunk_info["packed_tensors"]:
                     collected_tensors.append(converted_minidict[hf_key])
             else:
                 collected_tensors = [state_dict[hf_key] for hf_key in chunk_info["packed_tensors"]]
-            
+
             if self.rank == 0:
                 chunk_tensor = torch.stack(collected_tensors)
                 self.model_update_group.broadcast(chunk_tensor, src=0)
@@ -911,17 +914,17 @@ class DTensorV2PolicyWorker:
                     self.model_config,
                     trust_remote_code=True,
                 )
-            
+
             assert self.adapter is not None
             state_dict_hf = self.adapter.to_hf(model_state)
             model_hf.load_state_dict(state_dict_hf, strict=True, assign=True)
 
             # Save model in expected path
             model_hf.save_pretrained(weights_path)
-            
+
             if self.tokenizer is not None and tokenizer_save_path is not None:
                 self.tokenizer.save_pretrained(tokenizer_save_path)
-            
+
             # Save optimizer state
             if optimizer_file_path is not None and optimizer_state is not None:
                 optimizer_payload: dict[str, Any] = {"optimizer": optimizer_state}
@@ -954,29 +957,29 @@ class DTensorV2PolicyWorker:
         )
         if optimizer_path and self.optimizer is not None:
             self._reshard_optimizer_state()
-    
+
     def _load_hf_optim_checkpoint(self, optimizer_path: str) -> None:
         """Manually loads a non-sharded optimizer checkpoint. Used for HF checkpoints."""
         optimizer_file_path = _infer_checkpoint_file_path(
             optimizer_path,
             "optimizer.pt",
         )
-        
+
         if self.rank == 0:
             optimizer_payload = torch.load(optimizer_file_path, map_location="cpu")
         else:
             optimizer_payload = None
-        
+
         obj = [optimizer_payload]
         torch.distributed.broadcast_object_list(obj, src=0) # type: ignore[attr-defined]
-        
+
         optimizer_payload = obj[0]
         assert optimizer_payload is not None
         optimizer_state = optimizer_payload.get("optimizer", optimizer_payload)
-        
+
         self.optimizer.load_state_dict(optimizer_state)
         self._reshard_optimizer_state()
-        
+
         if self.scheduler is not None:
             scheduler_state = optimizer_payload.get("scheduler", optimizer_payload)
             self.scheduler.load_state_dict(scheduler_state)

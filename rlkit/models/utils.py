@@ -60,7 +60,7 @@ def _unpermute(out, input_shape, permuted_indices):
 
 def indices_padding_wrapper(func: Callable) -> Callable:
     """Wrapper to pad indices for grouped_mm.
-    
+
     In order to use torch._grouped_mm, we need to make sure the number of
     tokens each expert gets is a multiple of TOKEN_GROUP_ALIGN_SIZE_M. The
     generate_permute_indices kernel also helps achieve this via padding,
@@ -98,7 +98,7 @@ def has_cuda_capability(major: int, minor: int) -> bool:
 
 class NoParallel(ParallelStyle):
     """Parallel style for not parallelizing."""
-    
+
     def __init__(
         self,
         *,
@@ -150,7 +150,7 @@ class NoParallel(ParallelStyle):
 # This class is just a convenience wrapper ported from a future version of PyTorch.
 class PrepareModuleInputOutput(ParallelStyle):
     """Convenience wrapper for wrapping the nn.Module's inputs and outputs to DTensors.
-    
+
     Configure the nn.Module's inputs (and outputs) to convert the input tensors (and output tensors, respectively) of the nn.Module
     to DTensors at runtime according to ``input_layouts`` (and output_layouts, respectively), and perform layout redistribution
     according to the ``desired_input_layouts`` (and ``desired_output_layouts``, respectively). This is a combination of
@@ -181,7 +181,7 @@ class PrepareModuleInputOutput(ParallelStyle):
             have the desired DTensor layouts.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
-    
+
     Returns:
         A :class:`ParallelStyle` object that prepares the sharding layouts of the nn.Module's inputs and outputs.
 
@@ -264,7 +264,7 @@ class PrepareModuleInputOutput(ParallelStyle):
 
 class ReordererSequenceParallel(ParallelStyle):
     """Parallel style for reordering sequence parallel."""
-    
+
     def __init__(self):
         """Initialize the reorderer sequence parallel."""
         super().__init__()

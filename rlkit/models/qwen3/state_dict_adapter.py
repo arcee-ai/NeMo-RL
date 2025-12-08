@@ -42,7 +42,7 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
 
     def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
         """Convert from native model state dict to HuggingFace format.
-        
+
         Args:
             state_dict: The native model state dict
 
@@ -74,7 +74,7 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
 
     def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
         """Convert from HuggingFace state dict to native model format.
-        
+
         Args:
             hf_state_dict: The HuggingFace format state dict
 

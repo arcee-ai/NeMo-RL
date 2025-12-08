@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--push-to-hub", action="store_true")
     parser.add_argument("--hf-private", action="store_true")
     args = parser.parse_args()
-    
+
     # Load tokenizer
     if args.tokenizer_name is None:
         logging.info("--tokenizer-name not provided, non-pretokenized datasets will crash.")
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     else:
         logging.info(f"Loading tokenizer '{args.tokenizer_name}'...")
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
-    
+
     ds_configs = get_dataset_config_names(args.dataset_name)
     if len(ds_configs) > 1:
         if args.ds_config is None:
@@ -35,17 +35,16 @@ if __name__ == "__main__":
             dataset = load_dataset(args.dataset_name, args.ds_config)
     else:
         dataset = load_dataset(args.dataset_name)
-    
+
     assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
-    
+
     logging.info("Loaded dataset. Applying transformation...")
-    
+
     dataset = transform_dataset(dataset, args.dataset_type, tokenizer, num_proc=args.num_proc)
-    
+
     if not args.push_to_hub:
         logging.info(f"Saving dataset to '{args.output_path}'")
         dataset.save_to_disk(args.output_path)
     else:
         logging.info(f"Pushing dataset to Hugging Face repo '{args.output_path}'...")
         dataset.push_to_hub(args.output_path, private=args.hf_private, num_proc=args.num_proc)
-    

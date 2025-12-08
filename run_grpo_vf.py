@@ -58,7 +58,10 @@ def main() -> None:
         os.environ["NCCL_SHM_DISABLE"] = "1"
         logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
         if not config.checkpointing.hf_checkpoint:
-            raise ValueError("Running on a system configuration with bugged DCP checkpointing. Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints.")
+            raise ValueError(
+                "Running on a system configuration with bugged DCP checkpointing. " + \
+                "Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints."
+            )
 
     # Get the next experiment directory with incremented ID
     config.logging.log_dir = get_next_experiment_dir(config.logging.log_dir)
@@ -71,7 +74,7 @@ def main() -> None:
     init_ray()
 
     trainer = GRPOTrainer(config)
-    
+
     print("\n" + "=" * 60)
     print(" " * 18 + "SETUP COMPLETE")
     print("=" * 60 + "\n")
