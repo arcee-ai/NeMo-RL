@@ -18,7 +18,6 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
     """State dict adapter for Qwen3 model."""
     def __init__(self, model_args: Qwen3ModelArgs, hf_assets_path: str | None):
         """Initialize the state dict adapter."""
-        super().__init__(model_args, hf_assets_path)
         self.model_args = model_args
         self.hf_assets_path = hf_assets_path
 
@@ -58,7 +57,9 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
             key = key.replace("_orig_mod.", "") # noqa: PLW2901
             if "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
-                layer_num = re.search(r"\d+", key).group(0)
+                layer_num_search = re.search(r"\d+", key)
+                assert layer_num_search is not None, f"Layer number not found in key: {key}"
+                layer_num = layer_num_search.group(0)
                 new_key = to_hf_map.get(abstract_key)
                 if new_key is None:
                     logging.warning(f"Key {key} not found in to_hf_map. Skipping.")
@@ -86,7 +87,9 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
         for key, value in hf_state_dict.items():
             if "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
-                layer_num = re.search(r"\d+", key).group(0)
+                layer_num_search = re.search(r"\d+", key)
+                assert layer_num_search is not None, f"Layer number not found in key: {key}"
+                layer_num = layer_num_search.group(0)
                 new_key = self.from_hf_map.get(abstract_key)
                 if new_key is None:
                     logging.warning(f"Key {key} not found in from_hf_map. Skipping.")
