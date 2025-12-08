@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gc
 import logging
 import os
 import re
@@ -50,7 +49,6 @@ from rlkit.models.state_dict_adapter import BaseStateDictAdapter
 from rlkit.training.utils import (
     clip_grad_by_total_norm_,
     configure_expandable_segments,
-    get_gpu_info,
     get_grad_norm,
     import_class_by_name,
     sliding_window_overwrite,
