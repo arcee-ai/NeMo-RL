@@ -7,11 +7,11 @@ sft:
   seed: 42
 
 policy:
-  model_name: "Qwen/Qwen2.5-0.5B"
+  model_name: "Qwen/Qwen3-0.6B"
   max_total_sequence_length: 2048
 
   training:
-    global_batch_size: 32
+    global_num_bins: 32
     micro_batch_size: 4
     dtype: "bfloat16"
     activation_checkpointing: false
@@ -56,14 +56,14 @@ data:
 logging:
   log_dir: "logs/sft"
   wandb:
-    project: "nemo-sft"
-    name: "sft-qwen-0.5B"
+    project: "rlkit-sft"
+    name: "sft-qwen-0.6B"
   gpu_monitoring:
     collection_interval: 10
     flush_interval: 10
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/sft_qwen_0.5B"
+  checkpoint_dir: "results/sft_qwen_0.6B"
   save_period: 100
   keep_top_k: 3

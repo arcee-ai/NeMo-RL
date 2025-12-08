@@ -254,7 +254,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         save_period = self.config.checkpointing.save_period
 
         pad_values = self._get_pad_values()
-        global_batch_size = self.training_config.global_batch_size
+        global_batch_size = self.training_config.global_num_bins
 
         # Run initial validation if requested
         if self.sft_config.val_at_start and step == 0 and self.val_dataloader is not None:
@@ -401,7 +401,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             return None
 
         pad_values = self._get_pad_values()
-        val_gbs = self.training_config.global_batch_size
+        val_gbs = self.training_config.global_num_bins
         val_batches = self.sft_config.val_batches
 
         self.policy.prepare_for_training()

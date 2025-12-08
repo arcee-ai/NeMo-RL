@@ -1,20 +1,29 @@
-# GRPO RL Configuration (New Format)
 rollouts:
   group_size: 16
-  max_concurrent_rollouts: null
+
+  # Advantage estimation settings.
   use_leave_one_out_baseline: true
   use_std_normalization: true
-  max_staleness: 1
+
+  max_concurrent_rollouts: null  # Number of rollouts to generate concurrently. If unspecified, uses global batch size.
+  max_staleness: 1  # Maximum number of training steps that can pass between a rollout being started and consumed.
+
+env:
+  env_name: "vf_reverse_text"
+  env_kwargs: {}  # Passed to load_environment().
+  max_prompt_length_ratio: 1.0
+  shuffle: false
 
 policy:
   model_name: "PrimeIntellect/Qwen3-0.6B-Reverse-Text-SFT"
   max_total_sequence_length: 512
 
   training:
-    global_batch_size: 256
+    global_num_bins: 256
     micro_batch_size: 4
     dtype: "bfloat16"
-    activation_checkpointing: false
+    activation_checkpointing: true
+    refit_max_pack: 1000  # Maximum number of tensors to send at once during refit.
     max_grad_norm: 1.0
 
     parallelism:
@@ -52,7 +61,7 @@ policy:
 
   inference:
     tp_size: 1
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.8
     dtype: "bfloat16"
     server_timeout: 6000
     sampling_args:
@@ -62,23 +71,17 @@ policy:
       gpus_per_node: 1
       num_nodes: 1
 
-env:
-  env_name: "vf_reverse_text"
-  env_kwargs: {}
-  max_prompt_length_ratio: 1.0
-  shuffle: false
-
 logging:
   log_dir: "logs"
   wandb:
-    project: "nemo-grpo-dev"
-    name: "grpo-vf-reverser-0.6B"
+    project: "rlkit-grpo-dev"
+    name: "debug-reverser-0.6B"
   gpu_monitoring:
     collection_interval: 10
     flush_interval: 10
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_vf_reverser_600M"
+  checkpoint_dir: "results/debug-reverser-0.6B"
   save_period: 10
   keep_top_k: 3

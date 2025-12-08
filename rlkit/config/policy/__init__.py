@@ -13,7 +13,7 @@ class PolicyConfig(BaseModel):
 
     max_total_sequence_length: int
 
-    tensor_pack_max: int = 1000
+    refit_max_pack: int = 1000
 
     training: TrainingConfig
     inference: InferenceConfig | None = None

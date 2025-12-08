@@ -410,7 +410,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 # TODO: Add a retry mechanism for invalid rollouts.
                 logging.warning("Ignoring an invalid rollout.")
 
-        target_in_flight = self.rollout_config.max_concurrent_rollouts or self.training_config.global_batch_size
+        target_in_flight = self.rollout_config.max_concurrent_rollouts or self.training_config.global_num_bins
         assert target_in_flight % self.rollout_config.group_size == 0, "max_concurrent_rollouts must be divisible by group_size"
         max_staleness = self.rollout_config.max_staleness
         in_flight = 0
@@ -473,7 +473,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     console.log(f"[yellow]Retrying {filtered} rollouts with staleness > {max_staleness}[/]")
 
                 # Try packing the rollouts into a fixed number of bins.
-                actual_num_bins = self.training_config.global_batch_size
+                actual_num_bins = self.training_config.global_num_bins
                 bins, remainder = pack_sequences(
                     documents=[x.output for x in packing_pool], # type: ignore[arg-type]
                     max_bin_size=self.policy_config.max_total_sequence_length,

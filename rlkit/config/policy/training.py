@@ -54,7 +54,7 @@ class PytorchOptimizerConfig(BaseModel):
 class TrainingConfig(BaseModel):
     """Configuration for training workers."""
 
-    global_batch_size: int
+    global_num_bins: int
     micro_batch_size: int
 
     parallelism: ParallelismConfig

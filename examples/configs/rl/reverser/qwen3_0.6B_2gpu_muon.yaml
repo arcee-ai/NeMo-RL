@@ -11,7 +11,7 @@ policy:
   max_total_sequence_length: 512
 
   training:
-    global_batch_size: 256
+    global_num_bins: 256
     micro_batch_size: 4
     dtype: "bfloat16"
     activation_checkpointing: false

@@ -439,7 +439,7 @@ class DTensorV2PolicyWorker:
         Returns:
             dict[str, Any]: Metrics from the training step.
         """
-        gbs = self.cfg.training.global_batch_size if gbs is None else gbs
+        gbs = self.cfg.training.global_num_bins if gbs is None else gbs
         mbs = self.cfg.training.micro_batch_size
 
         # Sanity-check input samples
@@ -649,7 +649,7 @@ class DTensorV2PolicyWorker:
             # Find all same-size (and same dtype) tensors
             similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
 
-            tensor_pack_max = self.cfg.tensor_pack_max
+            tensor_pack_max = self.cfg.refit_max_pack
 
             new_metadata: dict[str, dict[str, Any]] = {}
 

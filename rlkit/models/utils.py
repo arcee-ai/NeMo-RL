@@ -88,7 +88,7 @@ def indices_padding_wrapper(func: Callable) -> Callable:
     return wrapper
 
 def has_cuda_capability(major: int, minor: int) -> bool:
-    """Checks if the CUDA capability provided is supported by the current device."""
+    """Checks if the CUDA capability requested is supported by the current device."""
     return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
         major,
         minor,
