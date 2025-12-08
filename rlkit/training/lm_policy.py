@@ -72,7 +72,7 @@ class Policy:
             always_include_all=True,
         )
 
-        shape_map = {n: s for n, s in zip(mesh_info["mesh_dim_names"], mesh_info["mesh_shape"])}
+        shape_map = dict(zip(mesh_info["mesh_dim_names"], mesh_info["mesh_shape"], strict=False))
         dp_axis_size = (
             shape_map.get("dp_replicate", 1)
             * shape_map.get("dp_shard_mod_ep", 1)
@@ -250,7 +250,7 @@ class Policy:
                             expert_fractions.append(fraction)
                     else:
                         # If no tokens routed, set all fractions to 0
-                        for expert_idx in expert_counts.keys():
+                        for expert_idx in expert_counts:
                             expert_key = f"expert_{layer_id}_{expert_idx}"
                             aggregated_router_stats[expert_key] = 0.0
                             expert_fractions.append(0.0)

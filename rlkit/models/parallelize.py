@@ -56,9 +56,11 @@ def _apply_ac_to_transformer_block(
     module: nn.Module,
     ac_mode: Literal["full", "selective"],
     selective_ac_option: str = "2",
-    per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] = ["moe.router.gate"],
+    per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] | None = None,
     base_fqn: str | None = None
 ):
+    if per_op_sac_force_recompute_mm_shapes_by_fqns is None:
+        per_op_sac_force_recompute_mm_shapes_by_fqns = ["moe.router.gate"]
     valid_ac_modes = ("full", "selective")
     if ac_mode not in valid_ac_modes:
         raise ValueError(
@@ -148,10 +150,12 @@ def apply_ac(
     model: nn.Module,
     ac_mode: Literal["full", "selective"],
     selective_ac_option: str = "2",
-    per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] = ["moe.router.gate"],
+    per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] | None = None,
     base_fqn: str | None = None,
 ):
     """Apply activation checkpointing to the model."""
+    if per_op_sac_force_recompute_mm_shapes_by_fqns is None:
+        per_op_sac_force_recompute_mm_shapes_by_fqns = ["moe.router.gate"]
     for layer_id, transformer_block in model.layers.named_children():
         transformer_block = _apply_ac_to_transformer_block(
             transformer_block,
@@ -431,7 +435,7 @@ def apply_fsdp(
             reshard_after_forward=reshard_after_forward,
         )
 
-    for layer_id, transformer_block in model.layers.items():
+    for transformer_block in model.layers.values():
         # NOTE: When EP is enabled, In an MoE layer, we use the following FSDP wrapping
         # - the router and the shared experts are sharded together with the TransformerBlock
         # - the routed experts are sharded with the remaining dp_mod_ep_mesh
@@ -509,7 +513,7 @@ def apply_fsdp(
         model.tok_embeddings.set_modules_to_forward_prefetch([transformer_blocks[0]])
 
     for transformer_block, next_transformer_block in zip(
-        transformer_blocks, next_transformer_blocks
+        transformer_blocks, next_transformer_blocks, strict=False
     ):
         if next_transformer_block is not None:
             if is_moe_enabled(next_transformer_block):
@@ -533,7 +537,7 @@ def apply_fsdp(
         final_modules[0].set_modules_to_backward_prefetch([reversed_transformer_blocks[0]])
 
     for transformer_block, prev_transformer_block in zip(
-        reversed_transformer_blocks, prev_transformer_blocks
+        reversed_transformer_blocks, prev_transformer_blocks, strict=False
     ):
         if prev_transformer_block is not None:
             if is_moe_enabled(prev_transformer_block):

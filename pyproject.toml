@@ -110,7 +110,7 @@ select = [
     "PLW",   # pylint warnings
     "PLE",   # pylint errors
 ]
-ignore = ["RUF005", "RUF015"]
+ignore = ["RUF005", "RUF015", "SIM108"]
 extend-safe-fixes = ["W293"]
 
 # Ignore all lint errors in the examples directory

@@ -330,7 +330,7 @@ class SFTTrainer:
                 if len(val_results["all_mb_metrics"]) == 0:
                     warnings.warn(
                         "No validation metrics were collected for this batch."
-                        " This is likely because there were no valid samples."
+                        " This is likely because there were no valid samples.", stacklevel=2
                     )
                 else:
                     # global_loss is a tensor that may contain losses from multiple batches
@@ -347,7 +347,7 @@ class SFTTrainer:
             else:
                 warnings.warn(
                     "No validation metrics were collected."
-                    " This is likely because there were no valid samples in the validation set."
+                    " This is likely because there were no valid samples in the validation set.", stacklevel=2
                 )
 
             self.policy.prepare_for_training()
@@ -552,7 +552,7 @@ class SFTTrainer:
                 warnings.warn(
                     f"You asked to save checkpoints based on {self.master_config['checkpointing']['metric_name']} "
                     "but the metric is not found in the save state. "
-                    "Saving most recent k checkpoints instead."
+                    "Saving most recent k checkpoints instead.", stacklevel=2
                 )
                 self.master_config["checkpointing"]["metric_name"] = None
 

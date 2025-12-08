@@ -32,10 +32,8 @@ def nvml_context() -> Generator[None]:
     except pynvml.NVMLError as e:
         raise RuntimeError(f"Failed to initialize NVML: {e}")
     finally:
-        try:
+        with contextlib.suppress(Exception):
             pynvml.nvmlShutdown()
-        except Exception:
-            pass
 
 
 def device_id_to_physical_device_id(device_id: int) -> int:
@@ -45,11 +43,11 @@ def device_id_to_physical_device_id(device_id: int) -> int:
         try:
             physical_device_id = int(device_ids[device_id])
             return physical_device_id
-        except ValueError:
+        except ValueError as e:
             raise RuntimeError(
                 f"Failed to convert logical device ID {device_id} to physical device ID. " + \
                 "Available devices are: {device_ids}."
-            )
+            ) from e
     else:
         return device_id
 

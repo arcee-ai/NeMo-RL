@@ -85,7 +85,7 @@ class MultiWorkerFuture:
 
         object_refs: list[ObjectRef] = []
         has_generator = False
-        for idx, fut in enumerate(self.futures):
+        for fut in self.futures:
             if isinstance(fut, ObjectRefGenerator):
                 # ray.get cannot be called directly on the generator object - it must be iterated to obtain the individual ObjectRefs
                 for generated_ref in fut:
@@ -304,7 +304,7 @@ class RayWorkerGroup:
         name_prefix: str = "",
         bundle_indices_list: list[tuple[int, list[int]]] | None = None,
         sharding_annotations: NamedSharding | None = None,
-        env_vars: dict[str, str] = {},
+        env_vars: dict[str, str] | None = None,
     ):
         """Initialize a group of distributed Ray workers.
 
@@ -320,6 +320,8 @@ class RayWorkerGroup:
             sharding_annotations: NamedSharding object representing mapping of named axes to ranks (i.e. for TP, PP, etc.)
             env_vars: Environment variables to pass to all workers.
         """
+        if env_vars is None:
+            env_vars = {}
         self._workers: list[ray.actor.ActorHandle] = []
         self._worker_metadata: list[dict[str, Any]] = []
         self.cluster = cluster
@@ -365,7 +367,7 @@ class RayWorkerGroup:
 
             # Validate workers_per_group
             for i, (pg, worker_count) in enumerate(
-                zip(placement_groups, workers_per_group)
+                zip(placement_groups, workers_per_group, strict=False)
             ):
                 if worker_count > pg.bundle_count:
                     raise ValueError(
@@ -398,7 +400,7 @@ class RayWorkerGroup:
         self,
         remote_worker_builder: RayWorkerBuilder,
         bundle_indices_list: list[tuple[int, list[int]]],
-        env_vars: dict[str, str] = {},
+        env_vars: dict[str, str] | None = None,
     ) -> None:
         """Create workers based on explicit bundle indices for tied worker groups.
 
@@ -409,6 +411,8 @@ class RayWorkerGroup:
                                 spans multiple nodes, the node_idx will be the first node's index in the tied group.
             env_vars: Environment variables to pass to all workers.
         """
+        if env_vars is None:
+            env_vars = {}
         self.master_address, self.master_port = (
             self.cluster.get_master_address_and_port()
         )
@@ -522,7 +526,7 @@ class RayWorkerGroup:
         worker_refs = [future for future, _ in worker_futures]
         workers = ray.get(worker_refs)
 
-        for idx, (worker, (_, initializer)) in enumerate(zip(workers, worker_futures)):
+        for idx, (worker, (_, initializer)) in enumerate(zip(workers, worker_futures, strict=False)):
             worker._RAY_INITIALIZER_ACTOR_REF_TO_AVOID_GC = initializer
             self._workers.append(worker)
 
@@ -817,9 +821,8 @@ class RayWorkerGroup:
                     should_receive_data = False
                     return_from_this_worker = False
                     break
-                if axis in output_is_replicated:
-                    if worker_coords[axis] != 0:
-                        return_from_this_worker = False
+                if axis in output_is_replicated and worker_coords[axis] != 0:
+                    return_from_this_worker = False
             if return_from_this_worker:
                 return_from_workers.append(worker_idx)
 

@@ -554,7 +554,7 @@ class DTensorV2PolicyWorker:
 
                 # Pad and stack microbatch
                 microbatch = {}
-                for key in microbatch_samples[0].keys():
+                for key in microbatch_samples[0]:
                     values = [sample[key] for sample in microbatch_samples] # type: ignore - key will always be in the sample
                     max_len = max([len(value) for value in values])
 
@@ -689,7 +689,7 @@ class DTensorV2PolicyWorker:
                 except Exception as e:
                     # Log warning but don't fail training if router stats collection fails
                     import warnings
-                    warnings.warn(f"Failed to collect router statistics: {e}")
+                    warnings.warn(f"Failed to collect router statistics: {e}", stacklevel=2)
 
             return metrics
 
@@ -780,10 +780,10 @@ class DTensorV2PolicyWorker:
                 del hf_minidict
         else:
             # No adapter, map hf keys to native keys directly
-            hf_key_to_native_key = {k: k for k in state_dict.keys()}
+            hf_key_to_native_key = {k: k for k in state_dict}
 
         assert self._refit_metadata is not None, "Refit metadata has not been set"
-        for _, chunk_info in self._refit_metadata.items():
+        for chunk_info in self._refit_metadata.values():
             # Collect all of the necessary tensors for this chunk
             if self.adapter is not None:
                 minidict_to_convert = {}

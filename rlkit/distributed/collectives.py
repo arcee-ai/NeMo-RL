@@ -68,7 +68,7 @@ def rebalance_nd_tensor(
     return output_tensor
 
 
-def gather_jagged_object_lists(
+def gather_jagged_object_lists[T](
     local_objects: list[T], group: torch.distributed.ProcessGroup | None = None
 ) -> list[T]:
     """Gathers jagged lists of picklable objects from all ranks and flattens them into a single list.

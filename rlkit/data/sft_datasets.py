@@ -79,7 +79,7 @@ def _sharegpt_to_oai(x: dict) -> dict:
 transformations: dict[str, SFTDataTransformFn] = {
     "axolotl": lambda _, x: {
         "input_ids": torch.tensor(x["input_ids"]),
-        "token_mask": torch.tensor([a == b for a, b in zip(x["input_ids"], x["labels"])]),
+        "token_mask": torch.tensor([a == b for a, b in zip(x["input_ids"], x["labels"], strict=False)]),
         "sample_mask": torch.tensor(1.0)
     },
     "openai_prompt_completion": lambda tokenizer, x: _transform_oai(

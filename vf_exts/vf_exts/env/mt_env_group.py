@@ -13,7 +13,7 @@ class _MtEnvGroupRubric(vf.Rubric):
         names = set()
         for env in env_map.values():
             names.update(env.rubric.get_reward_func_names())
-        self._all_reward_names = sorted(list(names))
+        self._all_reward_names = sorted(names)
 
     def get_reward_func_names(self) -> list[str]:
         return self._all_reward_names
@@ -55,13 +55,11 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         self.env_names = env_names or [f"env_{i}" for i in range(len(envs))]
         if len(self.env_names) != len(self.envs):
             raise ValueError("Number of env_names must match number of envs")
-        self.env_map: dict[str, vf.MultiTurnEnv] = {
-            name: env for name, env in zip(self.env_names, self.envs)
-        }
+        self.env_map: dict[str, vf.MultiTurnEnv] = dict(zip(self.env_names, self.envs, strict=False))
 
         datasets = []
         eval_datasets = []
-        for env, name in zip(self.envs, self.env_names):
+        for env, name in zip(self.envs, self.env_names, strict=False):
             def add_task(example):
                 example["task"] = name
                 return example
@@ -143,10 +141,14 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         prompt: str | list[vf.ChatMessage],
         answer: str = "",
         task: str = "default",
-        info: vf.Info = {},
-        sampling_args: vf.SamplingArgs = {},
+        info: vf.Info = None,
+        sampling_args: vf.SamplingArgs = None,
         **kwargs,
     ) -> tuple[str | list[vf.ChatMessage], vf.State]:
         """Rollout the environment for a given task."""
+        if sampling_args is None:
+            sampling_args = {}
+        if info is None:
+            info = {}
         env = self.get_env_for_task(task)
         return await env.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)

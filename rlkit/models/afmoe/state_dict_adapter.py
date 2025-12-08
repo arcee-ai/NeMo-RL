@@ -64,7 +64,8 @@ class AFMoEStateDictAdapter(BaseStateDictAdapter):
             if m is not None:
                 layer_idx = m.group(1)
                 which = m.group(2)
-                assert isinstance(value, torch.Tensor) and value.dim() == 3
+                assert isinstance(value, torch.Tensor)
+                assert value.dim() == 3
                 for expert_idx in range(value.shape[0]):
                     if which == "w1":
                         hf_key = f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.gate_proj.weight"

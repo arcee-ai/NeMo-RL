@@ -80,7 +80,7 @@ class NamedSharding:
     @property
     def shape(self) -> dict[str, int]:
         """Returns the shape of the rank layout."""
-        return {name: size for name, size in zip(self._names, self._layout.shape)}
+        return dict(zip(self._names, self._layout.shape, strict=False))
 
     @property
     def names(self) -> list[str]:

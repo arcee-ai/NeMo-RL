@@ -170,7 +170,7 @@ class VllmHttpWorkerExtension:
         )
 
         try:
-            for _, chunk_info in self.state_dict_info.items():
+            for chunk_info in self.state_dict_info.values():
                 chunk_shape = chunk_info["shape"]
                 chunk_dtype = chunk_info["dtype"]
                 chunk_tensors = chunk_info["packed_tensors"]

@@ -120,12 +120,12 @@ class VLLMOpenAIServe:
 
     async def admin_reset_prefix_cache(self) -> bool:
         """Reset prefix cache on all vLLM workers."""
-        await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
+        await self._engine_client.collective_rpc("reset_prefix_cache", args=())
         return True
 
     async def admin_reset_prefix_cache_async(self) -> bool:
         """Reset prefix cache on all vLLM workers asynchronously."""
-        await self._engine_client.collective_rpc("reset_prefix_cache", args=tuple())
+        await self._engine_client.collective_rpc("reset_prefix_cache", args=())
         return True
 
     async def admin_init_collective(self, rank_prefix: int, ip: str, port: int, world_size: int) -> Literal[True]:
@@ -147,9 +147,9 @@ class VLLMOpenAIServe:
 
     async def admin_update_from_collective(self) -> bool:
         """Receive weight updates from training workers."""
-        results = await self._engine_client.collective_rpc("update_weights_from_collective", args=tuple())
+        results = await self._engine_client.collective_rpc("update_weights_from_collective", args=())
         return bool(results and results[0])
 
     async def admin_report_device_id(self) -> list[str]:
         """Report device IDs for vLLM workers."""
-        return await self._engine_client.collective_rpc("report_device_id", args=tuple())
+        return await self._engine_client.collective_rpc("report_device_id", args=())

@@ -254,10 +254,7 @@ class WandbLogger(LoggerInterface):
 
     def is_rollout_log(self, value: Any) -> bool:
         """Check if a value is a rollout log."""
-        if isinstance(value, list):
-            if len(value) >= 1 and isinstance(value[0], dict) and "grpo_group_id" in value[0].keys():
-                return True
-        return False
+        return bool(isinstance(value, list) and len(value) >= 1 and isinstance(value[0], dict) and "grpo_group_id" in value[0])
 
     def render_html_table(self, data: dict[str, Any]) -> str:
         """Render a dictionary as an HTML table."""

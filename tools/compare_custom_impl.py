@@ -44,22 +44,20 @@ if check_keys_granular:
     import re
     number_pattern = "\\.[0-9]+\\."
     seen = []
-    for key in model_tt.state_dict().keys():
+    for key in model_tt.state_dict():
         de_numbered = re.sub(number_pattern, ".[N].", key)
-        if key not in state_dict_tt.keys():
-            if de_numbered not in seen:
-                print(f"model_tt has key {de_numbered} but state_dict_tt does not")
-                failed = True
-                seen.append(de_numbered)
+        if key not in state_dict_tt and de_numbered not in seen:
+            print(f"model_tt has key {de_numbered} but state_dict_tt does not")
+            failed = True
+            seen.append(de_numbered)
 
     seen = []
-    for key in state_dict_tt.keys():
+    for key in state_dict_tt:
         de_numbered = re.sub(number_pattern, ".[N].", key)
-        if key not in model_tt.state_dict().keys():
-            if de_numbered not in seen:
-                print(f"state_dict_tt has key {de_numbered} but model_tt does not")
-                failed = True
-                seen.append(de_numbered)
+        if key not in model_tt.state_dict() and de_numbered not in seen:
+            print(f"state_dict_tt has key {de_numbered} but model_tt does not")
+            failed = True
+            seen.append(de_numbered)
     if failed:
         raise ValueError("state_dict_tt and model_tt do not have the same keys")
 else:

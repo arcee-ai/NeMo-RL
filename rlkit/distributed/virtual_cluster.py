@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import contextlib
 import logging
 import os
 import time
@@ -298,10 +299,8 @@ class RayVirtualCluster:
         except (TimeoutError, ray.exceptions.GetTimeoutError):
             # Clean up any created placement groups
             for pg in placement_groups:
-                try:
+                with contextlib.suppress(Exception):
                     remove_placement_group(pg)
-                except Exception:
-                    pass
             raise TimeoutError(
                 "Timed out waiting for placement groups to be ready. The cluster may not have enough resources "
                 "to satisfy the requested configuration, or the resources may be busy with other tasks."

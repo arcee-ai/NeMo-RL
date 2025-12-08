@@ -586,7 +586,7 @@ class AllGatherCPTensor(torch.autograd.Function):
             chunk_indices.append(cp_rank)
             chunk_indices.append(2 * cp_size - cp_rank - 1)
 
-        chunks_and_indices = list(zip(tensor_chunks, chunk_indices))
+        chunks_and_indices = list(zip(tensor_chunks, chunk_indices, strict=False))
         chunks_and_indices = sorted(chunks_and_indices, key=lambda tup: tup[1])
         ret_tensor = [chunk for chunk, _ in chunks_and_indices]
         ret_tensor = torch.cat(ret_tensor, dim=seq_dim)

@@ -93,7 +93,7 @@ class CheckpointManager:
         with open(save_dir / "training_info.json", "w") as f:
             # make any numpy items serializable
             for k, v in training_info.items():
-                if isinstance(v, torch.Tensor) or isinstance(v, np.ndarray):
+                if isinstance(v, (torch.Tensor, np.ndarray)):
                     training_info[k] = v.item()
             json.dump(training_info, f)
 

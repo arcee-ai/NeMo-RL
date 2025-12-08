@@ -42,10 +42,12 @@ class PairwiseJudgeRubric(vf.Rubric):
         judge_model: str = "gpt-4.1-nano",
         judge_prompt: str = DEFAULT_JUDGE_PROMPT,
         rubric_prompt: str = "Pick whichever response is better.",
-        judge_sampling_args: dict = {},
+        judge_sampling_args: dict | None = None,
         **kwargs,
     ):
         """Initialize the pairwise judge rubric."""
+        if judge_sampling_args is None:
+            judge_sampling_args = {}
         super().__init__(**kwargs)
         self.judge_client = judge_client if judge_client is not None else OpenAI()
         self.judge_model = judge_model

@@ -54,7 +54,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
     else:
         dataset = load_dataset(dataset_name)
 
-    assert "train" in dataset.keys(), "Dataset must contain a train split"
+    assert "train" in dataset, "Dataset must contain a train split"
     train_dataset = dataset["train"]
     val_dataset = dataset.get("validation", None)
 
