@@ -2,3 +2,6 @@ project-includes = [
     "rlkit/**/*.py",
     "tools/**/*.py",
 ]
+replace-imports-with-any = [
+    "ray.*"
+]
