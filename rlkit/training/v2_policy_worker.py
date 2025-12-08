@@ -49,7 +49,6 @@ from rlkit.training.utils import (
     configure_expandable_segments,
     get_grad_norm,
     import_class_by_name,
-    sliding_window_overwrite,
 )
 from rlkit.utils.native_checkpoint import (
     load_checkpoint,
@@ -140,9 +139,6 @@ class DTensorV2PolicyWorker:
             # Keeping the master weights in lower precision has been shown to cause issues with convergence.
             torch_dtype=torch.float32,
             trust_remote_code=True,
-            **sliding_window_overwrite(
-                model_name
-            ),  # due to https://github.com/huggingface/transformers/issues/38002
             attn_implementation=None
         )
 
