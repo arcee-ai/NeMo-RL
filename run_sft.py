@@ -1,118 +1,68 @@
 """Entrypoint for SFT training."""
 
-import argparse
-import asyncio
-import logging
 import os
-import pprint
 
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
 
+import argparse
+import asyncio
+import logging
+import pprint
+
 import torch
-from datasets import load_dataset, load_from_disk
-from omegaconf import OmegaConf
-from transformers import AutoTokenizer
+import yaml
 
 from rlkit.algorithms.sft import SFTTrainer
-from rlkit.algorithms.utils import get_tokenizer
-from rlkit.config import DataConfig
-from rlkit.config import SFTMasterConfig as MasterConfig
-from rlkit.data.sft_datasets import transform_dataset
+from rlkit.config.sft import SFTConfig
 from rlkit.distributed.virtual_cluster import init_ray
-from rlkit.utils.config import load_config, parse_hydra_overrides
 from rlkit.utils.logger import get_next_experiment_dir
 
-OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
-
-# Avoid asyncio spamming console on crash
+# Cope with asyncio spamming console on certain crashes
 logging.getLogger("asyncio").setLevel(logging.ERROR)
+# Suppress httpx logging (HTTP request spam)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
-def parse_args():
+
+def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Run SFT training with configuration")
     parser.add_argument(
-        "--config", type=str, default=None, help="Path to YAML config file"
+        "config", type=str, help="Path to YAML config file"
     )
-
-    # Parse known args for the script
-    args, overrides = parser.parse_known_args()
-
-    return args, overrides
+    return parser.parse_args()
 
 
-def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
-    """Preprocess the data for the SFT trainer."""
-    logging.info("Setting up data...")
-
-    dataset_name = data_config["dataset_name"]
-    dataset_type = data_config.get("dataset_type", "pretokenized")
-    on_disk = data_config.get("on_disk", False)
-
-    if on_disk:
-        dataset = load_from_disk(dataset_name)
-    else:
-        dataset = load_dataset(dataset_name)
-
-    assert "train" in dataset, "Dataset must contain a train split"
-    train_dataset = dataset["train"]
-    val_dataset = dataset.get("validation", None)
-
-    if dataset_type != "native":
-        logging.info(f"Using non-native '{dataset_type}' dataset type, applying transformation (this may take a while)")
-
-    train_dataset = transform_dataset(train_dataset, dataset_type, tokenizer)
-    if val_dataset is not None:
-        val_dataset = transform_dataset(val_dataset, dataset_type, tokenizer)
-
-    return train_dataset, val_dataset
-
-
-def main():
+def main() -> None:
     """Main entry point."""
-    # Parse arguments
-    args, overrides = parse_args()
+    args = parse_args()
 
-    if not args.config:
-        raise ValueError("A config file is required. Please specify a config file using the --config argument.")
+    with open(args.config) as f:
+        config_unstructured = yaml.load(f, Loader=yaml.FullLoader)
 
-    config = load_config(args.config)
-    print(f"Loaded configuration from: {args.config}")
-
-    if overrides:
-        print(f"Overrides: {overrides}")
-        config = parse_hydra_overrides(config, overrides)
-
-    config: MasterConfig = OmegaConf.to_container(config, resolve=True)
-    print("Applied CLI overrides")
-
-    if not torch.cuda.can_device_access_peer(0, 1):
-        os.environ["NCCL_SHM_DISABLE"] = "1"
-        logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
+    config = SFTConfig.model_validate(config_unstructured)
 
     # Print config
     print("Final config:")
-    pprint.pprint(config)
+    pprint.pprint(config.model_dump())
 
-    config["logger"]["log_dir"] = get_next_experiment_dir(config["logger"]["log_dir"])
-    print(f"📊 Using log directory: {config['logger']['log_dir']}")
-    if config["checkpointing"]["enabled"]:
-        print(
-            f"📊 Using checkpoint directory: {config['checkpointing']['checkpoint_dir']}"
-        )
+    # Handle NCCL P2P issues
+    if not torch.cuda.can_device_access_peer(0, 1):
+        os.environ["NCCL_SHM_DISABLE"] = "1"
+
+    # Get the next experiment directory with incremented ID
+    config.logging.log_dir = get_next_experiment_dir(config.logging.log_dir)
+    print(f"📊 Using log directory: {config.logging.log_dir}")
+    if config.checkpointing.enabled:
+        print(f"📊 Using checkpoint directory: {config.checkpointing.checkpoint_dir}")
 
     init_ray()
 
-    # setup tokenizer
-    tokenizer = get_tokenizer(config["policy"]["tokenizer"])
+    trainer = SFTTrainer(config)
 
-    # setup data
-    (
-        dataset,
-        val_dataset
-    ) = setup_data(tokenizer, config["data"])
-
-    trainer = SFTTrainer(config, tokenizer, dataset, val_dataset)
+    print("\n" + "=" * 60)
+    print(" " * 18 + "SETUP COMPLETE")
+    print("=" * 60 + "\n")
 
     asyncio.run(trainer.train())
 

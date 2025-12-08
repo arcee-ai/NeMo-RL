@@ -1,4 +1,4 @@
-"""SFT-specific configuration options."""
+"""Configuration for SFT training runs."""
 
 from typing import Literal
 
@@ -10,30 +10,38 @@ from .policy import PolicyConfig
 
 
 class SFTTrainerConfig(BaseModel):
-    """SFT-specific configuration options."""
+    """SFT-specific training configuration."""
 
-    max_num_steps: int
-    max_num_epochs: int
-    val_period: int
-    val_batches: int
-    val_global_batch_size: int
-    val_micro_batch_size: int
-    val_at_start: bool
-    seed: int
+    # Maximum number of training steps (0 = unlimited, train until data exhausted)
+    max_steps: int = 0
 
-    vram_torture_test: bool  # Ignore prompts and run all training on a full context window of nonsense.
+    # Validation settings
+    val_period: int = 0  # Steps between validation runs (0 = no validation)
+    val_batches: int = 0  # Number of batches per validation (0 = full validation set)
+    val_at_start: bool = False  # Run validation before training starts
+
+    # Random seed for reproducibility
+    seed: int = 42
 
 
 DatasetType = Literal["axolotl", "openai_prompt_completion", "openai", "sharegpt", "native"]
 
 
-class DatasetConfig(BaseModel):
-    """Configuration for datasets."""
+class DataConfig(BaseModel):
+    """Configuration for SFT datasets."""
 
-    dataset_name: str
+    # Dataset identifier (HF hub name or local path)
+    train_dataset: str
+    val_dataset: str | None = None
+
+    # Format of the dataset
     dataset_type: DatasetType = "native"
-    hf_dataset_format: Literal["hub", "disk"] = "hub"
-    shuffle: bool = False
+
+    # Whether to load from disk (vs HF hub)
+    from_disk: bool = False
+
+    # Whether to shuffle the training data
+    shuffle: bool = True
 
 
 class SFTConfig(BaseModel):
@@ -41,6 +49,6 @@ class SFTConfig(BaseModel):
 
     sft: SFTTrainerConfig
     policy: PolicyConfig
-    data: DatasetConfig
+    data: DataConfig
     logging: LoggingConfig
     checkpointing: CheckpointingConfig

@@ -1,287 +1,294 @@
 """Supervised fine-tuning (SFT) trainer."""
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 import logging
-import os
-import warnings
+from datetime import datetime
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import numpy as np
 import torch
-from datasets import Dataset
-from torchdata.stateful_dataloader import StatefulDataLoader
-from transformers import PreTrainedTokenizerBase
+from datasets import Dataset, load_dataset, load_from_disk
+from rich.console import Console
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from rlkit.algorithms.loss_functions import (
-    NLLLoss,
-)
+from rlkit.algorithms.base_trainer import BaseTrainer
+from rlkit.algorithms.loss_functions import NLLLoss
 from rlkit.algorithms.utils import set_seed
-from rlkit.config import (
-    CheckpointingConfig,
-    ClusterConfig,
-    DataConfig,
-    LoggerConfig,
-    PolicyConfig,
-    SFTTrainerConfig,
-)
-from rlkit.config import (
-    SFTMasterConfig as MasterConfig,
-)
+from rlkit.config.sft import DataConfig, SFTConfig
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
-from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.training.lm_policy import Policy
-from rlkit.utils.checkpoint import CheckpointManager
-from rlkit.utils.logger import Logger
-from rlkit.utils.timer import TimeoutChecker, Timer
+from rlkit.data.sft_datasets import transform_dataset
+from rlkit.utils.timer import Timer
 
 
 class SFTSaveState(TypedDict):
-    """Saved state for SFT."""
-    epoch: int  # Track current epoch
-    step: int  # Track step within current epoch
-    total_steps: int  # Track total number of steps across all epochs
-    val_loss: NotRequired[float]  # Optional field - may not be present during training
+    """Saved state for SFT training."""
+
+    step: int
     consumed_samples: int
 
 
 def _default_sft_save_state() -> SFTSaveState:
     return {
-        "epoch": 0,
         "step": 0,
-        "total_steps": 0,
         "consumed_samples": 0,
     }
 
 
-class SFTTrainer:
-    """Encapsulates setup, validation, and training logic for SFT."""
+class SFTTrainer(BaseTrainer[SFTSaveState]):
+    """SFT trainer following the GRPO trainer patterns.
 
-    def __init__(
-        self,
-        master_config: MasterConfig,
-        tokenizer: PreTrainedTokenizerBase,
-        train_dataset: Dataset,
-        val_dataset: Dataset | None
-    ) -> None:
-        """Initialize the SFT trainer."""
-        self.master_config = master_config
-        self.tokenizer = tokenizer
-        self.train_dataset = train_dataset
-        self.val_dataset = val_dataset
+    This trainer:
+    - Uses sequence packing to maximize throughput
+    - Supports checkpointing and resumption
+    - Logs metrics to wandb
+    - Supports validation during training
+    """
 
-        policy_config = self.master_config["policy"]
-        cluster_config = self.master_config["cluster"]
+    def __init__(self, config: SFTConfig) -> None:
+        """Initialize the SFT trainer.
 
-        set_seed(master_config["sft"]["seed"])
+        Args:
+            config: Full SFT configuration.
+        """
+        self.config = config
+        self.policy_config = config.policy
+        self.training_config = config.policy.training
+        self.sft_config = config.sft
+        self.data_config = config.data
 
-        self.logger = self._setup_logger(master_config["logger"])
+        set_seed(self.sft_config.seed)
 
-        (
-            self.checkpointer,
-            self.sft_save_state,
-            last_checkpoint_path,
-        ) = self._setup_checkpointing(master_config["checkpointing"])
+        # Set up logging
+        self.logger = self._setup_logger(config.logging)
 
-        (
-            self.train_dataloader,
-            self.val_dataloader,
-        ) = self._setup_dataloaders(
-            train_dataset=train_dataset,
-            val_dataset=val_dataset,
-            data_config=master_config["data"],
-            policy_config=master_config["policy"],
-            sft_config=master_config["sft"],
-            last_checkpoint_path=last_checkpoint_path,
+        # Set up checkpointing
+        self.checkpointer, self.save_state, last_checkpoint_path = self._setup_checkpointing(
+            config.checkpointing
         )
 
-        logging.info("Setting up compute cluster...")
+        # Load tokenizer
+        self.tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(
+            self.policy_config.model_name
+        )
 
-        self.cluster = self._setup_cluster(cluster_config)
+        # Load and prepare datasets
+        logging.info("Loading datasets...")
+        self.train_dataset, self.val_dataset = self._load_datasets(self.data_config)
 
+        # Set up dataloader
+        self.train_dataloader = self._setup_dataloader(
+            self.train_dataset,
+            shuffle=self.data_config.shuffle,
+        )
+
+        self.val_dataloader = None
+        if self.val_dataset is not None:
+            self.val_dataloader = self._setup_dataloader(
+                self.val_dataset,
+                shuffle=False,
+            )
+
+        # Set up compute cluster
+        logging.info("\n▶ Setting up compute cluster...")
+        train_resources = self.training_config.resources
+        self.cluster = self._setup_train_cluster(
+            num_nodes=train_resources.num_nodes,
+            gpus_per_node=train_resources.gpus_per_node,
+            name="sft_train_cluster",
+        )
+
+        # Determine checkpoint paths for resumption
+        weights_path = None
+        optimizer_path = None
         if last_checkpoint_path:
             weights_path = Path(last_checkpoint_path) / "policy" / "weights"
             optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
-        else:
-            weights_path = None
-            optimizer_path = None
 
-        self.policy = self._initialize_policy(
-            self.cluster,
-            policy_config,
-            self.tokenizer,
-            weights_path,
-            optimizer_path
-        )
-
-        self.loss_fn = NLLLoss()
-
-    def _setup_logger(self, logger_config: LoggerConfig) -> Logger:
-        logger = Logger(logger_config)
-        logger.log_hyperparams(self.master_config)
-        return logger
-
-    def _setup_checkpointing(
-        self, checkpoint_config: CheckpointingConfig
-    ) -> tuple[CheckpointManager, SFTSaveState, str | None]:
-        checkpointer = CheckpointManager(checkpoint_config)
-        last_checkpoint_path = checkpointer.get_latest_checkpoint_path()
-        sft_save_state = cast(
-            SFTSaveState | None,
-            checkpointer.load_training_info(last_checkpoint_path),
-        )
-        if sft_save_state is None:
-            sft_save_state = _default_sft_save_state()
-        return checkpointer, sft_save_state, last_checkpoint_path
-
-    def _setup_dataloaders(
-        self,
-        train_dataset: Dataset,
-        val_dataset: Dataset | None,
-        data_config: DataConfig,
-        policy_config: PolicyConfig,
-        sft_config: SFTTrainerConfig,
-        last_checkpoint_path: str | None,
-    ) -> tuple[
-        StatefulDataLoader,
-        StatefulDataLoader | None,
-    ]:
-        # Use batch_size=1 so we can pull samples one at a time and pack them
-        train_dataloader = StatefulDataLoader(
-            train_dataset, # type: ignore[arg-type]
-            batch_size=1,
-            shuffle=data_config["shuffle"],
-            drop_last=False,
-            # Default collate function mangles dictionaries. We just want the raw list.
-            collate_fn=lambda x: x,
-        )
-
-        if last_checkpoint_path is not None:
-            dataloader_state_dict = torch.load(
-                os.path.join(last_checkpoint_path, "train_dataloader.pt")
-            )
-            train_dataloader.load_state_dict(dataloader_state_dict)
-
-        val_dataloader: StatefulDataLoader | None = None
-        if val_dataset is not None:
-            val_dataloader = StatefulDataLoader(
-                val_dataset, # type: ignore[arg-type]
-                batch_size=1,
-                shuffle=False,
-                collate_fn=lambda x: x,
-            )
-
-        return train_dataloader, val_dataloader
-
-    def _setup_cluster(self, cluster_config: ClusterConfig) -> RayVirtualCluster:
-        logging.info("Setting up compute cluster...")
-        cluster = RayVirtualCluster(
-            name="grpo_train_cluster",
-            bundle_ct_per_node_list=[cluster_config["gpus_per_node"]] * cluster_config["num_nodes"],
-            use_gpus=True,
-            num_gpus_per_node=cluster_config["gpus_per_node"],
-            max_colocated_worker_groups=1,
-        )
-        logging.info(f"Ray cluster initialized with {cluster_config['num_nodes']} nodes")
-        return cluster
-
-    def _initialize_policy(
-        self,
-        train_cluster: RayVirtualCluster,
-        policy_config: PolicyConfig,
-        tokenizer: PreTrainedTokenizerBase,
-        weights_path: Path | None,
-        optimizer_path: Path | None
-    ) -> Policy:
-        use_cce = self.master_config["sft"].get("use_cut_cross_entropy", False)
+        # Check if using cut cross entropy (kernel-level optimization)
+        use_cce = self.training_config.loss.loss_fn == "cut_cross_entropy"
         if use_cce:
             logging.info("Using cut cross-entropy loss kernel")
 
-        return Policy(
-            cluster=train_cluster,
-            config=policy_config,
-            tokenizer=tokenizer,
+        # Initialize policy
+        self.policy = self._initialize_policy(
+            cluster=self.cluster,
+            policy_config=self.policy_config,
+            tokenizer=self.tokenizer,
             weights_path=weights_path,
             optimizer_path=optimizer_path,
-            init_optimizer=True,
             init_reference_model=False,
             use_cut_cross_entropy=use_cce,
         )
 
-    def _sample_to_document(self, sample: dict[str, list]) -> dict[str, list] | None:
-        """Convert a single sample to the document format expected by pack_sequences.
+        # Loss function (NLL for SFT - cut_cross_entropy is handled at kernel level)
+        self.loss_fn = NLLLoss()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Abstract method implementations
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _get_default_save_state(self) -> SFTSaveState:
+        return _default_sft_save_state()
+
+    def _get_pad_values(self) -> dict[str, int | float | bool]:
+        return {
+            "token_ids": self.tokenizer.pad_token_id or 0,
+            "token_mask": False,
+        }
+
+    def _get_config_for_logging(self) -> dict[str, Any]:
+        return self.config.model_dump()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Dataset handling
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _load_datasets(self, data_config: DataConfig) -> tuple[Dataset, Dataset | None]:
+        """Load and transform train/validation datasets."""
+        train_dataset: Dataset
+        if data_config.from_disk:
+            train_dataset = cast(Dataset, load_from_disk(data_config.train_dataset))
+        else:
+            loaded = load_dataset(data_config.train_dataset)
+            if isinstance(loaded, dict):
+                train_dataset = cast(Dataset, loaded.get("train", loaded))
+            else:
+                train_dataset = cast(Dataset, loaded)
+
+        # Transform if not native format
+        if data_config.dataset_type != "native":
+            logging.info(f"Transforming dataset from '{data_config.dataset_type}' format...")
+            train_dataset = transform_dataset(
+                train_dataset,
+                data_config.dataset_type,
+                self.tokenizer,
+            )
+
+        logging.info(f"  ✓ Training dataset loaded with {len(train_dataset)} samples")
+
+        # Load validation dataset
+        val_dataset: Dataset | None = None
+        if data_config.val_dataset is not None:
+            if data_config.from_disk:
+                val_dataset = cast(Dataset, load_from_disk(data_config.val_dataset))
+            else:
+                loaded = load_dataset(data_config.val_dataset)
+                if isinstance(loaded, dict):
+                    val_dataset = cast(Dataset, loaded.get("validation", loaded.get("test", loaded)))
+                else:
+                    val_dataset = cast(Dataset, loaded)
+
+            if data_config.dataset_type != "native":
+                val_dataset = transform_dataset(
+                    val_dataset,
+                    data_config.dataset_type,
+                    self.tokenizer,
+                )
+
+            logging.info(f"  ✓ Validation dataset loaded with {len(val_dataset)} samples")
+
+        return train_dataset, val_dataset
+
+    def _setup_dataloader(
+        self,
+        dataset: Dataset,
+        shuffle: bool = True,
+    ) -> DataLoader:
+        """Set up a dataloader for the dataset."""
+        return DataLoader(
+            dataset,  # type: ignore[arg-type]
+            batch_size=1,  # We pull one at a time for packing
+            shuffle=shuffle,
+            drop_last=False,
+            collate_fn=lambda x: x,  # Don't mangle dicts
+        )
+
+    def _sample_to_document(self, sample: dict[str, Any]) -> dict[str, list] | None:
+        """Convert a dataset sample to document format for packing.
 
         Args:
             sample: Dictionary with 'input_ids' and 'token_mask' keys.
 
         Returns:
-            Document dict with 'token_ids', 'token_mask', and 'targets' keys,
-            or None if the sample is invalid.
+            Document dict or None if sample is invalid/too long.
         """
-        max_seq_len = self.master_config["policy"]["max_total_sequence_length"]
+        max_seq_len = self.policy_config.max_total_sequence_length
 
         input_ids = sample["input_ids"]
         token_mask = sample["token_mask"]
+
+        # Handle tensor vs list
+        if isinstance(input_ids, torch.Tensor):
+            input_ids = input_ids.tolist()
+        if isinstance(token_mask, torch.Tensor):
+            token_mask = token_mask.tolist()
+
+        if len(input_ids) == 0:
+            return None
 
         if len(input_ids) > max_seq_len:
             # Truncate if too long
             input_ids = input_ids[:max_seq_len]
             token_mask = token_mask[:max_seq_len]
-            logging.warning(f"Truncated sample from {len(sample['input_ids'])} to {max_seq_len} tokens")
+            logging.debug(f"Truncated sample from {len(sample['input_ids'])} to {max_seq_len} tokens")
 
-        if len(input_ids) == 0:
-            return None
-
-        # Convert to the format expected by pack_sequences
-        # 'targets' is a marker field to indicate SFT data (actual targets derived from token_ids)
         return {
             "token_ids": list(input_ids),
             "token_mask": [bool(m) for m in token_mask],
-            "targets": list(input_ids),  # Marker field for SFT detection
         }
 
-    async def validate(self, step: int) -> tuple[dict[str, float], dict[str, float]] | None:
-        """Run validation on the validation dataset."""
-        if self.val_dataloader is None:
-            logging.info("No validation dataloader provided, skipping validation")
-            return None
+    # ─────────────────────────────────────────────────────────────────────────
+    # Training
+    # ─────────────────────────────────────────────────────────────────────────
 
+    async def train(self) -> None:
+        """Run the SFT training loop."""
         timer = Timer()
-        sft_config = self.master_config["sft"]
+        console = Console()
 
-        pad_values = {
-            "token_ids": self.tokenizer.pad_token_id,
-            "token_mask": False,
-            "targets": self.tokenizer.pad_token_id,
-        }
+        step = self.save_state["step"]
+        consumed_samples = self.save_state["consumed_samples"]
 
-        with timer.time("total_validation_time"):
-            print(f"▶ Starting validation at step {step}...")
+        max_steps = self.sft_config.max_steps
+        val_period = self.sft_config.val_period
+        save_period = self.config.checkpointing.save_period
 
-            val_metrics = {"val_loss": 0.0}
-            num_valid_batches = 0
+        pad_values = self._get_pad_values()
+        global_batch_size = self.training_config.global_batch_size
 
-            self.policy.prepare_for_training()
+        # Run initial validation if requested
+        if self.sft_config.val_at_start and step == 0 and self.val_dataloader is not None:
+            console.log("[cyan]Running initial validation...[/]")
+            val_metrics = await self._validate(step)
+            if val_metrics:
+                self.logger.log_metrics(val_metrics, step, prefix="validation")
 
-            val_dataloader_iter = iter(self.val_dataloader)
-            packing_pool: list[dict[str, list]] = []
-            out_of_samples = False
+        self.policy.prepare_for_training()
 
-            while num_valid_batches < sft_config["val_batches"] or sft_config["val_batches"] <= 0:
-                # Pull samples until we can fill all bins
+        dataloader_iter = iter(self.train_dataloader)
+        packing_pool: list[dict[str, list]] = []
+        out_of_samples = False
+        step_start = datetime.now()
+
+        # Initialize bins/remainder for the loop
+        bins: list[dict[str, list]] = []
+        remainder: list[dict[str, list]] = []
+
+        def get_status_text() -> str:
+            elapsed = (datetime.now() - step_start).total_seconds()
+            return (
+                f"Packing samples... | "
+                f"pool=[yellow]{len(packing_pool)}[/] "
+                f"consumed=[blue]{consumed_samples}[/] "
+                f"time=[green]{elapsed:.2f}s[/]"
+            )
+
+        with console.status(get_status_text(), spinner="dots") as status:
+            while max_steps == 0 or step < max_steps:
+                # Pull samples from dataloader until we can fill bins
                 while not out_of_samples:
-                    sample = next(val_dataloader_iter, None)
+                    sample = next(dataloader_iter, None)
                     if sample is None:
                         out_of_samples = True
                         break
@@ -289,12 +296,15 @@ class SFTTrainer:
                     doc = self._sample_to_document(sample[0])
                     if doc is not None:
                         packing_pool.append(doc)
+                        consumed_samples += 1
+
+                    status.update(get_status_text())
 
                     # Try packing
                     bins, remainder = pack_sequences(
                         documents=packing_pool,
-                        max_bin_size=self.master_config["policy"]["max_total_sequence_length"],
-                        num_bins=sft_config["val_global_batch_size"],
+                        max_bin_size=self.policy_config.max_total_sequence_length,
+                        num_bins=global_batch_size,
                         separator_value=pad_values,
                     )
 
@@ -303,325 +313,235 @@ class SFTTrainer:
                         packing_pool = list(remainder)
                         break
 
-                # Check if we ran out of samples without filling bins
+                # Check end conditions
                 if len(remainder) == 0:
                     if out_of_samples:
-                        # No more samples and bins aren't full - we're done
-                        break
-                    # Keep waiting for more samples
-                    continue
+                        # End of data - train on whatever we have if possible
+                        non_empty_bins = [b for b in bins if len(b["token_ids"]) > 0]
+                        num_shards = self.policy.sharding_annotations.get_axis_size("data_parallel")
+                        mbs = self.training_config.micro_batch_size
+                        batch_unit = num_shards * mbs
+                        actual_num_bins = (len(non_empty_bins) // batch_unit) * batch_unit
 
-                # Distribute bins for DP
+                        if actual_num_bins == 0:
+                            console.log(f"[yellow]Dropping {len(packing_pool)} samples (not enough for batch)[/]")
+                            break
+
+                        bins = non_empty_bins[:actual_num_bins]
+                        console.log(f"[cyan]End of data: training partial batch with {actual_num_bins} bins[/]")
+                    else:
+                        continue  # Keep collecting
+
+                # Log bin statistics
+                bin_stats = self._get_bin_stats(bins)
+                logging.debug(
+                    f"Step {step + 1}: Packed {bin_stats['num_bins']} bins "
+                    f"(lengths: {bin_stats['min_bin_length']}-{bin_stats['max_bin_length']}, "
+                    f"mean={bin_stats['mean_bin_length']:.1f})"
+                )
+
+                # Distribute bins for data parallelism
                 dist_bins = distribute_bins_for_dp(
                     bins=bins,
                     num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
                 )
 
-                val_results = await self.policy.train(
-                    dist_bins,
-                    self.loss_fn,
-                    pad_values,
-                    eval_mode=True,
-                )
-
-                if len(val_results["all_mb_metrics"]) == 0:
-                    warnings.warn(
-                        "No validation metrics were collected for this batch."
-                        " This is likely because there were no valid samples.", stacklevel=2
-                    )
-                else:
-                    # global_loss is a tensor that may contain losses from multiple batches
-                    # Sum all elements to get total loss for this validation call
-                    loss_tensor = val_results["loss"]
-                    if isinstance(loss_tensor, torch.Tensor):
-                        val_metrics["val_loss"] += loss_tensor.sum().item()
-                    else:
-                        val_metrics["val_loss"] += float(loss_tensor)
-                    num_valid_batches += 1
-
-            if num_valid_batches > 0:
-                val_metrics["val_loss"] /= num_valid_batches
-            else:
-                warnings.warn(
-                    "No validation metrics were collected."
-                    " This is likely because there were no valid samples in the validation set.", stacklevel=2
-                )
-
-            self.policy.prepare_for_training()
-
-        timing_metrics = timer.get_timing_metrics(reduction_op="sum")
-
-        if num_valid_batches > 0:
-            print("\n📊 Validation Results:")
-            print(f"    • Validation loss: {val_metrics['val_loss']:.4f}")
-
-            print("\n  ⏱️  Validation Timing:")
-            validation_time = timing_metrics.get("total_validation_time", 0)
-            print(f"    • Total validation time: {validation_time:.2f}s")
-
-        timer.reset()
-
-        return cast(tuple[dict[str, float], dict[str, float]], (val_metrics, timing_metrics))
-
-    async def train(self) -> None:
-        """Run training loop until finished."""
-        timer = Timer()
-        timeout = TimeoutChecker(
-            timeout=self.master_config["checkpointing"]["checkpoint_must_save_by"],
-            fit_last_save_time=True,
-        )
-        timeout.start_iterations()
-
-        step = self.sft_save_state.get("total_steps", 0)
-        consumed_samples = self.sft_save_state.get("consumed_samples", 0)
-
-        sft_config = self.master_config["sft"]
-        val_period = sft_config["val_period"]
-        val_at_start = sft_config["val_at_start"]
-
-        pad_values = {
-            "token_ids": self.tokenizer.pad_token_id,
-            "token_mask": False,
-            "targets": self.tokenizer.pad_token_id,
-        }
-
-        if val_at_start and step == 0:
-            print("\n🔍 Running initial validation...")
-            validation_result = await self.validate(step=0)
-            if validation_result is not None:
-                val_metrics, validation_timings = validation_result
-                self.logger.log_metrics(val_metrics, step, prefix="validation")
-                self.logger.log_metrics(
-                    validation_timings, step, prefix="timing/validation"
-                )
-
-        self.policy.prepare_for_training()
-
-        dataloader_iter = iter(self.train_dataloader)
-        packing_pool: list[dict[str, list]] = []
-        out_of_samples = False
-
-        while step < sft_config["max_num_steps"]:
-            with timer.time("total_step_time"):
-                # Pull samples from dataloader until bins are full
-                with timer.time("data_processing"):
-                    while not out_of_samples:
-                        sample = next(dataloader_iter, None)
-                        if sample is None:
-                            out_of_samples = True
-                            break
-
-                        doc = self._sample_to_document(sample[0])
-                        if doc is not None:
-                            packing_pool.append(doc)
-                            consumed_samples += 1
-
-                        # Try packing
-                        bins, remainder = pack_sequences(
-                            documents=packing_pool,
-                            max_bin_size=self.master_config["policy"]["max_total_sequence_length"],
-                            num_bins=self.master_config["policy"]["train_global_batch_size"],
-                            separator_value=pad_values,
-                        )
-
-                        # If we have remainder, bins are full - proceed with training
-                        if len(remainder) > 0:
-                            packing_pool = list(remainder)
-                            break
-
-                    # Check if we ran out of samples without filling bins
-                    if len(remainder) == 0:
-                        if out_of_samples:
-                            # No more samples and bins aren't full - we're done
-                            logging.info("Finished training - ran out of samples.")
-                            break
-                        # Keep waiting for more samples
-                        continue
-
-                    bin_lengths = [len(bin["token_ids"]) for bin in bins]
-                    min_bin_length = min(bin_lengths)
-                    max_bin_length = max(bin_lengths)
-                    mean_bin_length = sum(bin_lengths) / len(bin_lengths)
-                    logging.info(
-                        f"Step {step + 1}: Packed sequences into {len(bins)} bins: "
-                        f"min={min_bin_length}, max={max_bin_length}, mean={mean_bin_length:.1f}"
-                    )
-
-                    # Distribute bins for DP
-                    dist_bins = distribute_bins_for_dp(
-                        bins=bins,
-                        num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
-                    )
-
-                logging.info("Taking a training step...")
+                # Train
+                status.update("[bold]Training...[/]")
                 with timer.time("policy_training"):
                     train_results = await self.policy.train(
                         dist_bins,
                         self.loss_fn,
                         pad_values,
+                        gbs=len(bins),
                     )
 
-                val_metrics, validation_timings = None, None
-                if val_period > 0 and (step + 1) % val_period == 0:
-                    logging.info("Running validation...")
-                    validation_result = await self.validate(step=step + 1)
-                    if validation_result is not None:
-                        val_metrics, validation_timings = validation_result
-                        self.logger.log_metrics(
-                            validation_timings,
-                            step + 1,
-                            prefix="timing/validation",
-                        )
-                        self.logger.log_metrics(
-                            val_metrics, step + 1, prefix="validation"
-                        )
+                # Validation
+                if val_period > 0 and (step + 1) % val_period == 0 and self.val_dataloader is not None:
+                    status.update("[bold]Validating...[/]")
+                    val_metrics = await self._validate(step + 1)
+                    if val_metrics:
+                        self.logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
-                timeout.mark_iteration()
-                should_save_by_step = (step + 1) % self.master_config["checkpointing"]["save_period"] == 0
-                should_save_by_timeout = timeout.check_save()
+                # Checkpointing
+                if self.config.checkpointing.enabled and (step + 1) % save_period == 0:
+                    status.update(f"[bold]Saving checkpoint for step {step + 1}...[/]")
+                    self._save_checkpoint(step, consumed_samples, timer)
 
-                if self.master_config["checkpointing"]["enabled"] and (
-                    should_save_by_step or should_save_by_timeout
-                ):
-                    self._save_checkpoint(step, consumed_samples, val_metrics, timer)
+                # Log metrics
+                self._log_step(step, train_results, timer, bin_stats, console)
 
-            metrics = {
-                "loss": self._to_scalar_array(train_results["loss"]),
-                "grad_norm": self._to_scalar_array(train_results["grad_norm"]),
-            }
-            metrics.update(train_results["all_mb_metrics"])
-            mean_reduction_keys = {
-                "lr",
-                "wd",
-                "global_valid_seqs",
-                "global_valid_toks",
-                "avg_pad_tokens_per_sequence",
-                "packing_efficiency",
-            }
-            for k, v in metrics.items():
-                if k in mean_reduction_keys:
-                    metrics[k] = np.mean(v).item()
-                else:
-                    metrics[k] = np.sum(v).item()
+                timer.reset()
+                step_start = datetime.now()
+                step += 1
 
-            # Add router statistics if available
-            expert_balance_metrics = {}
-            router_stats_metrics = {}
-            if "router_statistics" in train_results:
-                router_stats = train_results["router_statistics"]
-                for expert_key, count in router_stats.items():
-                    if expert_key.startswith("expert_balance_"):
-                        layer_id = expert_key.replace("expert_balance_", "")
-                        expert_balance_metrics[layer_id] = count
-                    else:
-                        router_stats_metrics[expert_key] = count
+                # Check if we hit max steps or ran out of data with empty pool
+                if out_of_samples and len(packing_pool) == 0:
+                    break
 
-                if expert_balance_metrics:
-                    full_model_balance = np.mean(list(expert_balance_metrics.values()))
-                    metrics["expert_balance"] = full_model_balance
-
-            self._log_step(metrics, timer, train_results, step, expert_balance_metrics, router_stats_metrics)
-
-            timer.reset()
-            step += 1
+        console.log("[bold green]Finished training![/]")
 
         # Final checkpoint
-        logging.info("Finished training!")
-        if self.master_config["checkpointing"]["enabled"]:
-            self._save_checkpoint(step, consumed_samples, None, timer)
+        if self.config.checkpointing.enabled:
+            self._save_checkpoint(step, consumed_samples, timer)
+
+    async def _validate(self, step: int) -> dict[str, float] | None:
+        """Run validation on the validation dataset.
+
+        Args:
+            step: Current training step (for logging).
+
+        Returns:
+            Dictionary of validation metrics, or None if validation failed.
+        """
+        if self.val_dataloader is None:
+            return None
+
+        pad_values = self._get_pad_values()
+        val_gbs = self.training_config.global_batch_size
+        val_batches = self.sft_config.val_batches
+
+        self.policy.prepare_for_training()
+
+        val_dataloader_iter = iter(self.val_dataloader)
+        packing_pool: list[dict[str, list]] = []
+        out_of_samples = False
+
+        # Initialize bins/remainder for the loop
+        bins: list[dict[str, list]] = []
+        remainder: list[dict[str, list]] = []
+
+        total_loss = 0.0
+        num_batches = 0
+
+        while val_batches == 0 or num_batches < val_batches:
+            # Pull samples
+            while not out_of_samples:
+                sample = next(val_dataloader_iter, None)
+                if sample is None:
+                    out_of_samples = True
+                    break
+
+                doc = self._sample_to_document(sample[0])
+                if doc is not None:
+                    packing_pool.append(doc)
+
+                bins, remainder = pack_sequences(
+                    documents=packing_pool,
+                    max_bin_size=self.policy_config.max_total_sequence_length,
+                    num_bins=val_gbs,
+                    separator_value=pad_values,
+                )
+
+                if len(remainder) > 0:
+                    packing_pool = list(remainder)
+                    break
+
+            if len(remainder) == 0 and out_of_samples:
+                break
+
+            dist_bins = distribute_bins_for_dp(
+                bins=bins,
+                num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
+            )
+
+            val_results = await self.policy.train(
+                dist_bins,
+                self.loss_fn,
+                pad_values,
+                eval_mode=True,
+            )
+
+            loss = val_results["loss"]
+            if isinstance(loss, torch.Tensor):
+                total_loss += loss.sum().item()
+            else:
+                total_loss += float(loss)
+            num_batches += 1
+
+        if num_batches == 0:
+            logging.warning("No validation batches completed")
+            return None
+
+        return {
+            "val_loss": total_loss / num_batches,
+            "val_batches": num_batches,
+        }
 
     def _save_checkpoint(
         self,
         step: int,
         consumed_samples: int,
-        val_metrics: dict[str, float] | None,
         timer: Timer,
     ) -> None:
-        self.sft_save_state["total_steps"] = step + 1
-        self.sft_save_state["consumed_samples"] = consumed_samples
-        if val_metrics is not None:
-            self.sft_save_state["val_loss"] = val_metrics["val_loss"]
-        elif "val_loss" in self.sft_save_state:
-            del self.sft_save_state["val_loss"]
+        """Save a training checkpoint."""
+        if not self.config.checkpointing.enabled:
+            return
 
-        if self.master_config["checkpointing"]["metric_name"] is not None:
-            if self.master_config["checkpointing"]["metric_name"] not in self.sft_save_state:
-                warnings.warn(
-                    f"You asked to save checkpoints based on {self.master_config['checkpointing']['metric_name']} "
-                    "but the metric is not found in the save state. "
-                    "Saving most recent k checkpoints instead.", stacklevel=2
-                )
-                self.master_config["checkpointing"]["metric_name"] = None
+        self.policy.prepare_for_training()
 
-        with timer.time("checkpointing"):
-            logging.info(f"Saving checkpoint for step {step + 1}...")
-            checkpoint_path = self.checkpointer.init_tmp_checkpoint(
-                step + 1, self.sft_save_state, self.master_config
-            )
+        self.save_state["step"] = step + 1
+        self.save_state["consumed_samples"] = consumed_samples
 
-            self.policy.save_checkpoint(
-                weights_path=os.path.join(checkpoint_path, "policy", "weights"),
-                optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
-                tokenizer_path=os.path.join(checkpoint_path, "policy", "tokenizer"),
-            )
-            torch.save(
-                self.train_dataloader.state_dict(),
-                os.path.join(checkpoint_path, "train_dataloader.pt"),
-            )
-            self.checkpointer.finalize_checkpoint(checkpoint_path)
+        checkpoint_path = self._save_checkpoint_base(
+            step=step,
+            save_state=dict(self.save_state),
+            config=self.config.model_dump(),
+            timer=timer,
+        )
+        self._finalize_checkpoint(checkpoint_path)
 
     def _log_step(
         self,
-        metrics: dict[str, Any],
-        timer: Timer,
+        step: int,
         train_results: dict[str, Any],
-        total_steps: int,
-        expert_balance_metrics: dict[str, float] | None = None,
-        router_stats_metrics: dict[str, float] | None = None,
+        timer: Timer,
+        bin_stats: dict[str, float],
+        console: Console,
     ) -> None:
+        """Log training metrics for a step."""
+        # Extract metrics
+        loss = train_results["loss"]
+        if isinstance(loss, torch.Tensor):
+            loss = loss.sum().item()
+        else:
+            loss = float(np.sum(loss))
+
+        grad_norm = train_results.get("grad_norm")
+        if grad_norm is not None:
+            if isinstance(grad_norm, torch.Tensor):
+                grad_norm = grad_norm.item()
+            else:
+                grad_norm = float(np.mean(grad_norm))
+
+        # Get timing
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
-        print("\n📊 Training Results:")
-        print(f"  • Loss: {float(metrics['loss']):.4f}")
+        train_time_raw = timing_metrics.get("policy_training", 0.0)
+        train_time = float(train_time_raw) if isinstance(train_time_raw, (int, float)) else sum(train_time_raw)
 
-        total_valid_toks = train_results["all_mb_metrics"]["global_valid_toks"][0]
-        print(f"  • Total valid tokens: {total_valid_toks}")
-        print(f"  • Mean microbatch tokens: {total_valid_toks / len(train_results['all_mb_metrics']['global_valid_toks']):.0f}")
-        print(f"  • Estimated throughput: {total_valid_toks / timing_metrics['policy_training']:.2f} tok/s")
+        # Get token counts from microbatch metrics
+        all_mb_metrics = train_results.get("all_mb_metrics", {})
+        total_tokens = int(sum(all_mb_metrics.get("global_valid_toks", [0])))
 
-        print("\n⏱️  Timing:")
-        total_time = timing_metrics.get("total_step_time", 0)
-        print(f"  • Total step time: {total_time:.2f}s")
-
-        for k, v in sorted(
-            timing_metrics.items(), key=lambda item: item[1], reverse=True
-        ):
-            if k != "total_step_time":
-                percent = (v / total_time * 100) if total_time > 0 else 0 # type: ignore
-                print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
-
-        self.logger.log_metrics(metrics, total_steps + 1, prefix="train")
-        self.logger.log_metrics(
-            timing_metrics, total_steps + 1, prefix="timing/train"
+        # Log to console
+        throughput = total_tokens / train_time if train_time > 0 else 0.0
+        console.log(
+            f"[bold green]Step {step + 1:4d}[/] | "
+            f"loss=[cyan]{loss:.4f}[/] "
+            f"toks=[white]{total_tokens}[/] "
+            f"time=[green]{train_time:.2f}s[/] "
+            f"toks/s=[magenta]{throughput:.0f}[/]"
         )
 
-        # Log expert balance metrics separately under expert/balance/
-        if expert_balance_metrics:
-            balance_metrics = {
-                f"balance/{layer_id}": val for layer_id, val in expert_balance_metrics.items()
-            }
-            self.logger.log_metrics(
-                balance_metrics, total_steps + 1, prefix="expert"
-            )
+        # Log to wandb
+        metrics = {
+            "loss": loss,
+            "total_tokens": total_tokens,
+            "throughput_toks_per_sec": throughput,
+            **bin_stats,
+        }
+        if grad_norm is not None:
+            metrics["grad_norm"] = grad_norm
 
-        # Log router statistics (expert fractions) separately under expert/router_stats/
-        if router_stats_metrics:
-            stats_metrics = {
-                f"router_stats/{expert_key}": val for expert_key, val in router_stats_metrics.items()
-            }
-            self.logger.log_metrics(
-                stats_metrics, total_steps + 1, prefix="expert"
-            )
-
-    def _to_scalar_array(self, tensor: torch.Tensor) -> np.ndarray:
-        """Convert a tensor to numpy array for logging purposes."""
-        return tensor.detach().cpu().numpy()
+        self.logger.log_metrics(metrics, step + 1, prefix="train")
+        self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")

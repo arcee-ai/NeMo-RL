@@ -450,11 +450,8 @@ class DTensorV2PolicyWorker:
 
         if all("advantages" in sample for sample in data):
             data_type = "rl"
-        elif all("targets" in sample for sample in data):
-            data_type = "sft"
-            # SFT just uses token_ids and token_mask so we don't need to cast it.
         else:
-            raise ValueError("Data must contain either 'advantages' or 'targets' in each sample, got invalid or mixed group.")
+            data_type = "sft"
 
         if eval_mode:
             ctx: AbstractContextManager[Any] = torch.no_grad()
