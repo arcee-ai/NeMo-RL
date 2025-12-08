@@ -128,42 +128,6 @@ class BaseTrainer[SaveStateT](ABC):
             use_cut_cross_entropy=use_cut_cross_entropy,
         )
 
-    def _pack_and_distribute(
-        self,
-        documents: list[dict[str, list]],
-        max_bin_size: int,
-        num_bins: int,
-        priorities: list[int] | None = None,
-    ) -> tuple[list[list[dict[str, list[int | float]]]], list[dict[str, list]]]:
-        """Pack sequences into bins and distribute for data parallelism.
-
-        Args:
-            documents: List of documents to pack, each with token_ids, token_mask, etc.
-            max_bin_size: Maximum sequence length per bin.
-            num_bins: Number of bins to pack into (typically global_batch_size).
-            priorities: Optional priority scores for packing order.
-
-        Returns:
-            Tuple of (distributed_bins, remainder_documents).
-            distributed_bins is ready for sharded training.
-            remainder_documents are documents that didn't fit.
-        """
-        bins, remainder = pack_sequences(
-            documents=documents,
-            max_bin_size=max_bin_size,
-            num_bins=num_bins,
-            separator_value=self._get_pad_values(),
-            doc_priorities=priorities,
-        )
-
-        # Distribute bins across data parallel shards
-        dist_bins = distribute_bins_for_dp(
-            bins=bins,
-            num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
-        )
-
-        return dist_bins, list(remainder)
-
     def _save_checkpoint(self, step: int, timer: Timer) -> None:
         """Save a training checkpoint.
 
