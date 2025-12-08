@@ -33,6 +33,7 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.device_mesh import DeviceMesh
+from torch.optim.lr_scheduler import LambdaLR, LRScheduler, SequentialLR
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -393,7 +394,7 @@ class DTensorV2PolicyWorker:
         # Set up scheduler
         optim_cfg = self.cfg.training.optimizer
         scheduler_phases = optim_cfg.scheduler.phases
-        self.scheduler: torch.optim.lr_scheduler.LRScheduler
+        self.scheduler: LRScheduler
         if len(scheduler_phases) > 0:
             schedulers = [
                 import_class_by_name(scheduler_cfg.name)(
@@ -403,11 +404,11 @@ class DTensorV2PolicyWorker:
 
             milestones = optim_cfg.scheduler.milestones
 
-            self.scheduler = torch.optim.lr_scheduler.SequentialLR(
+            self.scheduler = SequentialLR(
                 self.optimizer, schedulers, milestones
             )
         else:
-            self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.scheduler = LambdaLR(
                 self.optimizer, lr_lambda=lambda epoch: 1
             )
 
