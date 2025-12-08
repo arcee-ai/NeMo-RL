@@ -123,11 +123,6 @@ class VLLMOpenAIServe:
         await self._engine_client.collective_rpc("reset_prefix_cache", args=())
         return True
 
-    async def admin_reset_prefix_cache_async(self) -> bool:
-        """Reset prefix cache on all vLLM workers asynchronously."""
-        await self._engine_client.collective_rpc("reset_prefix_cache", args=())
-        return True
-
     async def admin_init_collective(self, rank_prefix: int, ip: str, port: int, world_size: int) -> Literal[True]:
         """Initialize collective communication between vLLM workers and the training rank0 for weight refits.
 

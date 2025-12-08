@@ -481,14 +481,6 @@ class DTensorV2PolicyWorker:
         """Check if the policy worker is working."""
         return True
 
-    def reset_peak_memory_stats(self) -> None:
-        """Reset the peak memory statistics for the current GPU."""
-        torch.cuda.reset_peak_memory_stats()
-
-    def get_gpu_info(self) -> dict[str, Any]:
-        """Return information about the GPU being used by this worker."""
-        return get_gpu_info(self.model)
-
     def train(
         self,
         data: list[PackedSample],
@@ -692,10 +684,6 @@ class DTensorV2PolicyWorker:
 
             return metrics
 
-    def return_state_dict(self) -> dict[str, Any]:
-        """Return the current model state dictionary."""
-        return self.model.state_dict()
-
     def report_device_id(self) -> str:
         """Report the UUID of the current CUDA device using NVML.
 
@@ -834,20 +822,6 @@ class DTensorV2PolicyWorker:
         for v in model.buffers():
             v.data = v.data.to(device)
 
-        return model
-
-    def move_to_cuda(self, model: BaseModel) -> BaseModel:
-        """Move a model to CUDA."""
-        model = self.move_to_device(model, "cuda")
-        gc.collect()
-        torch.cuda.empty_cache()
-        return model
-
-    def move_to_cpu(self, model: BaseModel) -> BaseModel:
-        """Move the model to CPU."""
-        model = self.move_to_device(model, "cpu")
-        gc.collect()
-        torch.cuda.empty_cache()
         return model
 
     def save_checkpoint(

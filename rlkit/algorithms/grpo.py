@@ -676,7 +676,11 @@ class GRPOTrainer:
         output = []
 
         # Calculate response-level advantages.
-        advantages, is_valid = self._compute_advantages(results["reward"], self.rollout_config.use_leave_one_out_baseline)
+        advantages, is_valid = self._compute_advantages(
+            results["reward"],
+            self.rollout_config.use_leave_one_out_baseline,
+            self.rollout_config.use_std_normalization,
+        )
 
         # Stich returned trajectories into full tokenized responses.
         for i, state in enumerate(results["state"]):
@@ -744,13 +748,15 @@ class GRPOTrainer:
     def _compute_advantages(
         self,
         rewards: list[float],
-        leave_one_out_baseline: bool = False,
+        leave_one_out_baseline: bool,
+        use_std_normalization: bool,
     ) -> tuple[list[float], bool]:
         """Compute response-level advantages from rewards (all assumed to be in the same group).
 
         Args:
             rewards: List of rewards for a single prompt group
             leave_one_out_baseline: If True, baseline for each response excludes that response
+            use_std_normalization: If True, normalize advantages by the standard deviation of the rewards
 
         Returns:
             Tuple of (advantages, is_valid) where is_valid is True if group has non-zero variance
@@ -766,7 +772,10 @@ class GRPOTrainer:
             # Baseline = mean of all responses
             baselines = rewards_tensor.mean()
 
-        advantages = (rewards_tensor - baselines).tolist()
+        advantages = (rewards_tensor - baselines)
+        if use_std_normalization:
+            advantages = advantages / rewards_tensor.std().item()
+        advantages = advantages.tolist()
 
         # Mark as invalid if all rewards are identical (zero variance)
         return advantages, rewards_tensor.std().item() > 0

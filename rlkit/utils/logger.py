@@ -712,54 +712,6 @@ class Logger(LoggerInterface):
             self.gpu_monitor.stop()
 
 
-def flatten_dict(d: Mapping[str, Any], sep: str = ".") -> dict[str, Any]:
-    """Flatten a nested dictionary.
-
-    Handles nested dictionaries and lists by creating keys with separators.
-    For lists, the index is used as part of the key.
-
-    Args:
-        d: Dictionary to flatten
-        sep: Separator to use between nested keys
-
-    Returns:
-        Flattened dictionary with compound keys
-
-    Examples:
-        ```{doctest}
-        >>> from rlkit.utils.logger import flatten_dict
-        >>> flatten_dict({"a": 1, "b": {"c": 2}})
-        {'a': 1, 'b.c': 2}
-
-        >>> flatten_dict({"a": [1, 2], "b": {"c": [3, 4]}})
-        {'a.0': 1, 'a.1': 2, 'b.c.0': 3, 'b.c.1': 4}
-
-        >>> flatten_dict({"a": [{"b": 1}, {"c": 2}]})
-        {'a.0.b': 1, 'a.1.c': 2}
-        ```
-    """
-    result: dict[str, Any] = {}
-
-    def _flatten(d: Mapping[str, Any], parent_key: str = "") -> None:
-        for key, value in d.items():
-            new_key = f"{parent_key}{sep}{key}" if parent_key else key
-
-            if isinstance(value, dict):
-                _flatten(value, new_key)
-            elif isinstance(value, list):
-                for i, item in enumerate(value):
-                    list_key = f"{new_key}{sep}{i}"
-                    if isinstance(item, dict):
-                        _flatten(item, list_key)
-                    else:
-                        result[list_key] = item
-            else:
-                result[new_key] = value
-
-    _flatten(d)
-    return result
-
-
 def get_next_experiment_dir(base_log_dir: str) -> str:
     """Create a new experiment directory with an incremented ID.
 
