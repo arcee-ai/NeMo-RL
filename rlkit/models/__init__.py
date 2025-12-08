@@ -21,7 +21,6 @@ class BaseModelArgs(ABC):
 
 class BaseModel(nn.Module, ABC):
     """Base class for all models."""
-    @abstractmethod
     def __init__(self, model_args: BaseModelArgs, skip_logits: bool = False):
         """Initialize the model."""
         super().__init__()

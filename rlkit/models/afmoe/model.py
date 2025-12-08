@@ -141,6 +141,7 @@ class Attention(nn.Module):
         )
 
         self.use_flex_attn = model_args.use_flex_attn
+        self.inner_attention: nn.Module
         if self.is_local_attention:
             if not self.use_flex_attn:
                 raise ValueError("SWA is only supported for flex-attn")
@@ -158,14 +159,14 @@ class Attention(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
-        attention_masks: AttentionMasksType | None,
+        attention_masks: AttentionMasksType,
     ):
         """Forward pass of the attention module.
 
         Args:
             x (torch.Tensor): Input tensor.
             freqs_cis (torch.Tensor): Precomputed frequency tensor.
-            attention_masks (AttentionMasksType | None): Attention masks.
+            attention_masks (AttentionMasksType): Attention masks.
 
         Returns:
             torch.Tensor: Output tensor after attention.
@@ -324,7 +325,6 @@ class AFMoEModel(BaseModel):
         self.norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
         self.skip_logits = skip_logits
         self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-        self.init_weights()
 
     def _precompute_freqs_cis(self) -> tuple[torch.Tensor, torch.Tensor]:
         head_dim = self.model_args.head_dim if self.model_args.head_dim is not None else self.model_args.dim // self.model_args.n_heads
@@ -355,8 +355,7 @@ class AFMoEModel(BaseModel):
             torch.Tensor: Output logits after applying the Transformer model.
 
         """
-        # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
-        h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
+        h = self.tok_embeddings(tokens)
 
         if self.model_args.mup_enabled:
             h = h * (self.model_args.dim**0.5)
@@ -365,22 +364,22 @@ class AFMoEModel(BaseModel):
         for layer in self.layers.values():
             h = layer(h, freqs_cis, attention_masks)
 
-        h = self.norm(h) if self.norm else h
+        h = self.norm(h)
         if self.skip_logits:
             return h
         else:
-            output = self.output(h) if self.output else h
+            output = self.output(h)
             return output
 
     def get_attention_masks(
         self,
-        input_batch: torch.Tensor,
+        input_ids: torch.Tensor,
         separator_value: int,
     ) -> AttentionMasksType:
         """Generate attention masks for a given sequence.
 
         Args:
-            input_batch (torch.Tensor): The input batch read from the dataloader.
+            input_ids (torch.Tensor): The input token IDs.
             separator_value (int): The token ID separating packed documents.
 
         Returns:
@@ -391,8 +390,8 @@ class AFMoEModel(BaseModel):
             case "causal":
                 B = 1
             case "block_causal":
-                mask_mods.append(get_document_mask_mod(input_batch, separator_value))
-                B = input_batch.shape[0]
+                mask_mods.append(get_document_mask_mod(input_ids, separator_value))
+                B = input_ids.shape[0]
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"
@@ -404,7 +403,7 @@ class AFMoEModel(BaseModel):
         )
         full_mask_mod = and_masks(*mask_mods)
 
-        seqlen = input_batch.shape[1]
+        seqlen = input_ids.shape[1]
         return {
             "full": create_attention_mask(full_mask_mod, B, None, seqlen, seqlen),
             "swa": create_attention_mask(swa_mask_mod, B, None, seqlen, seqlen),
@@ -429,13 +428,13 @@ class AFMoEModel(BaseModel):
 
         for layer_id_str, layer in self.layers.items():
             if hasattr(layer, "moe") and layer.moe is not None:
-                layer_id = layer.moe.layer_id
+                layer_id = layer.moe.layer_id # type: ignore[union-attr] - We know these are our own layers but the type system is inflexible here.
                 if layer_id is None:
                     # Fallback to layer_id_str if layer_id not set
                     layer_id = int(layer_id_str)
 
                 # Get router statistics for this layer
-                stats = layer.moe.router_stats.clone()
+                stats = layer.moe.router_stats.clone() # type: ignore[union-attr] - see above
 
                 # Aggregate across EP ranks if EP is enabled
                 if ep_mesh is not None and ep_mesh.size() > 1:
@@ -470,6 +469,6 @@ class AFMoEModel(BaseModel):
                     router_stats[f"expert_balance_{layer_id}"] = expert_balance
 
                 # Reset router statistics after collection
-                layer.moe.reset_router_statistics()
+                layer.moe.reset_router_statistics() # type: ignore[union-attr] - see above
 
         return router_stats
