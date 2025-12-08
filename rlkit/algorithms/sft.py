@@ -121,7 +121,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             use_cut_cross_entropy=use_cce,
         )
 
-        # Loss function (NLL for SFT - cut_cross_entropy is handled at kernel level)
+        # Loss function (always NLL for SFT - cut_cross_entropy is unique and special-cased)
         self.loss_fn = NLLLoss()
 
     # ─────────────────────────────────────────────────────────────────────────

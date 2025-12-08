@@ -506,7 +506,6 @@ class DTensorV2PolicyWorker:
                     output: torch.Tensor = self.model(**forward_kwargs)
 
                 if self.use_cut_cross_entropy:
-                    assert self.cp_size == 1, "Liger's cross-entropy loss kernel is not supported with context parallel"
                     assert data_type == "sft", "Liger's cross-entropy loss kernel is only supported for SFT data"
 
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
