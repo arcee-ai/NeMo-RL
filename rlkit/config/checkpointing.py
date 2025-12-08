@@ -10,4 +10,3 @@ class CheckpointingConfig(BaseModel):
     checkpoint_dir: str
     save_period: int
     keep_top_k: int | None = None
-    hf_checkpoint: bool = False

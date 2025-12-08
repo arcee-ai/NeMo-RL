@@ -53,14 +53,9 @@ def main() -> None:
     print("Final config:")
     pprint.pprint(config.model_dump())
 
+    # Inexplicably, NCCL cannot cope with P2P via shared memory on some machines.
     if not torch.cuda.can_device_access_peer(0, 1):
         os.environ["NCCL_SHM_DISABLE"] = "1"
-        logging.warning("Detected that P2P via shared memory is not available. Setting NCCL_SHM_DISABLE to 1.")
-        if not config.checkpointing.hf_checkpoint:
-            raise ValueError(
-                "Running on a system configuration with bugged DCP checkpointing. " + \
-                "Please set `checkpointing.hf_checkpoint` to `True` to use centralized HuggingFace checkpoints."
-            )
 
     # Get the next experiment directory with incremented ID
     config.logging.log_dir = get_next_experiment_dir(config.logging.log_dir)

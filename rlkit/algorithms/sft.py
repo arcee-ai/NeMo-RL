@@ -117,8 +117,6 @@ class SFTTrainer:
             weights_path = None
             optimizer_path = None
 
-        self.use_hf_checkpoint = self.master_config["checkpointing"].get("hf_checkpoint", False)
-
         self.policy = self._initialize_policy(
             self.cluster,
             policy_config,
@@ -218,7 +216,6 @@ class SFTTrainer:
             optimizer_path=optimizer_path,
             init_optimizer=True,
             init_reference_model=False,
-            use_hf_checkpoint=self.use_hf_checkpoint,
             use_cut_cross_entropy=use_cce,
         )
 

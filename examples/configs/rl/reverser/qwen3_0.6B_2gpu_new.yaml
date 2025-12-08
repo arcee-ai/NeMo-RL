@@ -82,4 +82,3 @@ checkpointing:
   checkpoint_dir: "results/grpo_vf_reverser_600M"
   save_period: 10
   keep_top_k: 3
-  hf_checkpoint: true

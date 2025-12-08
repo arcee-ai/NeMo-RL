@@ -155,7 +155,6 @@ class GRPOTrainer:
             weights_path=weights_path,
             optimizer_path=optimizer_path,
             init_optimizer=True,
-            use_hf_checkpoint=self.config.checkpointing.hf_checkpoint,
         )
 
         self._initialize_collective_communication(

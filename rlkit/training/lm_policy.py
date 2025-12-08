@@ -44,7 +44,6 @@ class Policy:
         weights_path: PathLike | None = None,
         optimizer_path: PathLike | None = None,
         init_reference_model: bool = True,
-        use_hf_checkpoint: bool = False,
         use_cut_cross_entropy: bool = False,
     ):
         """Initialize all training workers."""
@@ -112,7 +111,6 @@ class Policy:
             init_reference_model=init_reference_model,
             worker_sharding_annotations=self.sharding_annotations,
             pre_init_communication_queue=pre_init_queue,
-            use_hf_checkpoint=use_hf_checkpoint,
             use_cut_cross_entropy=use_cut_cross_entropy,
         )
 
@@ -126,7 +124,6 @@ class Policy:
         )
 
         self.cfg = config
-        self.use_hf_checkpoint = use_hf_checkpoint
 
     def init_collective(
         self, ip: str, port: int, world_size: int

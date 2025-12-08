@@ -18,7 +18,7 @@ import os
 import re
 from collections import defaultdict
 from contextlib import AbstractContextManager, nullcontext
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict
 
 import ray
 import torch
@@ -26,8 +26,6 @@ from accelerate import init_empty_weights
 from torch.distributed._tensor import distribute_tensor
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
-    get_model_state_dict,
-    get_optimizer_state_dict,
     set_model_state_dict,
 )
 from torch.distributed.tensor import DTensor
@@ -52,7 +50,6 @@ from rlkit.training.utils import (
     get_grad_norm,
     import_class_by_name,
     sliding_window_overwrite,
-    to_local_if_dtensor,
 )
 from rlkit.utils.native_checkpoint import (
     load_checkpoint,
@@ -61,46 +58,10 @@ from rlkit.utils.native_checkpoint import (
 
 from .utils import get_device_mesh_info
 
+# Disable dynamo autotune_local_cache to avoid crash when there's already a cache with different order of node_bundles.
+# This must be set at module level to avoid Ray serialization issues with ConfigModuleInstance.
+torch._inductor.config.autotune_local_cache = False  # type: ignore[attr-defined]
 
-def _materialize_state_to_cpu(obj: Any) -> Any:
-    """Recursively convert DTensors/Tensors to CPU tensors for serialization."""
-    if isinstance(obj, DTensor):
-        obj = to_local_if_dtensor(obj)
-    if isinstance(obj, torch.Tensor):
-        return obj.detach().cpu()
-    if isinstance(obj, dict):
-        return {k: _materialize_state_to_cpu(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_materialize_state_to_cpu(v) for v in obj]
-    if isinstance(obj, tuple):
-        return tuple(_materialize_state_to_cpu(v) for v in obj)
-    return obj
-
-
-def _resolve_checkpoint_file_path(path: str, default_filename: str) -> str:
-    """Return a filesystem path suitable for torch.save/torch.load.
-
-    If `path` already looks like a file (non-empty suffix), ensure its parent exists and return it.
-    Otherwise, treat `path` as a directory, create it, and return `path/default_filename`.
-    """
-    path = os.path.abspath(path)
-    suffix = os.path.splitext(path)[1]
-    if suffix:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        return path
-    os.makedirs(path, exist_ok=True)
-    return os.path.join(path, default_filename)
-
-
-def _infer_checkpoint_file_path(path: str, default_filename: str) -> str:
-    """Infer the file path that was produced by `_resolve_checkpoint_file_path`."""
-    path = os.path.abspath(path)
-    suffix = os.path.splitext(path)[1]
-    if suffix:
-        return path
-    if os.path.isdir(path):
-        return os.path.join(path, default_filename)
-    return os.path.join(path, default_filename)
 
 class PackedSample(TypedDict):
     """Superclass containing common fields for all training samples."""
@@ -132,7 +93,6 @@ class DTensorV2PolicyWorker:
         tokenizer: PreTrainedTokenizerBase,
         weights_path: str | None = None,
         optimizer_path: str | None = None,
-        use_hf_checkpoint: bool = False,
         use_cut_cross_entropy: bool = False,
         **kwargs: Any,
     ):
@@ -140,16 +100,11 @@ class DTensorV2PolicyWorker:
 
         Loads and parallelizes the model, sets up the optimizer and scheduler, and loads checkpoint if provided.
         """
-        self.use_hf_checkpoint = use_hf_checkpoint
         self.use_cut_cross_entropy = use_cut_cross_entropy
 
         # Explicitly set NCCL_CUMEM_ENABLE to 1 to avoid the P2P initialization error for PyNCCLCommunicator.
         # See https://github.com/NVIDIA-NeMo/RL/issues/564 for more details.
         os.environ["NCCL_CUMEM_ENABLE"] = "1"
-
-        # Disable dynamo autotune_local_cache to avoid crash when there's already a cache
-        # with different order of node_bundles
-        torch._inductor.config.autotune_local_cache = False # type: ignore[attr-defined]
 
         # Only enable expandable_segments on Hopper and newer architectures (compute capability 9.x+)
         configure_expandable_segments()
@@ -177,11 +132,7 @@ class DTensorV2PolicyWorker:
 
         self.model_name = model_name
 
-        # If we are checkpointing to HF format, we can just load a checkpoint directly from the weights path
-        if self.use_hf_checkpoint:
-            hf_model_name = model_name if weights_path is None else weights_path
-        else:
-            hf_model_name = model_name
+        hf_model_name = model_name
 
         self.model_config = AutoConfig.from_pretrained(
             hf_model_name,
@@ -410,13 +361,10 @@ class DTensorV2PolicyWorker:
                 self.optimizer, lr_lambda=lambda epoch: 1
             )
 
-        # Load remainder of checkpoint state
+        # Load DCP checkpoint if provided
         if weights_path and optimizer_path:
-            if self.use_hf_checkpoint:
-                self._load_hf_optim_checkpoint(optimizer_path)
-            else:
-                logging.info(f"Loading DCP checkpoint from {weights_path}")
-                self.load_dcp_checkpoint(weights_path, optimizer_path)
+            logging.info(f"Loading DCP checkpoint from {weights_path}")
+            self.load_dcp_checkpoint(weights_path, optimizer_path)
 
         self.refit_param_info = None
 
@@ -437,10 +385,6 @@ class DTensorV2PolicyWorker:
         assert hasattr(self.tokenizer, "pad_token_id"), "Tokenizer must have a pad token ID"
         attention_masks = self.model.get_attention_masks(input_ids, int(self.tokenizer.pad_token_id)) # type: ignore[arg-type]
         return {"tokens": input_ids, "attention_masks": attention_masks}
-
-    def _export_state_dict(self) -> dict[str, torch.Tensor | DTensor]:
-        """Export the current model state dictionary in the HuggingFace format."""
-        return self.adapter.to_hf(self.model.state_dict())
 
     def _group_state_dict_by_shape_and_dtype(
         self,
@@ -828,87 +772,19 @@ class DTensorV2PolicyWorker:
         optimizer_path: str | None = None,
         tokenizer_path: str | None = None
     ) -> None:
-        """Save a checkpoint of the model.
+        """Save a DCP checkpoint of the model.
 
-        the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
+        The optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
         """
-        if self.use_hf_checkpoint:
-            # Materialize a replicated model state dict that we can serialize centrally.
-            model_state = get_model_state_dict(
-                self.model,
-                options=StateDictOptions(
-                    full_state_dict=True,
-                    cpu_offload=True,
-                ),
-            )
-            model_state = cast(dict[str, Any], _materialize_state_to_cpu(model_state))
-
-            optimizer_state: dict[str, Any] | None = None
-            scheduler_state: dict[str, Any] | None = None
-            if optimizer_path is not None and self.optimizer is not None:
-                optimizer_state = get_optimizer_state_dict(
-                    self.model,
-                    self.optimizer,
-                    options=StateDictOptions(
-                        full_state_dict=True,
-                        cpu_offload=True,
-                    ),
-                )
-                optimizer_state = cast(
-                    dict[str, Any], _materialize_state_to_cpu(optimizer_state)
-                )
-                if self.scheduler is not None:
-                    scheduler_state = self.scheduler.state_dict()
-
-            if self.rank != 0:
-                # Only rank 0 serializes to disk, other ranks participate in the gathers above.
-                return
-
-            os.makedirs(weights_path, exist_ok=True)
-            optimizer_file_path: str | None = None
-            if optimizer_path is not None:
-                optimizer_file_path = _resolve_checkpoint_file_path(
-                    optimizer_path,
-                    "optimizer.pt",
-                )
-            tokenizer_save_path: str | None = None
-            if tokenizer_path is not None:
-                tokenizer_save_path = os.path.abspath(tokenizer_path)
-                os.makedirs(tokenizer_save_path, exist_ok=True)
-
-            # Create empty version of the HF model
-            with init_empty_weights():
-                model_hf = AutoModelForCausalLM.from_config(
-                    self.model_config,
-                    trust_remote_code=True,
-                )
-
-            assert self.adapter is not None
-            state_dict_hf = self.adapter.to_hf(model_state)
-            model_hf.load_state_dict(state_dict_hf, strict=True, assign=True)
-
-            # Save model in expected path
-            model_hf.save_pretrained(weights_path)
-
-            if self.tokenizer is not None and tokenizer_save_path is not None:
-                self.tokenizer.save_pretrained(tokenizer_save_path)
-
-            # Save optimizer state
-            if optimizer_file_path is not None and optimizer_state is not None:
-                optimizer_payload: dict[str, Any] = {"optimizer": optimizer_state}
-                if scheduler_state is not None:
-                    optimizer_payload["scheduler"] = scheduler_state
-                torch.save(optimizer_payload, optimizer_file_path)
-        else:
-            save_checkpoint(
-                model=self.model,
-                weights_path=weights_path,
-                optimizer=self.optimizer if optimizer_path else None,
-                scheduler=self.scheduler if optimizer_path else None,
-                optimizer_path=optimizer_path,
-                tokenizer=self.tokenizer if tokenizer_path else None,
-                tokenizer_path=tokenizer_path,
-            )
+        save_checkpoint(
+            model=self.model,
+            weights_path=weights_path,
+            optimizer=self.optimizer if optimizer_path else None,
+            scheduler=self.scheduler if optimizer_path else None,
+            optimizer_path=optimizer_path,
+            tokenizer=self.tokenizer if tokenizer_path else None,
+            tokenizer_path=tokenizer_path,
+        )
 
     def load_dcp_checkpoint(
         self,
@@ -925,32 +801,6 @@ class DTensorV2PolicyWorker:
         )
         if optimizer_path and self.optimizer is not None:
             self._reshard_optimizer_state()
-
-    def _load_hf_optim_checkpoint(self, optimizer_path: str) -> None:
-        """Manually loads a non-sharded optimizer checkpoint. Used for HF checkpoints."""
-        optimizer_file_path = _infer_checkpoint_file_path(
-            optimizer_path,
-            "optimizer.pt",
-        )
-
-        if self.rank == 0:
-            optimizer_payload = torch.load(optimizer_file_path, map_location="cpu")
-        else:
-            optimizer_payload = None
-
-        obj = [optimizer_payload]
-        torch.distributed.broadcast_object_list(obj, src=0) # type: ignore[attr-defined]
-
-        optimizer_payload = obj[0]
-        assert optimizer_payload is not None
-        optimizer_state = optimizer_payload.get("optimizer", optimizer_payload)
-
-        self.optimizer.load_state_dict(optimizer_state)
-        self._reshard_optimizer_state()
-
-        if self.scheduler is not None:
-            scheduler_state = optimizer_payload.get("scheduler", optimizer_payload)
-            self.scheduler.load_state_dict(scheduler_state)
 
     def _reshard_optimizer_state(self) -> None:
         """Restore DTensor layout for optimizer states associated with DTensor parameters."""
