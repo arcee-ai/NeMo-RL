@@ -497,6 +497,7 @@ class DTensorV2PolicyWorker:
         data: list[PackedSample],
         loss_fn: LossFunction,
         pad_values: dict[str, int | float | bool],
+        gbs: Optional[int] = None,
         eval_mode: bool = False,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function.
@@ -505,12 +506,13 @@ class DTensorV2PolicyWorker:
             data: A list of PackedSample objects, each representing a packed sequence of at most seq_len tokens.
             loss_fn: A LossFunction object.
             pad_values: A dictionary mapping keys in data to the correct placeholder value to use when padding tensors.
+            gbs: The global batch size to use for training. If not provided, the global batch size from the config will be used.
             eval_mode: A boolean indicating whether to run in evaluation mode.
 
         Returns:
             dict[str, Any]: Metrics from the training step.
         """
-        gbs = self.cfg.training.global_batch_size
+        gbs = self.cfg.training.global_batch_size if gbs is None else gbs
         mbs = self.cfg.training.micro_batch_size
 
         # Sanity-check input samples
@@ -608,8 +610,7 @@ class DTensorV2PolicyWorker:
                         )
                         loss_metrics = {
                             "loss": loss.item() if loss.ndim == 0 else loss,
-                            "num_unmasked_tokens": shifted_token_mask.sum().item(),
-                            "num_valid_samples": shifted_token_mask.sum().item(),
+                            "num_unmasked_tokens": shifted_token_mask.sum().item()
                         }
                 else:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
@@ -636,6 +637,7 @@ class DTensorV2PolicyWorker:
                 mb_losses.append(loss.item())
                 all_mb_metrics.append(loss_metrics)
 
+            # Full batch finished, compute and maybe clip grad norm.
             grad_norm: Optional[float | torch.Tensor] = None
             if not eval_mode:
                 with torch.no_grad():
@@ -677,7 +679,7 @@ class DTensorV2PolicyWorker:
                 "all_mb_metrics": dict(mb_metrics)
             }
 
-            # Collect router statistics from AFMoE model if available
+            # Collect router statistics from MoE model if available
             # Collect as absolute counts for DP aggregation, convert to fractions later
             if hasattr(self.model, "collect_router_statistics"):
                 try:

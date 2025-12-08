@@ -151,6 +151,7 @@ class Policy:
         sharded_data: list[list[dict[str, list[int | float]]]],
         loss_fn: LossFunction,
         pad_values: dict[str, int | float | bool],
+        gbs: Optional[int] = None,
         eval_mode: bool = False,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function.
@@ -160,6 +161,7 @@ class Policy:
                 of packed samples (dicts with token_ids, token_mask, etc.).
             loss_fn: Loss function to use for training.
             pad_values: Dictionary mapping field names to the placeholder value to use when padding tensors.
+            gbs: The global batch size to use for training. If not provided, the global batch size from the config will be used.
             eval_mode: Whether to run in evaluation mode (no gradient updates).
 
         Returns:
@@ -186,6 +188,7 @@ class Policy:
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
                 "pad_values": pad_values,
+                "gbs": gbs,
             },
         )
         results = await self.worker_group.get_all_worker_results_async(futures)

@@ -1,17 +1,4 @@
 """RL trainer."""
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 from datetime import datetime
 from rlkit.config.policy import PolicyConfig
 from rlkit.config.rl import EnvironmentConfig
@@ -19,6 +6,7 @@ from rlkit.config.checkpointing import CheckpointingConfig
 from rlkit.config.logging import LoggingConfig
 from rlkit.config.policy.loss import ClippedPGLossConfig, CISPOLossConfig
 from rlkit.config.rl import RLConfig
+
 import asyncio
 import logging
 import os
@@ -369,9 +357,6 @@ class GRPOTrainer:
             ray.get(fut)
         logging.info("All workers initialized collective communication!")
 
-    # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
     async def train(self) -> None:
         """Run training loop until finished."""
         timer = Timer()
@@ -386,6 +371,10 @@ class GRPOTrainer:
         total_samples = len(self.dataloader.dataset)  # type: ignore[arg-type]
 
         console = Console()
+
+        if total_samples <= consumed_samples:
+            console.log("[bold red]No samples left to train on! You may be resuming from a completed training run.[/]")
+            return
 
         refit_status = console.status("Running initial vLLM refit...", spinner="dots")
         await self._refit_policy_generation()
@@ -450,6 +439,10 @@ class GRPOTrainer:
 
                 status.update(get_status_text())
 
+                # Early exit if nothing left to process.
+                if out_of_samples and in_flight == 0 and len(packing_pool) == 0:
+                    break
+
                 # Wait for one or more rollouts to be finished
                 num_ready = awaiting_packing.qsize()
                 for _ in range(max(1, num_ready)):
@@ -471,10 +464,11 @@ class GRPOTrainer:
                     console.log(f"[yellow]Retrying {filtered} rollouts with staleness > {max_staleness}[/]")
 
                 # Try packing the rollouts into a fixed number of bins.
+                actual_num_bins = self.training_config.global_batch_size
                 bins, remainder = pack_sequences(
                     documents=[x.output for x in packing_pool], # type: ignore[arg-type]
                     max_bin_size=self.policy_config.max_total_sequence_length,
-                    num_bins=self.training_config.global_batch_size,
+                    num_bins=actual_num_bins,
                     separator_value={
                         "token_ids": self.tokenizer.pad_token_id,
                         "token_mask": False,
@@ -490,11 +484,31 @@ class GRPOTrainer:
 
                 if len(remainder) == 0:
                     if in_flight == 0 and out_of_samples:
-                        # We are out of samples and there are none left generating.
-                        # TODO: Find a way to consume incomplete batches.
-                        break
-                    # Batch incomplete, keep collecting.
-                    continue
+                        # End of dataset: train on whatever we have, using fewer bins if needed.
+                        if len(packing_pool) == 0:
+                            break  # Nothing left to train on
+
+                        # Filter out empty bins.
+                        non_empty_bins = [b for b in bins if len(b["token_ids"]) > 0]
+
+                        # Round down to a valid batch size (divisible by num_shards * micro_batch_size).
+                        num_shards = self.policy.sharding_annotations.get_axis_size("data_parallel")
+                        mbs = self.training_config.micro_batch_size
+                        batch_unit = num_shards * mbs
+                        actual_num_bins = (len(non_empty_bins) // batch_unit) * batch_unit
+
+                        if actual_num_bins == 0:
+                            console.log(f"[yellow]Dropping {len(packing_pool)} samples at end (not enough for 1 batch)[/]")
+                            break
+
+                        # Take only the bins we can use (they're sorted by size from distribute, take first N).
+                        bins = non_empty_bins[:actual_num_bins]
+
+                        console.log(f"[cyan]End of dataset: training partial batch with {actual_num_bins} bins[/]")
+                        # Fall through to training code with the adjusted bins
+                    else:
+                        # Batch incomplete, keep collecting.
+                        continue
 
                 step_env_metrics = [x.metrics for x in packing_pool if x.output not in remainder]
                 step_staleness = [x.staleness(step) for x in packing_pool if x.output not in remainder]
@@ -533,6 +547,7 @@ class GRPOTrainer:
                             "advantages": 0.0,
                             "generation_logprobs": -9999.0,
                         },
+                        gbs=actual_num_bins,
                     )
 
                 # Refit policy, temporarily pausing ongoing rollouts mid-generation.
