@@ -28,7 +28,7 @@ def pack_sequences(
     """
     # Handle empty list of documents.
     if len(documents) == 0:
-        return [{k: [] for k in separator_value.keys()}] * num_bins, []
+        return [{k: [] for k in separator_value}] * num_bins, []
 
     if doc_priorities is not None and len(doc_priorities) != len(documents):
         raise ValueError(f"doc_priorities length ({len(doc_priorities)}) must match documents length ({len(documents)})")

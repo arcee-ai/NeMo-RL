@@ -1,24 +1,19 @@
 """RL trainer."""
-from datetime import datetime
-from rlkit.config.policy import PolicyConfig
-from rlkit.config.rl import EnvironmentConfig
-from rlkit.config.checkpointing import CheckpointingConfig
-from rlkit.config.logging import LoggingConfig
-from rlkit.config.policy.loss import ClippedPGLossConfig, CISPOLossConfig
-from rlkit.config.rl import RLConfig
-
 import asyncio
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, TypedDict, TypeVar, cast
+from typing import Any, TypedDict, TypeVar, cast
 
-from datasets import Dataset
 import numpy as np
 import openai
-from openai.types.chat.chat_completion import ChatCompletion
 import ray
 import torch
+import verifiers as vf
+from datasets import Dataset
+from openai.types.chat.chat_completion import ChatCompletion
+from rich.console import Console
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -27,6 +22,11 @@ from rlkit.algorithms.loss_functions import (
     CISPOLossFn,
     ClippedPGLossFn,
 )
+from rlkit.config.checkpointing import CheckpointingConfig
+from rlkit.config.logging import LoggingConfig
+from rlkit.config.policy import PolicyConfig
+from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig
+from rlkit.config.rl import EnvironmentConfig, RLConfig
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http_generation import VllmHttpGeneration
@@ -36,9 +36,6 @@ from rlkit.utils.logger import (
     Logger,
 )
 from rlkit.utils.timer import Timer
-from rich.console import Console
-
-import verifiers as vf
 
 # ===============================================================================
 # Configuration
@@ -187,11 +184,11 @@ class GRPOTrainer:
 
     def _setup_checkpointing(
         self, checkpointing_config: CheckpointingConfig
-    ) -> tuple[CheckpointManager, GRPOSaveState, Optional[str]]:
+    ) -> tuple[CheckpointManager, GRPOSaveState, str | None]:
         checkpointer = CheckpointManager(checkpointing_config)
         last_checkpoint_path = checkpointer.get_latest_checkpoint_path()
         grpo_save_state = cast(
-            Optional[GRPOSaveState],
+            GRPOSaveState | None,
             checkpointer.load_training_info(last_checkpoint_path),
         )
         if grpo_save_state is None:
@@ -202,7 +199,7 @@ class GRPOTrainer:
         self,
         dataset: Dataset,
         env_config: EnvironmentConfig,
-        last_checkpoint_path: Optional[str],
+        last_checkpoint_path: str | None,
     ) -> StatefulDataLoader:
         dataloader = StatefulDataLoader(
             dataset, # type: ignore[arg-type]

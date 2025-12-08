@@ -1,11 +1,10 @@
 """Single-node vLLM HTTP server."""
-from typing import Literal
 import asyncio
-from typing import Optional
+from typing import Literal
 
-from fastapi import FastAPI
 import ray
 import uvicorn
+from fastapi import FastAPI
 
 
 @ray.remote(num_cpus=1)
@@ -20,7 +19,7 @@ class VLLMOpenAIServe:
         max_model_len: int = 8192,
         gpu_memory_utilization: float = 0.7,
         data_parallel_size: int = 1,
-        extra_cli_args: Optional[list[str]] = None,
+        extra_cli_args: list[str] | None = None,
         worker_extension_cls: str = "rlkit.inference.worker_ext.VllmHttpWorkerExtension",
         tool_call_parser: str | None = None,
     ):
@@ -46,8 +45,8 @@ class VLLMOpenAIServe:
         if extra_cli_args:
             args += extra_cli_args
 
-        from vllm.utils.argparse_utils import FlexibleArgumentParser
         from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
 
         parser = FlexibleArgumentParser(description="vLLM OAI app for Ray Serve")
         parser = make_arg_parser(parser)
@@ -65,6 +64,8 @@ class VLLMOpenAIServe:
         from vllm.engine.arg_utils import AsyncEngineArgs
         from vllm.entrypoints.openai.api_server import (
             build_app as build_vllm_app,
+        )
+        from vllm.entrypoints.openai.api_server import (
             build_async_engine_client_from_engine_args,
             init_app_state,
         )

@@ -3,15 +3,15 @@ from transformers import PretrainedConfig
 
 from rlkit.models import BaseModel, BaseModelArgs
 
+from .afmoe.args import AFMoEModelArgs
+from .afmoe.args import MoEArgs as MoEArgsAFMoE
 from .afmoe.model import AFMoEModel
-from .afmoe.args import AFMoEModelArgs, MoEArgs as MoEArgsAFMoE
 from .afmoe.state_dict_adapter import AFMoEStateDictAdapter
-
-from .qwen3.model import Qwen3Model
 from .qwen3.args import Qwen3ModelArgs
+from .qwen3.model import Qwen3Model
 from .qwen3.state_dict_adapter import Qwen3StateDictAdapter
-
 from .state_dict_adapter import BaseStateDictAdapter
+
 
 def get_model_config(config: PretrainedConfig) -> tuple[type[BaseModel], BaseModelArgs, type[BaseStateDictAdapter]]:
     """Get the model class, native model arguments, and state dict adapter class for a given HuggingFace config."""

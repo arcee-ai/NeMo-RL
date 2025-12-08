@@ -1,5 +1,4 @@
 """vLLM server coordinator."""
-from rlkit.config.policy import PolicyConfig
 import os
 import sys
 import time
@@ -7,11 +6,11 @@ from typing import Any
 
 import openai
 import ray
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
+from rlkit.config.policy import PolicyConfig
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http import VLLMOpenAIServe
-
-from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 
 class VllmHttpGeneration:

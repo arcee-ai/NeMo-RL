@@ -15,20 +15,20 @@
 """Checkpoint management utilities for HF models."""
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 import torch
-import torch.nn as nn
 import torch.distributed.checkpoint as dcp
+import torch.nn as nn
 from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
     get_model_state_dict,
     get_optimizer_state_dict,
     set_model_state_dict,
     set_optimizer_state_dict,
 )
 from torch.distributed.checkpoint.stateful import Stateful
-from torch.distributed.checkpoint.state_dict import StateDictOptions
 from torch.optim import Optimizer
 from transformers import AutoConfig, AutoTokenizer
 
@@ -92,7 +92,7 @@ class OptimizerState(Stateful):
         self,
         model: nn.Module,
         optimizer: Optimizer,
-        scheduler: Optional[Any] = None,
+        scheduler: Any | None = None,
     ):
         """Initialize the optimizer state."""
         self.model = model
@@ -143,11 +143,11 @@ class OptimizerState(Stateful):
 def save_checkpoint(
     model: nn.Module,
     weights_path: str,
-    optimizer: Optional[Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    optimizer_path: Optional[str] = None,
-    tokenizer: Optional[Any] = None,
-    tokenizer_path: Optional[str] = None,
+    optimizer: Optimizer | None = None,
+    scheduler: Any | None = None,
+    optimizer_path: str | None = None,
+    tokenizer: Any | None = None,
+    tokenizer_path: str | None = None,
 ) -> None:
     """Save a checkpoint of the model and optionally optimizer state.
 
@@ -182,9 +182,9 @@ def save_checkpoint(
 def load_checkpoint(
     model: nn.Module,
     weights_path: str,
-    optimizer: Optional[Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    optimizer_path: Optional[str] = None,
+    optimizer: Optimizer | None = None,
+    scheduler: Any | None = None,
+    optimizer_path: str | None = None,
 ) -> None:
     """Load a model weights and optionally optimizer state.
 

@@ -1,12 +1,13 @@
 """Reimplementation of EnvGroup which only accepts multi-turn environments."""
 
+
 import verifiers as vf
-from typing import Dict, List, Tuple, Union
 from datasets import concatenate_datasets
 from openai import AsyncOpenAI
 
+
 class _MtEnvGroupRubric(vf.Rubric):
-    def __init__(self, env_map: Dict[str, vf.MultiTurnEnv]):
+    def __init__(self, env_map: dict[str, vf.MultiTurnEnv]):
         super().__init__()
         self.env_map = env_map
         names = set()
@@ -14,17 +15,17 @@ class _MtEnvGroupRubric(vf.Rubric):
             names.update(env.rubric.get_reward_func_names())
         self._all_reward_names = sorted(list(names))
 
-    def get_reward_func_names(self) -> List[str]:
+    def get_reward_func_names(self) -> list[str]:
         return self._all_reward_names
 
     async def score_rollouts(
         self,
-        prompts: List[vf.Messages],
-        completions: List[vf.Messages],
-        answers: List[str],
-        states: List[vf.State],
-        tasks: List[str],
-        infos: List[vf.Info],
+        prompts: list[vf.Messages],
+        completions: list[vf.Messages],
+        answers: list[str],
+        states: list[vf.State],
+        tasks: list[str],
+        infos: list[vf.Info],
         **kwargs,
     ) -> vf.RolloutScores:
         env = self.env_map.get(tasks[0])
@@ -39,8 +40,8 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
     """Reimplementation of EnvGroup which only accepts multi-turn environments."""
     def __init__(
         self,
-        envs: List[vf.MultiTurnEnv],
-        env_names: List[str] | None = None,
+        envs: list[vf.MultiTurnEnv],
+        env_names: list[str] | None = None,
         message_type: vf.MessageType | None = None,
         max_turns: int | None = None,
         force_overwrite_task: bool = False,
@@ -54,7 +55,7 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         self.env_names = env_names or [f"env_{i}" for i in range(len(envs))]
         if len(self.env_names) != len(self.envs):
             raise ValueError("Number of env_names must match number of envs")
-        self.env_map: Dict[str, vf.MultiTurnEnv] = {
+        self.env_map: dict[str, vf.MultiTurnEnv] = {
             name: env for name, env in zip(self.env_names, self.envs)
         }
 
@@ -128,7 +129,7 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
 
     def env_response(
         self, messages: vf.Messages, state: vf.State, **kwargs
-    ) -> Tuple[vf.Messages, vf.State]:
+    ) -> tuple[vf.Messages, vf.State]:
         """Get the environment response for a given messages and state."""
         task = state.get("task", None)
         assert task is not None, "Could not find task in state."
@@ -139,13 +140,13 @@ class MultiTurnEnvGroup(vf.MultiTurnEnv):
         self,
         client: AsyncOpenAI,
         model: str,
-        prompt: Union[str, List[vf.ChatMessage]],
+        prompt: str | list[vf.ChatMessage],
         answer: str = "",
         task: str = "default",
         info: vf.Info = {},
         sampling_args: vf.SamplingArgs = {},
         **kwargs,
-    ) -> Tuple[Union[str, List[vf.ChatMessage]], vf.State]:
+    ) -> tuple[str | list[vf.ChatMessage], vf.State]:
         """Rollout the environment for a given task."""
         env = self.get_env_for_task(task)
         return await env.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)

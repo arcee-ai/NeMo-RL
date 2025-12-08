@@ -5,11 +5,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
 
-from . import BaseModelArgs
-
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
+
+from . import BaseModelArgs
 
 logger = logging.getLogger()
 

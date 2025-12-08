@@ -12,10 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from rlkit.config.policy import PolicyConfig
 import os
 from collections import defaultdict
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import numpy as np
 import ray
@@ -23,6 +22,7 @@ from ray.util.queue import Queue as RayQueue
 from transformers import PreTrainedTokenizerBase
 
 from rlkit.algorithms.loss_functions import LossFunction
+from rlkit.config.policy import PolicyConfig
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
@@ -39,10 +39,10 @@ class Policy:
         config: PolicyConfig,
         tokenizer: PreTrainedTokenizerBase,
         name_prefix: str = "lm_policy",
-        workers_per_node: Optional[Union[int, list[int]]] = None,
+        workers_per_node: int | list[int] | None = None,
         init_optimizer: bool = True,
-        weights_path: Optional[PathLike] = None,
-        optimizer_path: Optional[PathLike] = None,
+        weights_path: PathLike | None = None,
+        optimizer_path: PathLike | None = None,
         init_reference_model: bool = True,
         use_hf_checkpoint: bool = False,
         use_cut_cross_entropy: bool = False,
@@ -151,7 +151,7 @@ class Policy:
         sharded_data: list[list[dict[str, list[int | float]]]],
         loss_fn: LossFunction,
         pad_values: dict[str, int | float | bool],
-        gbs: Optional[int] = None,
+        gbs: int | None = None,
         eval_mode: bool = False,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function.
@@ -300,8 +300,8 @@ class Policy:
     def save_checkpoint(
         self,
         weights_path: str,
-        optimizer_path: Optional[str] = None,
-        tokenizer_path: Optional[str] = None,
+        optimizer_path: str | None = None,
+        tokenizer_path: str | None = None,
     ) -> None:
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(

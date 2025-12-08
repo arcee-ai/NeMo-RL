@@ -5,21 +5,20 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
 
+from collections.abc import Callable
+from functools import partial
+from typing import Literal
+
 import torch
+from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import (
-    Replicate,
     DTensor,
+    Replicate,
     distribute_module,
 )
-from torch.distributed.device_mesh import DeviceMesh
-from torch import nn
-from functools import partial
-from typing import Callable, Literal, Optional
-from torch.distributed.tensor.parallel import ParallelStyle
+from torch.distributed.tensor.parallel import ParallelStyle, PrepareModuleInput, PrepareModuleOutput
 from torch.distributed.tensor.placement_types import Placement
-from torch.distributed.tensor.parallel import PrepareModuleInput, PrepareModuleOutput
-
-from typing import Union
 
 from .moe_indices import generate_permute_indices
 
@@ -44,7 +43,7 @@ def _permute(x, num_tokens_per_expert, ep_degree, num_local_experts, token_group
             TOKEN_GROUP_ALIGN_SIZE_M,
         )
 
-    x = torch.vstack((x, x.new_zeros((x.shape[-1]))))
+    x = torch.vstack((x, x.new_zeros(x.shape[-1])))
     input_shape = x.shape
     x = x[permuted_indices, :]
 
@@ -213,15 +212,13 @@ class PrepareModuleInputOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
-        desired_input_layouts: Optional[
-            Union[Placement, tuple[Optional[Placement]]]
-        ] = None,
-        input_kwarg_layouts: Optional[dict[str, Placement]] = None,
-        desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        input_layouts: Placement | tuple[Placement | None] | None = None,
+        desired_input_layouts: Placement | tuple[Placement | None] | None = None,
+        input_kwarg_layouts: dict[str, Placement] | None = None,
+        desired_input_kwarg_layouts: dict[str, Placement] | None = None,
         use_local_input: bool = False,
-        output_layouts: Union[Placement, tuple[Placement]],
-        desired_output_layouts: Union[Placement, tuple[Placement]],
+        output_layouts: Placement | tuple[Placement],
+        desired_output_layouts: Placement | tuple[Placement],
         use_local_output: bool = True,
     ):
         """Initialize PrepareModuleInputOutput."""

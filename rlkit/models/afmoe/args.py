@@ -1,9 +1,9 @@
 """Arguments for an AFMoE model."""
 from dataclasses import dataclass, field
-from typing_extensions import Literal
-
+from typing import Literal
 
 from rlkit.models import BaseModelArgs
+
 
 @dataclass
 class MoEArgs:

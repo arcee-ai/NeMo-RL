@@ -6,10 +6,10 @@ import tempfile
 from typing import Any
 
 import torch
-from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
+from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from rlkit.models.convert import get_model_config
-from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 
 
 def _resolve_dcp_path(dcp_path: str) -> str:

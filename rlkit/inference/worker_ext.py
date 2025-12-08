@@ -1,9 +1,9 @@
 # pyrefly: ignore-errors
 """vLLM worker extension."""
 
-from collections import defaultdict
-from typing import Any, Optional
 import asyncio
+from collections import defaultdict
+from typing import Any
 
 import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
@@ -38,7 +38,7 @@ class VllmHttpWorkerExtension:
         return get_device_uuid(self.device.index)
 
     def prepare_refit_info(
-        self, state_dict_info: Optional[dict[str, Any]] = None
+        self, state_dict_info: dict[str, Any] | None = None
     ) -> None:
         """Prepare the info for refit.
 

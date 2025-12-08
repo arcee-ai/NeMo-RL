@@ -10,16 +10,22 @@
 
 
 import torch
-from torch.nn.attention.flex_attention import BlockMask, and_masks
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.attention.flex_attention import BlockMask, and_masks
 
-from rlkit.models.attention import (AttentionMasksType,
-                                    FlexAttentionWrapper, ScaledDotProductAttentionWrapper,
-                                    create_attention_mask, get_causal_mask_mod, get_document_mask_mod)
+from rlkit.models import BaseModel
+from rlkit.models.attention import (
+    AttentionMasksType,
+    FlexAttentionWrapper,
+    ScaledDotProductAttentionWrapper,
+    create_attention_mask,
+    get_causal_mask_mod,
+    get_document_mask_mod,
+)
 
 from .args import Qwen3ModelArgs
-from rlkit.models import BaseModel
+
 
 def precompute_rope_cache(
     dim: int, max_seq_len: int, base: float = 1_000_000.0

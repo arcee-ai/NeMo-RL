@@ -13,16 +13,17 @@ from torch.distributed._functional_collectives import (
 )
 from torch.distributed.tensor import (
     DeviceMesh,
-    distribute_module,
-    distribute_tensor,
     DTensor,
     Partial,
     Replicate,
     Shard,
+    distribute_module,
+    distribute_tensor,
 )
 from torch.distributed.tensor.parallel import ParallelStyle
 
 from .utils import _permute, _unpermute
+
 
 class TensorParallel(ParallelStyle):
     """Tensor parallel for the GroupedExperts in MoE."""

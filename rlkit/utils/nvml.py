@@ -14,13 +14,13 @@
 # limitations under the License.
 import contextlib
 import os
-from typing import Generator
+from collections.abc import Generator
 
 import pynvml
 
 
 @contextlib.contextmanager
-def nvml_context() -> Generator[None, None, None]:
+def nvml_context() -> Generator[None]:
     """Context manager for NVML initialization and shutdown.
 
     Raises:

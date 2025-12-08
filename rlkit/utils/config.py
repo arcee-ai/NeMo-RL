@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from pathlib import Path
-from typing import Optional, Union, cast
+from typing import cast
 
 from hydra._internal.config_loader_impl import ConfigLoaderImpl
 from hydra.core.override_parser.overrides_parser import OverridesParser
@@ -29,8 +29,8 @@ def resolve_path(base_path: Path, path: str) -> Path:
 
 
 def load_config_with_inheritance(
-    config_path: Union[str, Path],
-    base_dir: Optional[Union[str, Path]] = None,
+    config_path: str | Path,
+    base_dir: str | Path | None = None,
 ) -> DictConfig:
     """Load a config file with inheritance support.
 
@@ -72,7 +72,7 @@ def load_config_with_inheritance(
     return config
 
 
-def load_config(config_path: Union[str, Path]) -> DictConfig:
+def load_config(config_path: str | Path) -> DictConfig:
     """Load a config file with inheritance support and convert it to an OmegaConf object.
 
     The config inheritance system supports:

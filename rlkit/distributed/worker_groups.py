@@ -15,10 +15,10 @@
 import asyncio
 import importlib
 import os
+import sys
 from copy import deepcopy
 from dataclasses import dataclass
-import sys
-from typing import Any, Optional, Union
+from typing import Any
 
 import ray
 from ray.util.placement_group import PlacementGroup
@@ -34,8 +34,8 @@ class MultiWorkerFuture:
     """Container for Ray futures with associated worker information."""
 
     futures: list[ray.ObjectRef]
-    return_from_workers: Optional[list[int]] = None
-    called_workers: Optional[list[int]] = None
+    return_from_workers: list[int] | None = None
+    called_workers: list[int] | None = None
 
     def get_results(
         self, worker_group: "RayWorkerGroup", return_generators_as_proxies: bool = False
@@ -123,8 +123,8 @@ class RayWorkerBuilder:
             placement_group: PlacementGroup,
             placement_group_bundle_index: int,
             num_gpus: int,
-            bundle_indices: Optional[tuple] = None,
-            **extra_options: Optional[dict[str, Any]],
+            bundle_indices: tuple | None = None,
+            **extra_options: dict[str, Any] | None,
         ):
             """Create a Ray worker with the specified configuration.
 
@@ -202,7 +202,7 @@ class RayWorkerBuilder:
         placement_group: PlacementGroup,
         placement_group_bundle_index: int,
         num_gpus: float | int,
-        bundle_indices: Optional[tuple[int, list[int]]] = None,
+        bundle_indices: tuple[int, list[int]] | None = None,
         **extra_options: Any,
     ) -> tuple[ray.ObjectRef, ray.actor.ActorHandle]:
         """Create a Ray worker asynchronously, returning futures.
@@ -244,7 +244,7 @@ class RayWorkerBuilder:
         placement_group: PlacementGroup,
         placement_group_bundle_index: int,
         num_gpus: float | int,
-        bundle_indices: Optional[tuple[int, list[int]]] = None,
+        bundle_indices: tuple[int, list[int]] | None = None,
         **extra_options: Any,
     ) -> ray.actor.ActorHandle:
         """Create a Ray worker with the specified configuration.
@@ -300,10 +300,10 @@ class RayWorkerGroup:
         self,
         cluster: RayVirtualCluster,
         remote_worker_builder: RayWorkerBuilder,
-        workers_per_node: Optional[Union[int, list[int]]] = None,
+        workers_per_node: int | list[int] | None = None,
         name_prefix: str = "",
-        bundle_indices_list: Optional[list[tuple[int, list[int]]]] = None,
-        sharding_annotations: Optional[NamedSharding] = None,
+        bundle_indices_list: list[tuple[int, list[int]]] | None = None,
+        sharding_annotations: NamedSharding | None = None,
         env_vars: dict[str, str] = {},
     ):
         """Initialize a group of distributed Ray workers.
@@ -587,7 +587,7 @@ class RayWorkerGroup:
         method_name: str,
         *args,
         run_rank_0_only_axes: list[str] | None = None,
-        common_kwargs: Optional[dict[str, Any]] = None,
+        common_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> list[ray.ObjectRef]:
         """Run a method on all workers in parallel with different data.
@@ -734,7 +734,7 @@ class RayWorkerGroup:
         replicate_on_axes: list[str] | None = None,
         output_is_replicated: list[str] | None = None,
         make_dummy_calls_to_free_axes: bool = False,
-        common_kwargs: Optional[dict[str, Any]] = None,
+        common_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> MultiWorkerFuture:
         """Run a method on all workers in parallel with sharded data.
@@ -847,7 +847,7 @@ class RayWorkerGroup:
                 if make_dummy_calls_to_free_axes:
                     # If make_dummy_calls_to_free_axes is True, just call the method with None
                     worker_args = [None] * len(args)
-                    worker_kwargs = {key: None for key in kwargs.keys()}
+                    worker_kwargs = dict.fromkeys(kwargs.keys())
                     future = getattr(worker, method_name).remote(
                         *worker_args, **worker_kwargs, **common_kwargs
                     )
@@ -935,8 +935,8 @@ class RayWorkerGroup:
 
     def shutdown(
         self,
-        cleanup_method: Optional[str] = None,
-        timeout: Optional[float] = 30.0,
+        cleanup_method: str | None = None,
+        timeout: float | None = 30.0,
         force: bool = False,
     ) -> bool:
         """Shutdown all workers in the worker group.

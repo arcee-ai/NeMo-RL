@@ -15,7 +15,6 @@
 import logging
 import os
 import time
-from typing import Optional
 
 import ray
 from ray.util.placement_group import (
@@ -48,7 +47,7 @@ def _get_node_ip_and_free_port() -> tuple[str, int]:
     return node_ip, port
 
 
-def init_ray(log_dir: Optional[str] = None) -> None:
+def init_ray(log_dir: str | None = None) -> None:
     """Initialise Ray.
 
     Try to attach to an existing local cluster.
@@ -174,7 +173,7 @@ class RayVirtualCluster:
         """
         self._bundle_ct_per_node_list = bundle_ct_per_node_list
         self._world_size = sum(self._bundle_ct_per_node_list)
-        self._node_placement_groups: Optional[list[PlacementGroup]] = None
+        self._node_placement_groups: list[PlacementGroup] | None = None
 
         self.num_gpus_per_node = num_gpus_per_node
         self.use_gpus = use_gpus

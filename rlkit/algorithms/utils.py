@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import random
-from typing import Optional
 
 import numpy as np
 import torch
 import torch.cuda
+
 
 def _pad_tensor(
     tensor: torch.Tensor,
@@ -68,8 +68,8 @@ def calculate_kl_penalty_joschu2020(
 def masked_mean(
     values: torch.Tensor,
     mask: torch.Tensor,
-    dim: Optional[int] = None,
-    global_normalization_factor: Optional[torch.Tensor | float] = None,
+    dim: int | None = None,
+    global_normalization_factor: torch.Tensor | float | None = None,
 ):
     """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
     normalization_factor = (

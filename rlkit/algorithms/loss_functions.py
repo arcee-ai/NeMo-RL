@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import abstractmethod
-from typing import Any, TypedDict, TypeVar, Protocol
+from typing import Any, Protocol, TypedDict, TypeVar
 
 import torch
 from torch.distributed.tensor import DTensor
@@ -160,7 +160,7 @@ class ClippedPGLossFn(LossFunction):
             reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
         else:
             reference_policy_logprobs = None
-        seq_index = data.get("seq_index", None)
+        seq_index = data.get("seq_index")
 
         if isinstance(next_token_logits, DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
@@ -385,7 +385,7 @@ class CISPOLossFn(LossFunction):
             reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
         else:
             reference_policy_logprobs = None
-        seq_index = data.get("seq_index", None)
+        seq_index = data.get("seq_index")
 
         # Get current policy logprobs
         if isinstance(next_token_logits, DTensor):
@@ -547,7 +547,7 @@ class NLLLoss(LossFunction):
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         mask = data["token_mask"][:, 1:]
-        seq_index = data.get("seq_index", None)
+        seq_index = data.get("seq_index")
 
         # Gather the logprobs for the actual next tokens
         if isinstance(next_token_logits, DTensor):

@@ -5,11 +5,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
 
-import re
 import logging
+import re
 from typing import Any
 
 from rlkit.models.state_dict_adapter import BaseStateDictAdapter
+
 from .args import Qwen3ModelArgs
 
 

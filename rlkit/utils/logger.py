@@ -23,7 +23,8 @@ import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Mapping, Optional, TypedDict
+from collections.abc import Callable, Mapping
+from typing import Any, Optional, TypedDict
 
 import ray
 import requests
@@ -51,8 +52,8 @@ class LoggerInterface(ABC):
         self,
         metrics: dict[str, Any],
         step: int,
-        prefix: Optional[str] = "",
-        step_metric: Optional[str] = None,
+        prefix: str | None = "",
+        step_metric: str | None = None,
     ) -> None:
         """Log a dictionary of metrics."""
         pass
@@ -65,7 +66,7 @@ class LoggerInterface(ABC):
 class WandbLogger(LoggerInterface):
     """Weights & Biases logger backend."""
 
-    def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None):
+    def __init__(self, cfg: WandbConfig, log_dir: str | None = None):
         """Initialize the Weights & Biases logger."""
         self.run = wandb.init(project=cfg.project, name=cfg.name, dir=log_dir)
         self._log_code()
@@ -185,7 +186,7 @@ class WandbLogger(LoggerInterface):
     def define_metric(
         self,
         name: str,
-        step_metric: Optional[str] = None,
+        step_metric: str | None = None,
     ) -> None:
         """Define a metric with custom step metric.
 
@@ -199,8 +200,8 @@ class WandbLogger(LoggerInterface):
         self,
         metrics: dict[str, Any],
         step: int,
-        prefix: Optional[str] = "",
-        step_metric: Optional[str] = None,
+        prefix: str | None = "",
+        step_metric: str | None = None,
     ) -> None:
         """Log metrics to wandb.
 
@@ -372,7 +373,7 @@ class RayGpuMonitorLogger:
         ] = []  # Store metrics with timestamps
         self.last_flush_time = time.time()
         self.is_running = False
-        self.collection_thread: Optional[threading.Thread] = None
+        self.collection_thread: threading.Thread | None = None
         self.lock = threading.Lock()
         self.start_time: float = float("-inf")
 
@@ -689,8 +690,8 @@ class Logger(LoggerInterface):
         self,
         metrics: dict[str, Any],
         step: int,
-        prefix: Optional[str] = "",
-        step_metric: Optional[str] = None,
+        prefix: str | None = "",
+        step_metric: str | None = None,
     ) -> None:
         """Log metrics to all enabled backends.
 

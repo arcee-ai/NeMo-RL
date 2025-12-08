@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import torch
 import torch.cuda
@@ -22,7 +22,7 @@ T = TypeVar("T")
 
 
 def rebalance_nd_tensor(
-    tensor: torch.Tensor, group: Optional[torch.distributed.ProcessGroup] = None
+    tensor: torch.Tensor, group: torch.distributed.ProcessGroup | None = None
 ) -> torch.Tensor:
     """Takes tensors with variable leading sizes (at dim=0) and stacks them into a single tensor.
 
@@ -69,7 +69,7 @@ def rebalance_nd_tensor(
 
 
 def gather_jagged_object_lists(
-    local_objects: list[T], group: Optional[torch.distributed.ProcessGroup] = None
+    local_objects: list[T], group: torch.distributed.ProcessGroup | None = None
 ) -> list[T]:
     """Gathers jagged lists of picklable objects from all ranks and flattens them into a single list.
 

@@ -12,13 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from rlkit.config.sft import DatasetType
 import json
-from typing import Callable, Any, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import torch
 from datasets import Dataset
 from transformers import PreTrainedTokenizerBase
+
+from rlkit.config.sft import DatasetType
 
 TokenizerType = PreTrainedTokenizerBase
 
@@ -37,7 +39,7 @@ def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
     if not has_assistant_messages:
         raise ValueError("No assistant messages found in the conversation!")
 
-    oai_tools = x.get("oai_tools", None)
+    oai_tools = x.get("oai_tools")
     if isinstance(oai_tools, str):
         oai_tools = json.loads(oai_tools)
 

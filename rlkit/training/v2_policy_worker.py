@@ -13,18 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Literal
 import gc
+import logging
 import os
+import re
 from collections import defaultdict
 from contextlib import AbstractContextManager, nullcontext
-import re
-from typing import Any, Optional, TypedDict, Union, cast
-import logging
+from typing import Any, Literal, TypedDict, cast
 
 import ray
 import torch
 from accelerate import init_empty_weights
+from torch.distributed._tensor import distribute_tensor
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_model_state_dict,
@@ -33,23 +33,26 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.device_mesh import DeviceMesh
-from torch.distributed._tensor import distribute_tensor
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     PreTrainedTokenizerBase,
 )
+
 from rlkit.algorithms.loss_functions import LossFunction
-from rlkit.algorithms.utils import masked_mean, _pad_tensor
+from rlkit.algorithms.utils import _pad_tensor, masked_mean
 from rlkit.config.policy import PolicyConfig
 from rlkit.models import BaseModel
+from rlkit.models.convert import get_model_config
+from rlkit.models.parallelize import parallelize_model
+from rlkit.models.state_dict_adapter import BaseStateDictAdapter
 from rlkit.training.utils import (
+    clip_grad_by_total_norm_,
     configure_dynamo_cache,
     configure_expandable_segments,
     get_gpu_info,
-    import_class_by_name,
-    clip_grad_by_total_norm_,
     get_grad_norm,
+    import_class_by_name,
     sliding_window_overwrite,
     to_local_if_dtensor,
 )
@@ -58,9 +61,6 @@ from rlkit.utils.native_checkpoint import (
     save_checkpoint,
 )
 
-from rlkit.models.convert import get_model_config
-from rlkit.models.parallelize import parallelize_model
-from rlkit.models.state_dict_adapter import BaseStateDictAdapter
 from .utils import get_device_mesh_info
 
 
@@ -132,8 +132,8 @@ class DTensorV2PolicyWorker:
         self,
         config: PolicyConfig,
         tokenizer: PreTrainedTokenizerBase,
-        weights_path: Optional[str] = None,
-        optimizer_path: Optional[str] = None,
+        weights_path: str | None = None,
+        optimizer_path: str | None = None,
         use_hf_checkpoint: bool = False,
         use_cut_cross_entropy: bool = False,
         **kwargs: Any,
@@ -424,9 +424,7 @@ class DTensorV2PolicyWorker:
         self.refit_param_info = None
 
         # Used for streaming refits
-        self._refit_metadata: Optional[
-            dict[str, dict[str, Any]]
-        ] = None
+        self._refit_metadata: dict[str, dict[str, Any]] | None = None
 
     def _build_forward_kwargs(self, input_ids: torch.Tensor) -> dict[str, Any]:
         """Build keyword arguments for the model forward pass.
@@ -443,7 +441,7 @@ class DTensorV2PolicyWorker:
         attention_masks = self.model.get_attention_masks(input_ids, int(self.tokenizer.pad_token_id)) # type: ignore[arg-type]
         return {"tokens": input_ids, "attention_masks": attention_masks}
 
-    def _export_state_dict(self) -> dict[str, Union[torch.Tensor, DTensor]]:
+    def _export_state_dict(self) -> dict[str, torch.Tensor | DTensor]:
         """Export the current model state dictionary in the HuggingFace format."""
         return self.adapter.to_hf(self.model.state_dict())
 
@@ -466,8 +464,8 @@ class DTensorV2PolicyWorker:
 
     def init_collective(self, ip: str, port: int, world_size: int) -> None:
         """Initialize collective communication with vLLM training workers."""
-        from vllm.distributed.utils import StatelessProcessGroup
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+        from vllm.distributed.utils import StatelessProcessGroup
 
         if self.rank == 0:
             logging.info(f"Initializing collective communication on trainer using PyNCCL (rank {self.rank}, world_size {world_size})")
@@ -497,7 +495,7 @@ class DTensorV2PolicyWorker:
         data: list[PackedSample],
         loss_fn: LossFunction,
         pad_values: dict[str, int | float | bool],
-        gbs: Optional[int] = None,
+        gbs: int | None = None,
         eval_mode: bool = False,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function.
@@ -638,7 +636,7 @@ class DTensorV2PolicyWorker:
                 all_mb_metrics.append(loss_metrics)
 
             # Full batch finished, compute and maybe clip grad norm.
-            grad_norm: Optional[float | torch.Tensor] = None
+            grad_norm: float | torch.Tensor | None = None
             if not eval_mode:
                 with torch.no_grad():
                     grad_norm = get_grad_norm(
@@ -859,8 +857,8 @@ class DTensorV2PolicyWorker:
     def save_checkpoint(
         self,
         weights_path: str,
-        optimizer_path: Optional[str] = None,
-        tokenizer_path: Optional[str] = None
+        optimizer_path: str | None = None,
+        tokenizer_path: str | None = None
     ) -> None:
         """Save a checkpoint of the model.
 
@@ -877,8 +875,8 @@ class DTensorV2PolicyWorker:
             )
             model_state = cast(dict[str, Any], _materialize_state_to_cpu(model_state))
 
-            optimizer_state: Optional[dict[str, Any]] = None
-            scheduler_state: Optional[dict[str, Any]] = None
+            optimizer_state: dict[str, Any] | None = None
+            scheduler_state: dict[str, Any] | None = None
             if optimizer_path is not None and self.optimizer is not None:
                 optimizer_state = get_optimizer_state_dict(
                     self.model,
@@ -899,13 +897,13 @@ class DTensorV2PolicyWorker:
                 return
 
             os.makedirs(weights_path, exist_ok=True)
-            optimizer_file_path: Optional[str] = None
+            optimizer_file_path: str | None = None
             if optimizer_path is not None:
                 optimizer_file_path = _resolve_checkpoint_file_path(
                     optimizer_path,
                     "optimizer.pt",
                 )
-            tokenizer_save_path: Optional[str] = None
+            tokenizer_save_path: str | None = None
             if tokenizer_path is not None:
                 tokenizer_save_path = os.path.abspath(tokenizer_path)
                 os.makedirs(tokenizer_save_path, exist_ok=True)
@@ -947,7 +945,7 @@ class DTensorV2PolicyWorker:
     def load_dcp_checkpoint(
         self,
         weights_path: str,
-        optimizer_path: Optional[str] = None,
+        optimizer_path: str | None = None,
     ) -> None:
         """Load a checkpoint into the model."""
         load_checkpoint(

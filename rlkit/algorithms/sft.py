@@ -16,11 +16,11 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Any, NotRequired, Optional, TypedDict, cast
+from typing import Any, NotRequired, TypedDict, cast
 
-from datasets import Dataset
 import numpy as np
 import torch
+from datasets import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizerBase
 
@@ -29,12 +29,14 @@ from rlkit.algorithms.loss_functions import (
 )
 from rlkit.algorithms.utils import set_seed
 from rlkit.config import (
-    ClusterConfig,
     CheckpointingConfig,
+    ClusterConfig,
     DataConfig,
     LoggerConfig,
     PolicyConfig,
     SFTTrainerConfig,
+)
+from rlkit.config import (
     SFTMasterConfig as MasterConfig,
 )
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
@@ -71,7 +73,7 @@ class SFTTrainer:
         master_config: MasterConfig,
         tokenizer: PreTrainedTokenizerBase,
         train_dataset: Dataset,
-        val_dataset: Optional[Dataset]
+        val_dataset: Dataset | None
     ) -> None:
         """Initialize the SFT trainer."""
         self.master_config = master_config
@@ -134,11 +136,11 @@ class SFTTrainer:
 
     def _setup_checkpointing(
         self, checkpoint_config: CheckpointingConfig
-    ) -> tuple[CheckpointManager, SFTSaveState, Optional[str]]:
+    ) -> tuple[CheckpointManager, SFTSaveState, str | None]:
         checkpointer = CheckpointManager(checkpoint_config)
         last_checkpoint_path = checkpointer.get_latest_checkpoint_path()
         sft_save_state = cast(
-            Optional[SFTSaveState],
+            SFTSaveState | None,
             checkpointer.load_training_info(last_checkpoint_path),
         )
         if sft_save_state is None:
@@ -148,14 +150,14 @@ class SFTTrainer:
     def _setup_dataloaders(
         self,
         train_dataset: Dataset,
-        val_dataset: Optional[Dataset],
+        val_dataset: Dataset | None,
         data_config: DataConfig,
         policy_config: PolicyConfig,
         sft_config: SFTTrainerConfig,
-        last_checkpoint_path: Optional[str],
+        last_checkpoint_path: str | None,
     ) -> tuple[
         StatefulDataLoader,
-        Optional[StatefulDataLoader],
+        StatefulDataLoader | None,
     ]:
         # Use batch_size=1 so we can pull samples one at a time and pack them
         train_dataloader = StatefulDataLoader(
@@ -173,7 +175,7 @@ class SFTTrainer:
             )
             train_dataloader.load_state_dict(dataloader_state_dict)
 
-        val_dataloader: Optional[StatefulDataLoader] = None
+        val_dataloader: StatefulDataLoader | None = None
         if val_dataset is not None:
             val_dataloader = StatefulDataLoader(
                 val_dataset, # type: ignore[arg-type]
@@ -201,8 +203,8 @@ class SFTTrainer:
         train_cluster: RayVirtualCluster,
         policy_config: PolicyConfig,
         tokenizer: PreTrainedTokenizerBase,
-        weights_path: Optional[Path],
-        optimizer_path: Optional[Path]
+        weights_path: Path | None,
+        optimizer_path: Path | None
     ) -> Policy:
         use_cce = self.master_config["sft"].get("use_cut_cross_entropy", False)
         if use_cce:
@@ -252,7 +254,7 @@ class SFTTrainer:
             "targets": list(input_ids),  # Marker field for SFT detection
         }
 
-    async def validate(self, step: int) -> Optional[tuple[dict[str, float], dict[str, float]]]:
+    async def validate(self, step: int) -> tuple[dict[str, float], dict[str, float]] | None:
         """Run validation on the validation dataset."""
         if self.val_dataloader is None:
             logging.info("No validation dataloader provided, skipping validation")
@@ -535,7 +537,7 @@ class SFTTrainer:
         self,
         step: int,
         consumed_samples: int,
-        val_metrics: Optional[dict[str, float]],
+        val_metrics: dict[str, float] | None,
         timer: Timer,
     ) -> None:
         self.sft_save_state["total_steps"] = step + 1

@@ -21,8 +21,9 @@ import glob
 import json
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -66,7 +67,7 @@ class CheckpointManager:
         self,
         step: int,
         training_info: dict[str, Any],
-        run_config: Optional[Mapping[str, Any]] = None,
+        run_config: Mapping[str, Any] | None = None,
     ) -> PathLike:
         """Initialize a temporary checkpoint directory.
 
@@ -168,7 +169,7 @@ class CheckpointManager:
             )
             shutil.rmtree(checkpoint[1])
 
-    def get_latest_checkpoint_path(self) -> Optional[str]:
+    def get_latest_checkpoint_path(self) -> str | None:
         """Get the path to the latest checkpoint.
 
         Returns the path to the checkpoint with the highest step number.
@@ -184,8 +185,8 @@ class CheckpointManager:
         return str(step_dirs[-1])
 
     def load_training_info(
-        self, checkpoint_path: Optional[PathLike] = None
-    ) -> Optional[dict[str, Any]]:
+        self, checkpoint_path: PathLike | None = None
+    ) -> dict[str, Any] | None:
         """Load the training info from a checkpoint.
 
         Args:
@@ -198,7 +199,7 @@ class CheckpointManager:
         """
         if checkpoint_path is None:
             return None
-        with open(Path(checkpoint_path) / "training_info.json", "r") as f:
+        with open(Path(checkpoint_path) / "training_info.json") as f:
             return json.load(f)
 
 

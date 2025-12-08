@@ -6,23 +6,26 @@
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
 
 
+import logging
+from collections import defaultdict
+from typing import Literal
+
 import torch
 import torch.nn as nn
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
-from torch.distributed.tensor import Partial, Replicate, Shard
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    parallelize_module,
-    PrepareModuleInput,
-    RowwiseParallel,
-    SequenceParallel,
-)
+from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper as ptd_checkpoint_wrapper,
 )
-from torch.distributed._composable.replicate import replicate
-
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy, fully_shard
+from torch.distributed.tensor import Partial, Replicate, Shard
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    PrepareModuleInput,
+    RowwiseParallel,
+    SequenceParallel,
+    parallelize_module,
+)
 
 from .expert_parallel import (
     ExpertParallel,
@@ -31,11 +34,6 @@ from .expert_parallel import (
     TensorParallel,
 )
 from .utils import NoParallel, PrepareModuleInputOutput
-
-
-from collections import defaultdict
-import logging
-from typing import Literal, Optional
 
 
 def is_moe_enabled(module: nn.Module) -> bool:
@@ -59,7 +57,7 @@ def _apply_ac_to_transformer_block(
     ac_mode: Literal["full", "selective"],
     selective_ac_option: str = "2",
     per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] = ["moe.router.gate"],
-    base_fqn: Optional[str] = None
+    base_fqn: str | None = None
 ):
     valid_ac_modes = ("full", "selective")
     if ac_mode not in valid_ac_modes:
@@ -151,7 +149,7 @@ def apply_ac(
     ac_mode: Literal["full", "selective"],
     selective_ac_option: str = "2",
     per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] = ["moe.router.gate"],
-    base_fqn: Optional[str] = None,
+    base_fqn: str | None = None,
 ):
     """Apply activation checkpointing to the model."""
     for layer_id, transformer_block in model.layers.named_children():

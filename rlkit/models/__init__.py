@@ -4,14 +4,14 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE_TORCHTITAN file in the root directory of this source tree.
-from abc import ABC
-from .attention import AttentionMasksType
-
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from torch import nn
 import torch
+from torch import nn
+
+from .attention import AttentionMasksType
+
 
 @dataclass
 class BaseModelArgs(ABC):

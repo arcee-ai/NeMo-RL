@@ -15,7 +15,8 @@
 
 import importlib
 import os
-from typing import Any, Iterable, Optional, Union
+from collections.abc import Iterable
+from typing import Any
 
 import torch
 from torch.distributed.tensor import DTensor
@@ -172,15 +173,15 @@ def configure_dynamo_cache() -> None:
     torch._inductor.config.autotune_local_cache = False # type: ignore[attr-defined]
 
 
-def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
+def to_local_if_dtensor(tensor: torch.Tensor | DTensor) -> torch.Tensor:
     """Return the local shard of a DTensor, or the tensor itself if already local."""
     with torch.no_grad():
         return tensor.to_local() if isinstance(tensor, DTensor) else tensor
 
 
 def clip_grad_by_total_norm_(
-    parameters: Union[Iterable[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
-    max_grad_norm: Union[int, float],
+    parameters: Iterable[torch.Tensor | DTensor] | torch.Tensor | DTensor,
+    max_grad_norm: int | float,
     total_norm: float,
     dtype: torch.dtype = torch.float32,
 ) -> None:
@@ -201,10 +202,10 @@ def clip_grad_by_total_norm_(
 
 
 def get_grad_norm(
-    parameters: Union[Iterable[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
+    parameters: Iterable[torch.Tensor | DTensor] | torch.Tensor | DTensor,
     dp_cp_group: torch.distributed.ProcessGroup,
     tp_group: torch.distributed.ProcessGroup,
-    norm_type: Union[int, float] = 2,
+    norm_type: int | float = 2,
     dtype: torch.dtype = torch.float32,
 ) -> float:
     """Calculate the norm of gradients across DP and TP meshes."""
@@ -252,8 +253,8 @@ def get_grad_norm(
 def get_logprobs_from_vocab_parallel_logits(
     vocab_parallel_logits: DTensor,
     input_ids: torch.Tensor | DTensor,
-    seq_index: Optional[torch.Tensor] = None,
-    chunk_size: Optional[int] = None,
+    seq_index: torch.Tensor | None = None,
+    chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Compute log probabilities from vocabulary-parallel logits."""
     device_mesh = vocab_parallel_logits.device_mesh

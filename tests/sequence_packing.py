@@ -1,6 +1,6 @@
 """Test the sequence packing function."""
 
-from rlkit.data.sequence_packing import pack_sequences, distribute_bins_for_dp
+from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 
 
 def test_pack_sequences():

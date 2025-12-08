@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.distributed.tensor import DTensor
@@ -267,8 +267,8 @@ def dtensor_from_parallel_logits_to_logprobs(
     vocab_end_index: int,
     tp_group: torch.distributed.ProcessGroup,
     inference_only: bool = False,
-    seq_index: Optional[torch.Tensor] = None,
-    chunk_size: Optional[int] = None,
+    seq_index: torch.Tensor | None = None,
+    chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Get log probabilities from TP+CP sharded vocab logits.
 
@@ -321,8 +321,8 @@ def from_parallel_logits_to_logprobs(
     vocab_end_index: int,
     tp_group: torch.distributed.ProcessGroup,
     inference_only: bool = False,
-    cp_group: Optional[torch.distributed.ProcessGroup] = None,
-    chunk_size: Optional[int] = None,
+    cp_group: torch.distributed.ProcessGroup | None = None,
+    chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Get log probabilities from TP+CP sharded vocab logits.
 
@@ -398,8 +398,8 @@ def from_parallel_logits_to_logprobs_packed_sequences(
     vocab_end_index: int,
     group: torch.distributed.ProcessGroup,
     inference_only: bool = False,
-    cp_group: Optional[torch.distributed.ProcessGroup] = None,
-    chunk_size: Optional[int] = None,
+    cp_group: torch.distributed.ProcessGroup | None = None,
+    chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Get log probabilities from TP sharded vocab logits for packed sequences.
 

@@ -2,8 +2,10 @@
 
 import argparse
 import logging
-from datasets import load_dataset, get_dataset_config_names, Dataset
+
+from datasets import Dataset, get_dataset_config_names, load_dataset
 from transformers import AutoTokenizer
+
 from rlkit.config.sft import DatasetType
 from rlkit.data.sft_datasets import transform_dataset
 

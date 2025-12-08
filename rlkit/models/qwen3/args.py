@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from rlkit.models import BaseModelArgs
 
+
 @dataclass
 class Qwen3ModelArgs(BaseModelArgs):
     """Arguments for a Qwen3 model."""

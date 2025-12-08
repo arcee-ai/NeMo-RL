@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import time
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Callable, Generator, Optional, Sequence, Union
 
 import numpy as np
 
@@ -107,7 +107,7 @@ class Timer:
         return elapsed
 
     @contextmanager
-    def time(self, label: str) -> Generator[None, None, None]:
+    def time(self, label: str) -> Generator[None]:
         """Context manager for timing a block of code.
 
         Args:
@@ -194,7 +194,7 @@ class Timer:
         return reduction_func(self._timers[label])
 
     def get_timing_metrics(
-        self, reduction_op: Union[str, dict[str, str]] = "mean"
+        self, reduction_op: str | dict[str, str] = "mean"
     ) -> dict[str, float | list[float]]:
         """Get all timing measurements with optional reduction.
 
@@ -213,7 +213,7 @@ class Timer:
             ValueError: If an invalid reduction operation is provided
         """
         if isinstance(reduction_op, str):
-            reduction_op = {label: reduction_op for label in self._timers}
+            reduction_op = dict.fromkeys(self._timers, reduction_op)
 
         results: dict[str, float | list[float]] = {}
         for label, op in reduction_op.items():
@@ -232,7 +232,7 @@ class Timer:
 
         return results
 
-    def reset(self, label: Optional[str] = None) -> None:
+    def reset(self, label: str | None = None) -> None:
         """Reset timings for the specified label or all labels.
 
         Args:

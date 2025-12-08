@@ -1,12 +1,12 @@
 """Manually compare our custom implementation of a model with the native RLKit implementation."""
-from accelerate import init_empty_weights
+import sys
+
 import torch
 import torch.nn.functional as F
-
-from rlkit.models.convert import get_model_config
+from accelerate import init_empty_weights
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-import sys
+from rlkit.models.convert import get_model_config
 
 model_name = sys.argv[1]
 

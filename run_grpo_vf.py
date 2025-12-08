@@ -6,18 +6,17 @@ import os
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
 
 import argparse
-import pprint
 import asyncio
-import yaml
+import logging
+import pprint
 
 import torch
+import yaml
 
 from rlkit.algorithms.grpo import GRPOTrainer
+from rlkit.config.rl import RLConfig
 from rlkit.distributed.virtual_cluster import init_ray
 from rlkit.utils.logger import get_next_experiment_dir
-from rlkit.config.rl import RLConfig
-
-import logging
 
 # Cope with asyncio spamming console on certain crashes
 logging.getLogger("asyncio").setLevel(logging.ERROR)
@@ -45,7 +44,7 @@ def main() -> None:
     if not args.config:
         raise ValueError("A config file is required. Please specify a config file using the --config argument.")
 
-    with open(args.config, "r") as f:
+    with open(args.config) as f:
         config_unstructured = yaml.load(f, Loader=yaml.FullLoader)
 
     config = RLConfig.model_validate(config_unstructured)
