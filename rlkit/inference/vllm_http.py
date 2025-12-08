@@ -58,7 +58,7 @@ class VLLMOpenAIServe:
 
         # Track engine initialization status
         self._engine_initialized = False
-        asyncio.create_task(self._init_app(worker_extension_cls))
+        self.create_task = asyncio.create_task(self._init_app(worker_extension_cls))
 
     async def _init_app(self, worker_extension_cls: str):
         """Async task to start vLLM HTTP app."""

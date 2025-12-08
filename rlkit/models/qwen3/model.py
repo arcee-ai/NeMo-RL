@@ -429,14 +429,14 @@ class Qwen3Model(BaseModel):
         mask_mods = [get_causal_mask_mod()]
         match self.model_args.attn_mask_type:
             case "causal":
-                B = 1
+                b = 1
             case "block_causal":
-                B = input_batch.shape[0]
+                b = input_batch.shape[0]
                 mask_mods.append(get_document_mask_mod(input_batch, separator_value))
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"
                 )
         return create_attention_mask(
-            and_masks(*mask_mods), B, None, input_batch.shape[1], input_batch.shape[1]
+            and_masks(*mask_mods), b, None, input_batch.shape[1], input_batch.shape[1]
         )

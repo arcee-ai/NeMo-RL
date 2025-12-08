@@ -23,14 +23,14 @@ from torch.nn.attention.flex_attention import (
 
 
 __all__ = [
+    "AttentionMasksType",
     "FlexAttentionWrapper",
     "ScaledDotProductAttentionWrapper",
+    "create_attention_mask",
     "get_causal_mask_mod",
     "get_document_mask_mod",
-    "get_sliding_window_mask_mod",
     "get_fixed_block_mask_mod",
-    "create_attention_mask",
-    "AttentionMasksType",
+    "get_sliding_window_mask_mod",
 ]
 
 AttentionMasksType = dict[str, BlockMask] | BlockMask

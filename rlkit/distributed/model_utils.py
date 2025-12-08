@@ -109,17 +109,17 @@ class DistributedLogprob(torch.autograd.Function):
         softmax, target_mask, masked_target = ctx.saved_tensors
 
         if softmax.ndim == 3:
-            B, S, V = softmax.shape
+            b, s, v = softmax.shape
 
             # skip `torch.nn.functional.one_hot`
             row = (
-                torch.arange(B, device=softmax.device)
+                torch.arange(b, device=softmax.device)
                 .view(-1, 1)
-                .expand(-1, S)
+                .expand(-1, s)
                 .reshape(-1)
             )
-            col = torch.arange(S, device=softmax.device).expand(B, -1).reshape(-1)
-            flat_idx = (row * S + col) * V
+            col = torch.arange(s, device=softmax.device).expand(b, -1).reshape(-1)
+            flat_idx = (row * s + col) * v
 
             flat_chosen = flat_idx.masked_select(
                 ~target_mask.reshape(-1)
@@ -132,9 +132,9 @@ class DistributedLogprob(torch.autograd.Function):
             grad_output_selected = grad_output.masked_select(~target_mask)
             grad_input.view(-1).scatter_add_(0, flat_chosen, grad_output_selected)
         else:
-            V = softmax.size(-1)
+            v = softmax.size(-1)
             is_chosen = (~target_mask).unsqueeze(-1) * torch.nn.functional.one_hot(
-                masked_target, num_classes=V
+                masked_target, num_classes=v
             )
             grad_input = is_chosen.float().sub_(softmax)
             grad_input.mul_(grad_output.unsqueeze(-1))
@@ -561,7 +561,9 @@ def allgather_cp_sharded_tensor(
 
 class AllGatherCPTensor(torch.autograd.Function):
     """Custom autograd function for allgather_cp_sharded_tensor."""
-    def forward(
+
+    @staticmethod
+    def forward(  # pyrefly: ignore[bad-override]
         ctx, tensor, cp_group: torch.distributed.ProcessGroup, seq_dim=1
     ):  # , unpadded_seqlen: Optional[int] = None):
         """Forward pass for allgather_cp_sharded_tensor."""
@@ -595,7 +597,8 @@ class AllGatherCPTensor(torch.autograd.Function):
 
         return ret_tensor
 
-    def backward(ctx, grad_output): # type: ignore[override]
+    @staticmethod
+    def backward(ctx, grad_output):  # type: ignore[override]
         """Backward pass for allgather_cp_sharded_tensor."""
         cp_size = torch.distributed.get_world_size(ctx.cp_group)
         cp_rank = torch.distributed.get_rank(ctx.cp_group)

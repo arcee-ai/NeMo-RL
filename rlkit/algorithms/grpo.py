@@ -234,7 +234,7 @@ class GRPOTrainer:
 
         max_prompt_tokens = int(policy_config.max_total_sequence_length * env_config.max_prompt_length_ratio)
 
-        def keepBatch(batch):
+        def keep_batch(batch):
             texts = batch.get("prompt")
             if texts is None:
                 # Try "question" as a fallback.
@@ -258,7 +258,7 @@ class GRPOTrainer:
             return [batch for i, batch in enumerate(batch) if len(enc[i]["input_ids"]) <= max_prompt_tokens]
 
         return cast(Dataset, dataset.filter(
-            keepBatch,
+            keep_batch,
             batched=True,
             batch_size=16,
             writer_batch_size=16,
@@ -382,6 +382,8 @@ class GRPOTrainer:
 
         # Queue of pending rollout tasks.
         awaiting_packing: asyncio.Queue[QueuedRollout] = asyncio.Queue()
+        # List of in-progress rollout tasks. Not used for anything but necessary for avoiding GC issues.
+        tasks_in_progress: list[asyncio.Task] = []
         # List of rollouts that are waiting to be packed into a batch and trained on.
         packing_pool: list[QueuedRollout] = []
 
@@ -433,9 +435,13 @@ class GRPOTrainer:
                     if example is None:
                         out_of_samples = True
                         break
-                    asyncio.create_task(enqueue_rollout(example[0], step))
+                    task = asyncio.create_task(enqueue_rollout(example[0], step))
+                    tasks_in_progress.append(task)
                     in_flight += self.rollout_config.group_size
                     consumed_samples += 1
+
+                # Clear out references to old tasks.
+                tasks_in_progress = [task for task in tasks_in_progress if not task.done()]
 
                 status.update(get_status_text())
 

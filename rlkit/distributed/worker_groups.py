@@ -87,7 +87,7 @@ class MultiWorkerFuture:
         has_generator = False
         for idx, fut in enumerate(self.futures):
             if isinstance(fut, ObjectRefGenerator):
-                # ray.get cannot be called directly on the generator object – it must be iterated to obtain the individual ObjectRefs
+                # ray.get cannot be called directly on the generator object - it must be iterated to obtain the individual ObjectRefs
                 for generated_ref in fut:
                     object_refs.append(generated_ref)
                     has_generator = True

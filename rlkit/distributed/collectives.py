@@ -51,9 +51,9 @@ def rebalance_nd_tensor(
         batch_num_per_rank, num_samples, group=group
     )
 
-    B = batch_num_per_rank.sum()
+    b = batch_num_per_rank.sum()
     other_dims = tensor.shape[1:]
-    dims = (int(B), *other_dims)
+    dims = (int(b), *other_dims)
 
     indices = batch_num_per_rank.cumsum(dim=0)
     output_tensor = torch.zeros(

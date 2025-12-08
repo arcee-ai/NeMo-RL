@@ -388,10 +388,10 @@ class AFMoEModel(BaseModel):
         mask_mods = [get_causal_mask_mod()]
         match self.model_args.attn_mask_type:
             case "causal":
-                B = 1
+                b = 1
             case "block_causal":
                 mask_mods.append(get_document_mask_mod(input_ids, separator_value))
-                B = input_ids.shape[0]
+                b = input_ids.shape[0]
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"
@@ -405,8 +405,8 @@ class AFMoEModel(BaseModel):
 
         seqlen = input_ids.shape[1]
         return {
-            "full": create_attention_mask(full_mask_mod, B, None, seqlen, seqlen),
-            "swa": create_attention_mask(swa_mask_mod, B, None, seqlen, seqlen),
+            "full": create_attention_mask(full_mask_mod, b, None, seqlen, seqlen),
+            "swa": create_attention_mask(swa_mask_mod, b, None, seqlen, seqlen),
         }
 
     def collect_router_statistics(

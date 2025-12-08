@@ -89,15 +89,35 @@ omit = ["/tmp/*"]
 
 [tool.ruff]
 line-length = 140
-extend-safe-fixes = ["W293"]
 
 [tool.ruff.lint]
 # Enable all `pydocstyle` rules, limiting to those that adhere to the
 # Google convention via `convention = "google"`, below.
-select = ["D", "F", "E", "W"]
+select = [
+    "D",     # pydocstyle
+    "F",     # Pyflakes
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "N",     # pep8-naming
+    "RUF",   # Ruff-specific
+    "B",     # flake8-bugbear (bugs)
+    "UP",    # pyupgrade (modernize)
+    "I",     # isort (imports)
+    "PERF",  # Perflint (performance)
+    "SIM",   # flake8-simplify
+    "C4",    # flake8-comprehensions
+    "PT",    # pytest
+    "PLW",   # pylint warnings
+    "PLE",   # pylint errors
+]
+ignore = ["RUF005", "RUF015"]
+extend-safe-fixes = ["W293"]
 
 # Ignore all lint errors in the examples directory
 exclude = ["examples/**/*.py"]
+
+[tool.ruff.lint.pep8-naming]
+extend-ignore-names = ["F"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

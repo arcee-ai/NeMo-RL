@@ -164,4 +164,4 @@ def parse_hydra_overrides(cfg: DictConfig, overrides: list[str]) -> DictConfig:
         ConfigLoaderImpl._apply_overrides_to_config(overrides=parsed, cfg=cfg)
         return cfg
     except Exception as e:
-        raise OverridesError(f"Failed to parse Hydra overrides: {str(e)}") from e
+        raise OverridesError(f"Failed to parse Hydra overrides: {e!s}") from e

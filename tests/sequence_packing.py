@@ -5,9 +5,9 @@ from rlkit.data.sequence_packing import pack_sequences, distribute_bins_for_dp
 
 def test_pack_sequences():
     """Test the sequence packing function."""
-    SEPARATOR = {"input_ids": 98, "loss_mask": 0, "advantage": 0.0}
-    MAX_BIN_SIZE = 20
-    NUM_BINS = 2
+    separator = {"input_ids": 98, "loss_mask": 0, "advantage": 0.0}
+    max_bin_size = 20
+    num_bins = 2
 
     sequences = [
         {
@@ -32,9 +32,9 @@ def test_pack_sequences():
         },
     ]
 
-    bins, remainder = pack_sequences(sequences, max_bin_size=MAX_BIN_SIZE, num_bins=NUM_BINS, separator_value=SEPARATOR)
+    bins, remainder = pack_sequences(sequences, max_bin_size=max_bin_size, num_bins=num_bins, separator_value=separator)
 
-    assert len(bins) == NUM_BINS
+    assert len(bins) == num_bins
     assert remainder == []
 
     # First bin: longest seq (10 tokens) + second longest (6 tokens) = 18 tokens (with separators)
@@ -50,9 +50,9 @@ def test_pack_sequences():
 
 def test_pack_sequences_with_remainder():
     """Test packing returns leftover sequences that don't fit."""
-    SEPARATOR = {"input_ids": 99, "advantage": 0.0}
-    MAX_BIN_SIZE = 10
-    NUM_BINS = 2
+    separator = {"input_ids": 99, "advantage": 0.0}
+    max_bin_size = 10
+    num_bins = 2
 
     # Create sequences that won't all fit:
     # - Two 8-token sequences will each take a full bin (8 + 1 separator = 9)
@@ -66,12 +66,12 @@ def test_pack_sequences_with_remainder():
 
     bins, remainder = pack_sequences(
         sequences,
-        max_bin_size=MAX_BIN_SIZE,
-        num_bins=NUM_BINS,
-        separator_value=SEPARATOR,
+        max_bin_size=max_bin_size,
+        num_bins=num_bins,
+        separator_value=separator,
     )
 
-    assert len(bins) == NUM_BINS
+    assert len(bins) == num_bins
 
     # The two 8-token sequences should be packed (one per bin)
     assert bins[0]["input_ids"] == [10, 11, 12, 13, 14, 15, 16, 17, 99]
@@ -89,7 +89,7 @@ def test_pack_sequences_with_remainder():
 
 def test_distribute_bins_for_dp_snake_ordering():
     """Test that snake ordering balances token counts across shards."""
-    NUM_SHARDS = 2
+    num_shards = 2
 
     # Bins with varying lengths (token counts)
     # Sorted descending: [10, 8, 6, 4] tokens
@@ -100,9 +100,9 @@ def test_distribute_bins_for_dp_snake_ordering():
         {"input_ids": [4] * 6, "advantage": [0.4] * 6},    # 6 tokens
     ]
 
-    shards = distribute_bins_for_dp(bins, num_shards=NUM_SHARDS)
+    shards = distribute_bins_for_dp(bins, num_shards=num_shards)
 
-    assert len(shards) == NUM_SHARDS
+    assert len(shards) == num_shards
 
     # Snake ordering on sorted [10, 8, 6, 4]:
     # Shard 0 gets positions 0, 3 -> bins with 10, 4 tokens = 14 total
@@ -150,8 +150,8 @@ def test_distribute_bins_for_dp_preserves_data():
 
 def test_pack_sequences_empty():
     """Test packing with empty sequences dict."""
-    SEPARATOR = {"input_ids": 0, "advantage": 0.0}
-    bins, remainder = pack_sequences([], max_bin_size=10, num_bins=2, separator_value=SEPARATOR)
+    separator = {"input_ids": 0, "advantage": 0.0}
+    bins, remainder = pack_sequences([], max_bin_size=10, num_bins=2, separator_value=separator)
 
     assert len(bins) == 2
     assert all(b["input_ids"] == [] for b in bins)
@@ -170,9 +170,9 @@ def test_distribute_bins_for_dp_empty():
 
 def test_pack_sequences_with_doc_priorities_basic():
     """Test packing with priority keys ensures high-priority (stale) sequences are packed first."""
-    SEPARATOR = {"input_ids": 99, "value": 0.0}
-    MAX_BIN_SIZE = 20
-    NUM_BINS = 2
+    separator = {"input_ids": 99, "value": 0.0}
+    max_bin_size = 20
+    num_bins = 2
 
     # Without priority: FFD would pack by length [8, 6, 4, 3]
     #   -> bin0: [8-tok, 6-tok, sep, sep] = 16, bin1: [4-tok, 3-tok, sep, sep] = 10
@@ -188,13 +188,13 @@ def test_pack_sequences_with_doc_priorities_basic():
 
     bins, remainder = pack_sequences(
         sequences,
-        max_bin_size=MAX_BIN_SIZE,
-        num_bins=NUM_BINS,
-        separator_value=SEPARATOR,
+        max_bin_size=max_bin_size,
+        num_bins=num_bins,
+        separator_value=separator,
         doc_priorities=doc_priorities,
     )
 
-    assert len(bins) == NUM_BINS
+    assert len(bins) == num_bins
     assert remainder == []
 
     # Packing order by (priority desc, length desc): seq[1], seq[3], seq[2], seq[0]
@@ -214,9 +214,9 @@ def test_pack_sequences_with_doc_priorities_basic():
 
 def test_pack_sequences_doc_priorities_same_priority_uses_length():
     """Test that within the same priority level, longer sequences are packed first."""
-    SEPARATOR = {"input_ids": 99}
-    MAX_BIN_SIZE = 25
-    NUM_BINS = 2
+    separator = {"input_ids": 99}
+    max_bin_size = 25
+    num_bins = 2
 
     # All sequences have same priority, so should fall back to FFD (length descending)
     sequences = [
@@ -229,9 +229,9 @@ def test_pack_sequences_doc_priorities_same_priority_uses_length():
 
     bins, remainder = pack_sequences(
         sequences,
-        max_bin_size=MAX_BIN_SIZE,
-        num_bins=NUM_BINS,
-        separator_value=SEPARATOR,
+        max_bin_size=max_bin_size,
+        num_bins=num_bins,
+        separator_value=separator,
         doc_priorities=doc_priorities,
     )
 
@@ -249,9 +249,9 @@ def test_pack_sequences_doc_priorities_same_priority_uses_length():
 
 def test_pack_sequences_doc_priorities_with_remainder():
     """Test priority packing with remainder returns high-priority items first, low-priority in remainder."""
-    SEPARATOR = {"input_ids": 99}
-    MAX_BIN_SIZE = 10
-    NUM_BINS = 1
+    separator = {"input_ids": 99}
+    max_bin_size = 10
+    num_bins = 1
 
     sequences = [
         {"input_ids": [1] * 8},   # len=8, priority=0 (low)
@@ -262,9 +262,9 @@ def test_pack_sequences_doc_priorities_with_remainder():
 
     bins, remainder = pack_sequences(
         sequences,
-        max_bin_size=MAX_BIN_SIZE,
-        num_bins=NUM_BINS,
-        separator_value=SEPARATOR,
+        max_bin_size=max_bin_size,
+        num_bins=num_bins,
+        separator_value=separator,
         doc_priorities=doc_priorities,
     )
 

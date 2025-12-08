@@ -292,7 +292,7 @@ class ClippedPGLossFn(LossFunction):
 
         # token_mult_prob_error
         # See more details and other metrics in docs/guides/grpo.md#metrics
-        lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
+        lp_error = torch.abs(generation_logprobs - prev_logprobs)
         # average over all tokens in the microbatch
         mult_prob_error = masked_mean(
             torch.exp(lp_error * mask),

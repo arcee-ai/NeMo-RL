@@ -22,7 +22,7 @@ def _fill_indices_kernel(
     output_ptr,
     experts_per_rank: tl.constexpr,
     num_ranks: tl.constexpr,
-    BLOCK_SIZE: tl.constexpr,  # Number of threads per block
+    block_size: tl.constexpr,  # Number of threads per block
 ):
     pid = tl.program_id(axis=0)
     num_programs = tl.num_programs(axis=0)
@@ -41,10 +41,10 @@ def _fill_indices_kernel(
             length = tl.load(tokens_per_expert_group_ptr + i)
 
             # each thread in block processes tokens in parallel
-            offsets = tl.arange(0, BLOCK_SIZE)
+            offsets = tl.arange(0, block_size)
 
             # tokens are processed in chunks of BLOCK_SIZE
-            for chunk_start in range(0, length, BLOCK_SIZE):
+            for chunk_start in range(0, length, block_size):
                 chunk_offsets = chunk_start + offsets
 
                 # mask valid indices
@@ -95,7 +95,7 @@ def fill_indices_wrapper(
         permuted_indices,
         experts_per_rank,
         num_ranks,
-        BLOCK_SIZE=block_size,
+        block_size=block_size,
     )
     return permuted_indices
 
@@ -276,7 +276,7 @@ def test_with_zero_tokens():
     )
 
     # Use the CPU method
-    permuted_indices_cpu, m_sizes_cpu, m_offsets_cpu = generate_permute_indices(
+    permuted_indices_cpu, m_sizes_cpu, _m_offsets_cpu = generate_permute_indices(
         tokens_per_expert_group,
         experts_per_rank,
         num_ranks,

@@ -18,6 +18,16 @@ from typing import Callable, Generator, Optional, Sequence, Union
 
 import numpy as np
 
+# Define valid reduction types and their corresponding NumPy functions
+_REDUCTION_FUNCTIONS: dict[str, Callable[[Sequence[float]], float]] = {
+    "mean": np.mean,
+    "median": np.median,
+    "min": np.min,
+    "max": np.max,
+    "std": np.std,
+    "sum": np.sum,
+    "count": len,
+}
 
 class Timer:
     """A utility for timing code execution.
@@ -56,17 +66,6 @@ class Timer:
     max_forward_time = timer.reduce("model_forward_multiple", "max")
     ```
     """
-
-    # Define valid reduction types and their corresponding NumPy functions
-    _REDUCTION_FUNCTIONS: dict[str, Callable[[Sequence[float]], float]] = {
-        "mean": np.mean,
-        "median": np.median,
-        "min": np.min,
-        "max": np.max,
-        "std": np.std,
-        "sum": np.sum,
-        "count": len,
-    }
 
     def __init__(self) -> None:
         """Initialize the timer."""
@@ -182,8 +181,8 @@ class Timer:
             KeyError: If the label doesn't exist
             ValueError: If an invalid operation is provided
         """
-        if operation not in self._REDUCTION_FUNCTIONS:
-            valid_reductions = ", ".join(self._REDUCTION_FUNCTIONS.keys())
+        if operation not in _REDUCTION_FUNCTIONS:
+            valid_reductions = ", ".join(_REDUCTION_FUNCTIONS.keys())
             raise ValueError(
                 f"Invalid operation '{operation}'. Valid options are: {valid_reductions}"
             )
@@ -191,7 +190,7 @@ class Timer:
         if label not in self._timers:
             raise KeyError(f"No timings recorded for '{label}'")
 
-        reduction_func = self._REDUCTION_FUNCTIONS[operation]
+        reduction_func = _REDUCTION_FUNCTIONS[operation]
         return reduction_func(self._timers[label])
 
     def get_timing_metrics(
@@ -221,7 +220,7 @@ class Timer:
             if label not in self._timers:
                 continue
 
-            if op in self._REDUCTION_FUNCTIONS:
+            if op in _REDUCTION_FUNCTIONS:
                 results[label] = self.reduce(label, op)
             else:
                 results[label] = self._timers[label]

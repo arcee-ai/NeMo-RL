@@ -730,13 +730,13 @@ class DTensorV2PolicyWorker:
             # Find all same-size (and same dtype) tensors
             similar_tensors = self._group_state_dict_by_shape_and_dtype(state_dict_info)
 
-            TENSOR_PACK_MAX = 1000
+            tensor_pack_max = self.cfg.tensor_pack_max
 
             new_metadata: dict[str, dict[str, Any]] = {}
 
             for refit_info, tensors in similar_tensors.items():
-                for i in range(0, len(tensors), TENSOR_PACK_MAX):
-                    chunk_tensors = tensors[i:i+TENSOR_PACK_MAX]
+                for i in range(0, len(tensors), tensor_pack_max):
+                    chunk_tensors = tensors[i:i+tensor_pack_max]
                     key = "packed_tensor_" + str(refit_info) + "_" + str(i)
                     new_metadata[key] = {
                         "shape": (len(chunk_tensors),) + refit_info[0], # Shape of stacked tensors
