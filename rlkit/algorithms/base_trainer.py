@@ -115,7 +115,6 @@ class BaseTrainer(ABC, Generic[SaveStateT]):
         tokenizer: PreTrainedTokenizerBase,
         weights_path: Path | str | None = None,
         optimizer_path: Path | str | None = None,
-        init_reference_model: bool = False,
         use_cut_cross_entropy: bool = False,
     ) -> Policy:
         """Initialize the policy - common pattern with optional extras."""
@@ -126,7 +125,6 @@ class BaseTrainer(ABC, Generic[SaveStateT]):
             weights_path=weights_path,
             optimizer_path=optimizer_path,
             init_optimizer=True,
-            init_reference_model=init_reference_model,
             use_cut_cross_entropy=use_cut_cross_entropy,
         )
 

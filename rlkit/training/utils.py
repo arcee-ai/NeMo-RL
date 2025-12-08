@@ -22,8 +22,6 @@ import torch
 from torch.distributed.tensor import DTensor
 from transformers import AutoConfig
 
-from rlkit.distributed.model_utils import dtensor_from_parallel_logits_to_logprobs
-
 
 def get_gpu_info(model: torch.nn.Module) -> dict[str, Any]:
     """Return information about the GPU being used by this worker."""
@@ -239,30 +237,6 @@ def get_grad_norm(
 
     return total_norm
 
-
-def get_logprobs_from_vocab_parallel_logits(
-    vocab_parallel_logits: DTensor,
-    input_ids: torch.Tensor | DTensor,
-    chunk_size: int | None = None,
-) -> torch.Tensor:
-    """Compute log probabilities from vocabulary-parallel logits."""
-    device_mesh = vocab_parallel_logits.device_mesh
-
-    tp_group = device_mesh.get_group("tp")
-    tp_rank = tp_group.rank()
-    tp_size = tp_group.size()
-
-    vocab_interval_per_rank = vocab_parallel_logits.shape[-1] // tp_size
-
-    return dtensor_from_parallel_logits_to_logprobs(
-        vocab_parallel_logits.to_local(),
-        input_ids,
-        vocab_interval_per_rank * tp_rank,
-        (tp_rank + 1) * vocab_interval_per_rank,
-        tp_group,
-        inference_only=not torch.is_grad_enabled(),
-        chunk_size=chunk_size,
-    )
 
 def get_device_mesh_info(
     world_size: int,

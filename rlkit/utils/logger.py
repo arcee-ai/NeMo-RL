@@ -37,8 +37,7 @@ from rlkit.config.logging import (
     WandbConfig,
 )
 
-# Flag to track if rich logging has been configured
-_rich_logging_configured = False
+
 class LoggerInterface(ABC):
     """Abstract base class for logger backends."""
 

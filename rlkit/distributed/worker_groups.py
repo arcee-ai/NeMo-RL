@@ -24,7 +24,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.distributed.worker_group_utils import recursive_merge_options
 
 
 @dataclass
@@ -75,9 +74,7 @@ class RayWorkerBuilder:
         Returns:
             Ray actor handle for the created worker.
         """
-        # Merge default options with extra options
-        default_options = getattr(self.worker_class, "_default_options", {})
-        options = recursive_merge_options(default_options, extra_options)
+        options: dict[str, Any] = dict(extra_options)
 
         # Apply worker-specific configuration if available
         worker_kwargs = dict(self.kwargs)

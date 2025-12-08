@@ -43,7 +43,6 @@ class Policy:
         init_optimizer: bool = True,
         weights_path: PathLike | None = None,
         optimizer_path: PathLike | None = None,
-        init_reference_model: bool = True,
         use_cut_cross_entropy: bool = False,
     ):
         """Initialize all training workers."""
@@ -108,7 +107,6 @@ class Policy:
             init_optimizer=init_optimizer,
             weights_path=weights_path,
             optimizer_path=optimizer_path,
-            init_reference_model=init_reference_model,
             worker_sharding_annotations=self.sharding_annotations,
             pre_init_communication_queue=pre_init_queue,
             use_cut_cross_entropy=use_cut_cross_entropy,
@@ -303,11 +301,3 @@ class Policy:
         user calls worker_group.shutdown().
         """
         self.worker_group.shutdown()
-
-    def start_gpu_profiling(self) -> None:
-        """Start GPU profiling."""
-        ray.get(self.worker_group.run_all("start_gpu_profiling"))
-
-    def stop_gpu_profiling(self) -> None:
-        """Stop GPU profiling."""
-        ray.get(self.worker_group.run_all("stop_gpu_profiling"))

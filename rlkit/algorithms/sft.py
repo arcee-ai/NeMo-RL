@@ -117,7 +117,6 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             tokenizer=self.tokenizer,
             weights_path=weights_path,
             optimizer_path=optimizer_path,
-            init_reference_model=False,
             use_cut_cross_entropy=use_cce,
         )
 

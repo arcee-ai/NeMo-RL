@@ -37,10 +37,6 @@ from rlkit.utils.logger import (
 )
 from rlkit.utils.timer import Timer
 
-# ===============================================================================
-# Configuration
-# ===============================================================================
-TokenizerType = TypeVar("TokenizerType", bound=PreTrainedTokenizerBase)
 
 class GRPOSaveState(TypedDict):
     """Saved state for GRPO."""
@@ -261,7 +257,7 @@ class GRPOTrainer:
                 add_special_tokens=True,
             )
 
-            return [batch for i, batch in enumerate(batch) if len(enc[i]["input_ids"]) <= max_prompt_tokens]
+            return [sample for i, sample in enumerate(batch) if len(enc[i]["input_ids"]) <= max_prompt_tokens]
 
         return cast(Dataset, dataset.filter(
             keep_batch,

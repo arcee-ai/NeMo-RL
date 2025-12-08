@@ -22,9 +22,6 @@ from transformers import PreTrainedTokenizerBase
 
 from rlkit.config.sft import DatasetType
 
-TokenizerType = PreTrainedTokenizerBase
-
-# Dataset transformation utility
 SFTDataTransformFn = Callable[[PreTrainedTokenizerBase | None, dict], dict]
 
 def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
@@ -108,5 +105,5 @@ def transform_dataset(dataset: Dataset, dataset_type: DatasetType, tokenizer: Pr
         drop_cols = [col for col in old_cols if col not in new_cols]
 
         transform_fn = transformations[dataset_type]
-        dataset = dataset.map(lambda x: transform_fn(tokenizer, x), num_proc=num_proc, remove_columns=drop_cols)
+        dataset = cast(Dataset, dataset.map(lambda x: transform_fn(tokenizer, x), num_proc=num_proc, remove_columns=drop_cols))
     return dataset

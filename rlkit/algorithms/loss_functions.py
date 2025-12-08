@@ -16,14 +16,12 @@ from abc import abstractmethod
 from typing import Any, Protocol, TypedDict, TypeVar
 
 import torch
-from torch.distributed.tensor import DTensor
 
 from rlkit.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
 )
 from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig
-from rlkit.training.utils import get_logprobs_from_vocab_parallel_logits
 
 Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
@@ -79,7 +77,6 @@ class ClippedPGLossDataDict(TypedDict):
     generation_logprobs: torch.Tensor
     reference_policy_logprobs: torch.Tensor
     token_mask: torch.Tensor
-    __extra__: Any
 
 
 class ClippedPGLossFn(LossFunction):
@@ -160,24 +157,19 @@ class ClippedPGLossFn(LossFunction):
             reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
         else:
             reference_policy_logprobs = None
-        if isinstance(next_token_logits, DTensor):
-            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["token_ids"]
-            )
-        else:
-            next_token_logits = next_token_logits.to(torch.float32)
-            next_token_logits_wo_last = next_token_logits[
-                :, :-1
-            ]  # Remove last position's logits
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits_wo_last, dim=-1
-            )
-            next_tokens = data["token_ids"][:, 1:].cuda()  # Skip first token
-            if next_tokens.dtype != torch.int64:
-                raise ValueError(f"next_tokens must be of type int64, got {next_tokens.dtype} with shape {next_tokens.shape}")
-            curr_logprobs = next_token_logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        next_token_logits = next_token_logits.to(torch.float32)
+        next_token_logits_wo_last = next_token_logits[
+            :, :-1
+        ]  # Remove last position's logits
+        next_token_logprobs = torch.nn.functional.log_softmax(
+            next_token_logits_wo_last, dim=-1
+        )
+        next_tokens = data["token_ids"][:, 1:].cuda()  # Skip first token
+        if next_tokens.dtype != torch.int64:
+            raise ValueError(f"next_tokens must be of type int64, got {next_tokens.dtype} with shape {next_tokens.shape}")
+        curr_logprobs = next_token_logprobs.gather(
+            dim=-1, index=next_tokens.unsqueeze(-1)
+        ).squeeze(-1)
 
         # Calculate KL regularization.
         if self.reference_policy_kl_penalty != 0:
@@ -384,25 +376,20 @@ class CISPOLossFn(LossFunction):
         else:
             reference_policy_logprobs = None
         # Get current policy logprobs
-        if isinstance(next_token_logits, DTensor):
-            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["token_ids"]
+        next_token_logits = next_token_logits.to(torch.float32)
+        next_token_logits_wo_last = next_token_logits[:, :-1]
+        next_token_logprobs = torch.nn.functional.log_softmax(
+            next_token_logits_wo_last, dim=-1
+        )
+        next_tokens = data["token_ids"][:, 1:].cuda()
+        if next_tokens.dtype != torch.int64:
+            raise ValueError(
+                f"next_tokens must be of type int64, got {next_tokens.dtype} "
+                f"with shape {next_tokens.shape}"
             )
-        else:
-            next_token_logits = next_token_logits.to(torch.float32)
-            next_token_logits_wo_last = next_token_logits[:, :-1]
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits_wo_last, dim=-1
-            )
-            next_tokens = data["token_ids"][:, 1:].cuda()
-            if next_tokens.dtype != torch.int64:
-                raise ValueError(
-                    f"next_tokens must be of type int64, got {next_tokens.dtype} "
-                    f"with shape {next_tokens.shape}"
-                )
-            curr_logprobs = next_token_logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        curr_logprobs = next_token_logprobs.gather(
+            dim=-1, index=next_tokens.unsqueeze(-1)
+        ).squeeze(-1)
 
         # Calculate KL regularization
         if self.reference_policy_kl_penalty != 0:
@@ -545,20 +532,15 @@ class NLLLoss(LossFunction):
         mask = data["token_mask"][:, 1:]
 
         # Gather the logprobs for the actual next tokens
-        if isinstance(next_token_logits, DTensor):
-            token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["token_ids"]
-            )
-        else:
-            next_tokens = data["token_ids"][:, 1:].cuda()  # Skip first token
-            next_token_logits = next_token_logits.to(torch.float32)
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits, dim=-1
-            )
-            logprobs = next_token_logprobs[:, :-1]  # Remove last position's logits
-            token_logprobs = logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        next_tokens = data["token_ids"][:, 1:].cuda()  # Skip first token
+        next_token_logits = next_token_logits.to(torch.float32)
+        next_token_logprobs = torch.nn.functional.log_softmax(
+            next_token_logits, dim=-1
+        )
+        logprobs = next_token_logprobs[:, :-1]  # Remove last position's logits
+        token_logprobs = logprobs.gather(
+            dim=-1, index=next_tokens.unsqueeze(-1)
+        ).squeeze(-1)
 
         ## single scalar loss
         ## scale by the total number of tokens in the batch
