@@ -4,7 +4,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict, TypeVar, cast
+from typing import Any, TypedDict, cast
 
 import numpy as np
 import openai
@@ -16,14 +16,12 @@ from openai.types.chat.chat_completion import ChatCompletion
 from rich.console import Console
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
+from rlkit.algorithms.base_trainer import BaseTrainer
 from rlkit.algorithms.loss_functions import (
     CISPOLossFn,
     ClippedPGLossFn,
 )
-from rlkit.config.checkpointing import CheckpointingConfig
-from rlkit.config.logging import LoggingConfig
 from rlkit.config.policy import PolicyConfig
 from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig
 from rlkit.config.rl import EnvironmentConfig, RLConfig
@@ -31,10 +29,6 @@ from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http_generation import VllmHttpGeneration
 from rlkit.training.lm_policy import Policy
-from rlkit.utils.checkpoint import CheckpointManager
-from rlkit.utils.logger import (
-    Logger,
-)
 from rlkit.utils.timer import Timer
 
 
@@ -43,7 +37,7 @@ class GRPOSaveState(TypedDict):
     step: int
     consumed_example_ids: list[int]
 
-def _default_grpo_save_state() -> GRPOSaveState:
+def _default_save_state() -> GRPOSaveState:
     return {
         "step": 0,
         "consumed_example_ids": [],
@@ -75,8 +69,30 @@ class QueuedRollout:
         return current_step - self.step_started
 
 
-class GRPOTrainer:
+class GRPOTrainer(BaseTrainer[GRPOSaveState]):
     """Helper class that encapsulates GRPO setup and training routines."""
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Abstract method implementations
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _get_default_save_state(self) -> GRPOSaveState:
+        return _default_save_state()
+
+    def _get_pad_values(self) -> dict[str, int | float | bool]:
+        return {
+            "token_ids": self.tokenizer.pad_token_id,
+            "token_mask": False,
+            "advantages": 0.0,
+            "generation_logprobs": -9999.0,
+        }
+
+    def _get_config_for_logging(self) -> dict[str, Any]:
+        return self.config.model_dump()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Initialization
+    # ─────────────────────────────────────────────────────────────────────────
 
     def __init__(
         self,
@@ -95,12 +111,12 @@ class GRPOTrainer:
 
         self.logger = self._setup_logger(self.config.logging)
 
-        self.checkpointer, self.grpo_save_state, last_checkpoint_path = self._setup_checkpointing(
+        self.checkpointer, self.save_state, last_checkpoint_path = self._setup_checkpointing(
             self.config.checkpointing
         )
 
         # Get consumed example IDs from save state
-        self.consumed_example_ids: list[int] = self.grpo_save_state["consumed_example_ids"]
+        self.consumed_example_ids: list[int] = self.save_state["consumed_example_ids"]
 
         # Load tokenizer for prompt filtering.
         self.tokenizer = AutoTokenizer.from_pretrained(self.policy_config.model_name)
@@ -177,24 +193,6 @@ class GRPOTrainer:
         self.rollout_clients = []
         self.next_rollout_client = 0
 
-    def _setup_logger(self, logger_config: LoggingConfig) -> Logger:
-        logger = Logger(logger_config)
-        logger.log_hyperparams(self.config.model_dump())
-        return logger
-
-    def _setup_checkpointing(
-        self, checkpointing_config: CheckpointingConfig
-    ) -> tuple[CheckpointManager, GRPOSaveState, str | None]:
-        checkpointer = CheckpointManager(checkpointing_config)
-        last_checkpoint_path = checkpointer.get_latest_checkpoint_path()
-        grpo_save_state = cast(
-            GRPOSaveState | None,
-            checkpointer.load_training_info(last_checkpoint_path),
-        )
-        if grpo_save_state is None:
-            grpo_save_state = _default_grpo_save_state()
-        return checkpointer, grpo_save_state, last_checkpoint_path
-
     def _setup_dataloader(
         self,
         dataset: Dataset,
@@ -251,11 +249,11 @@ class GRPOTrainer:
 
             assert all(isinstance(text, list) for text in texts), "Each prompt must be a list of OpenAI messages."
 
-            enc = self.tokenizer.apply_chat_template(
+            enc = cast(list[dict[str, Any]], self.tokenizer.apply_chat_template(
                 texts,
                 tokenize=True,
                 add_special_tokens=True,
-            )
+            ))
 
             return [sample for i, sample in enumerate(batch) if len(enc[i]["input_ids"]) <= max_prompt_tokens]
 
@@ -363,7 +361,7 @@ class GRPOTrainer:
         """Run training loop until finished."""
         timer = Timer()
 
-        step = self.grpo_save_state["step"]
+        step = self.save_state["step"]
         # Track example IDs consumed this session (will be merged with self.consumed_example_ids)
         session_consumed_ids: set[int] = set()
 
@@ -572,13 +570,11 @@ class GRPOTrainer:
                 with timer.time("refit_policy_generation"):
                     await self._refit_policy_generation()
 
-                if (step+1) % self.checkpointing_config.save_period == 0:
+                if self.checkpointing_config.enabled and (step+1) % self.checkpointing_config.save_period == 0:
                     status.update(f"[bold]Saving checkpoint for step {step+1}...[/]")
-                    self._save_checkpoint(
-                        step,
-                        self.consumed_example_ids + list(session_consumed_ids),
-                        timer,
-                    )
+                    self.save_state["step"] = step + 1
+                    self.save_state["consumed_example_ids"] = self.consumed_example_ids + list(session_consumed_ids)
+                    self._save_checkpoint(step, timer)
 
                 # Collate metrics
                 collated_metrics: dict[str, list[float]] = {}
@@ -622,11 +618,10 @@ class GRPOTrainer:
                 step += 1
 
         console.log("[bold green]Finished training![/]")
-        self._save_checkpoint(
-            step,
-            self.consumed_example_ids + list(session_consumed_ids),
-            timer=timer,
-        )
+        if self.checkpointing_config.enabled:
+            self.save_state["step"] = step + 1
+            self.save_state["consumed_example_ids"] = self.consumed_example_ids + list(session_consumed_ids)
+            self._save_checkpoint(step, timer)
 
     async def _run_rollouts(
         self,
@@ -780,39 +775,6 @@ class GRPOTrainer:
     ) -> None:
         with timer.time("training_prep"):
             self.policy.prepare_for_training()
-
-    def _save_checkpoint(
-        self,
-        step: int,
-        consumed_example_ids: list[int],
-        timer: Timer,
-    ) -> None:
-        if not self.checkpointing_config.enabled:
-            return
-
-        self.policy.prepare_for_training()
-
-        self.grpo_save_state["step"] = step + 1
-        self.grpo_save_state["consumed_example_ids"] = consumed_example_ids
-
-        with timer.time("checkpointing"):
-            checkpoint_path = self.checkpointer.init_tmp_checkpoint(
-                step + 1,
-                cast(dict[str, Any], self.grpo_save_state),
-                self.config.model_dump(),
-            )
-            self.policy.save_checkpoint(
-                weights_path=os.path.join(
-                    checkpoint_path, "policy", "weights"
-                ),
-                optimizer_path=os.path.join(
-                    checkpoint_path, "policy", "optimizer"
-                ),
-                tokenizer_path=os.path.join(
-                    checkpoint_path, "policy", "tokenizer"
-                ),
-            )
-            self.checkpointer.finalize_checkpoint(checkpoint_path)
 
     async def _refit_policy_generation(self) -> None:
         update_success = False

@@ -365,7 +365,9 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                 # Checkpointing
                 if self.config.checkpointing.enabled and (step + 1) % save_period == 0:
                     status.update(f"[bold]Saving checkpoint for step {step + 1}...[/]")
-                    self._save_checkpoint(step, consumed_samples, timer)
+                    self.save_state["step"] = step + 1
+                    self.save_state["consumed_samples"] = consumed_samples
+                    self._save_checkpoint(step, timer)
 
                 # Log metrics
                 self._log_step(step, train_results, timer, bin_stats, console)
@@ -382,7 +384,9 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
 
         # Final checkpoint
         if self.config.checkpointing.enabled:
-            self._save_checkpoint(step, consumed_samples, timer)
+            self.save_state["step"] = step + 1
+            self.save_state["consumed_samples"] = consumed_samples
+            self._save_checkpoint(step, timer)
 
     async def _validate(self, step: int) -> dict[str, float] | None:
         """Run validation on the validation dataset.
@@ -466,29 +470,6 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             "val_loss": total_loss / num_batches,
             "val_batches": num_batches,
         }
-
-    def _save_checkpoint(
-        self,
-        step: int,
-        consumed_samples: int,
-        timer: Timer,
-    ) -> None:
-        """Save a training checkpoint."""
-        if not self.config.checkpointing.enabled:
-            return
-
-        self.policy.prepare_for_training()
-
-        self.save_state["step"] = step + 1
-        self.save_state["consumed_samples"] = consumed_samples
-
-        checkpoint_path = self._save_checkpoint_base(
-            step=step,
-            save_state=dict(self.save_state),
-            config=self.config.model_dump(),
-            timer=timer,
-        )
-        self._finalize_checkpoint(checkpoint_path)
 
     def _log_step(
         self,

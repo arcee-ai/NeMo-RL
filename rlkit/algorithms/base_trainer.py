@@ -4,7 +4,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 from transformers import PreTrainedTokenizerBase
 
@@ -22,7 +22,7 @@ from rlkit.utils.timer import Timer
 SaveStateT = TypeVar("SaveStateT")
 
 
-class BaseTrainer(ABC, Generic[SaveStateT]):
+class BaseTrainer[SaveStateT](ABC):
     """Base class for all trainers (SFT, GRPO, etc.).
 
     Provides shared functionality for:
@@ -164,41 +164,30 @@ class BaseTrainer(ABC, Generic[SaveStateT]):
 
         return dist_bins, list(remainder)
 
-    def _save_checkpoint_base(
-        self,
-        step: int,
-        save_state: dict[str, Any],
-        config: dict[str, Any],
-        timer: Timer,
-    ) -> str:
-        """Common checkpoint saving logic.
+    def _save_checkpoint(self, step: int, timer: Timer) -> None:
+        """Save a training checkpoint.
+
+        Saves self.save_state (which should be updated by the training loop
+        before calling this method) along with model weights and optimizer state.
 
         Args:
             step: Current training step (0-indexed, will be saved as step+1).
-            save_state: Trainer-specific state to save.
-            config: Full config dict for reproducibility.
             timer: Timer instance for timing the checkpoint.
-
-        Returns:
-            Path to the checkpoint directory.
         """
+        self.policy.prepare_for_training()
+
         with timer.time("checkpointing"):
-            logging.info(f"Saving checkpoint for step {step + 1}...")
             checkpoint_path = self.checkpointer.init_tmp_checkpoint(
                 step + 1,
-                save_state,
-                config,
+                cast(dict[str, Any], self.save_state),
+                self._get_config_for_logging(),
             )
             self.policy.save_checkpoint(
                 weights_path=os.path.join(checkpoint_path, "policy", "weights"),
                 optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
                 tokenizer_path=os.path.join(checkpoint_path, "policy", "tokenizer"),
             )
-            return str(checkpoint_path)
-
-    def _finalize_checkpoint(self, checkpoint_path: str) -> None:
-        """Finalize a checkpoint after all saves are complete."""
-        self.checkpointer.finalize_checkpoint(checkpoint_path)
+            self.checkpointer.finalize_checkpoint(checkpoint_path)
 
     def _get_bin_stats(self, bins: list[dict[str, list]]) -> dict[str, float]:
         """Get statistics about packed bins for logging."""
