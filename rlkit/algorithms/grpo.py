@@ -3,7 +3,6 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import numpy as np
@@ -15,9 +14,8 @@ from datasets import Dataset
 from openai.types.chat.chat_completion import ChatCompletion
 from rich.console import Console
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
 
-from rlkit.algorithms.base_trainer import BaseTrainer
+from rlkit.algorithms.base_trainer import BaseTrainer, SamplesPerSecondEMA, format_duration
 from rlkit.algorithms.loss_functions import (
     CISPOLossFn,
     ClippedPGLossFn,
@@ -28,7 +26,6 @@ from rlkit.config.rl import EnvironmentConfig, RLConfig
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http_generation import VllmHttpGeneration
-from rlkit.training.lm_policy import Policy
 from rlkit.utils.timer import Timer
 
 
@@ -36,12 +33,8 @@ class GRPOSaveState(TypedDict):
     """Saved state for GRPO."""
     step: int
     consumed_example_ids: list[int]
+    elapsed_seconds: float
 
-def _default_save_state() -> GRPOSaveState:
-    return {
-        "step": 0,
-        "consumed_example_ids": [],
-    }
 
 class RolloutOutputs(TypedDict):
     """Outputs of a finished rollout. TODO: Merge this with RLSample."""
@@ -76,29 +69,20 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
     # Abstract method implementations
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _get_default_save_state(self) -> GRPOSaveState:
-        return _default_save_state()
-
-    def _get_pad_values(self) -> dict[str, int | float | bool]:
+    @staticmethod
+    def _get_default_save_state() -> GRPOSaveState:
         return {
-            "token_ids": self.tokenizer.pad_token_id,
-            "token_mask": False,
-            "advantages": 0.0,
-            "generation_logprobs": -9999.0,
+            "step": 0,
+            "consumed_example_ids": [],
+            "elapsed_seconds": 0.0,
         }
-
-    def _get_config_for_logging(self) -> dict[str, Any]:
-        return self.config.model_dump()
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Initialization
-    # ─────────────────────────────────────────────────────────────────────────
 
     def __init__(
         self,
         config: RLConfig,
     ) -> None:
         """Initialize the GRPO trainer."""
+        super().__init__(config)
         self.config = config
 
         self.policy_config = self.config.policy
@@ -107,19 +91,9 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         self.training_config = self.policy_config.training
         self.rollout_config = self.config.rollouts
         self.env_config = self.config.env
-        self.checkpointing_config = self.config.checkpointing
-
-        self.logger = self._setup_logger(self.config.logging)
-
-        self.checkpointer, self.save_state, last_checkpoint_path = self._setup_checkpointing(
-            self.config.checkpointing
-        )
 
         # Get consumed example IDs from save state
         self.consumed_example_ids: list[int] = self.save_state["consumed_example_ids"]
-
-        # Load tokenizer for prompt filtering.
-        self.tokenizer = AutoTokenizer.from_pretrained(self.policy_config.model_name)
 
         # Load verifiers environment.
         logging.info(f"Loading verifiers environment '{self.env_config.env_name}'.")
@@ -140,45 +114,26 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
             self.consumed_example_ids,
         )
 
-        logging.info("\n▶ Setting up compute cluster...")
         (
-            train_cluster,
             inference_cluster,
             inference_nodes,
             inference_gpus_per_node,
-        ) = self._setup_clusters(self.policy_config)
+        ) = self._setup_inference_cluster(self.policy_config)
 
         self.inference: VllmHttpGeneration = self._initialize_generation_interface(
             self.policy_config,
             inference_cluster,
         )
 
-        if last_checkpoint_path:
-            weights_path = Path(last_checkpoint_path) / "policy" / "weights"
-            optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
-        else:
-            weights_path = None
-            optimizer_path = None
-
-        self.policy = Policy(
-            cluster=train_cluster,
-            config=self.policy_config,
-            tokenizer=self.tokenizer,
-            weights_path=weights_path,
-            optimizer_path=optimizer_path,
-            init_optimizer=True,
-        )
-
         self._initialize_collective_communication(
-            train_cluster,
+            self.train_cluster,
             inference_cluster,
             inference_nodes,
             inference_gpus_per_node,
         )
 
         state_dict_info = self.policy.prepare_refit_info()
-        if self.inference is not None:
-            self.inference.prepare_refit_info(state_dict_info)
+        self.inference.prepare_refit_info(state_dict_info)
 
         # Instantiate the appropriate loss function based on loss_fn discriminator
         loss_cfg = self.training_config.loss
@@ -265,34 +220,18 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
             num_proc=os.cpu_count() or 1,
         ))
 
-    def _setup_clusters(
+    def _setup_inference_cluster(
         self,
         policy_config: PolicyConfig
     ) -> tuple[
         RayVirtualCluster,
-        RayVirtualCluster,
         int,
         int,
     ]:
-        train_resources = policy_config.training.resources
-        train_gpus_per_node = train_resources.gpus_per_node
-        train_nodes = train_resources.num_nodes
-
         assert policy_config.inference is not None, "RL requires an inference configuration."
         inference_resources = policy_config.inference.resources
         inference_gpus_per_node = inference_resources.gpus_per_node
         inference_nodes = inference_resources.num_nodes
-
-        train_cluster = RayVirtualCluster(
-            name="grpo_train_cluster",
-            bundle_ct_per_node_list=[train_gpus_per_node] * train_nodes,
-            use_gpus=True,
-            num_gpus_per_node=train_gpus_per_node,
-            max_colocated_worker_groups=1,
-        )
-        logging.info(
-            f"Ray train cluster initialized with {train_nodes} nodes with {train_gpus_per_node} GPUs per node"
-        )
 
         inference_cluster = RayVirtualCluster(
             name="grpo_inference_cluster",
@@ -306,7 +245,6 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         )
 
         return (
-            train_cluster,
             inference_cluster,
             inference_nodes,
             inference_gpus_per_node,
@@ -365,6 +303,11 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         # Track example IDs consumed this session (will be merged with self.consumed_example_ids)
         session_consumed_ids: set[int] = set()
 
+        # Elapsed time tracking (restored from checkpoint + session time)
+        checkpoint_elapsed = self.save_state.get("elapsed_seconds", 0.0)
+        session_start = datetime.now()
+        samples_ema = SamplesPerSecondEMA(alpha=0.1)
+
         # Call finish generation before training begins to ensure the policy is ready.
         await self.inference.finish_generation()
 
@@ -382,6 +325,9 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         refit_status = console.status("Running initial vLLM refit...", spinner="dots")
         await self._refit_policy_generation()
         refit_status.stop()
+
+        # Start timing for waiting on rollouts
+        timer.start("waiting_for_rollouts")
 
         # Queue of pending rollout tasks.
         awaiting_packing: asyncio.Queue[QueuedRollout] = asyncio.Queue()
@@ -527,10 +473,6 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 trained_example_ids: list[int] = list({x.input_data["example_id"] for x in trained_rollouts})
 
                 coordinator_metrics = {
-                    "reward/mean": np.mean([x["reward"] for x in step_env_metrics]),
-                    "reward/std": np.std([x["reward"] for x in step_env_metrics]),
-                    "reward/min": np.min([x["reward"] for x in step_env_metrics]),
-                    "reward/max": np.max([x["reward"] for x in step_env_metrics]),
                     "staleness/mean": np.mean(step_staleness),
                     "staleness/std": np.std(step_staleness),
                     "staleness/min": np.min(step_staleness),
@@ -547,10 +489,13 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     num_shards=self.policy.sharding_annotations.get_axis_size("data_parallel"),
                 )
 
+                # Stop waiting timer now that we have enough rollouts
+                timer.stop("waiting_for_rollouts")
+
                 status.update("[bold]Training policy...[/]")
                 self._prepare_for_training(timer)
                 with timer.time("policy_training"):
-                    _train_results = await self.policy.train(
+                    train_results = await self.policy.train(
                         dist_bins,
                         self.loss_fn,
                         {
@@ -574,6 +519,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     status.update(f"[bold]Saving checkpoint for step {step+1}...[/]")
                     self.save_state["step"] = step + 1
                     self.save_state["consumed_example_ids"] = self.consumed_example_ids + list(session_consumed_ids)
+                    self.save_state["elapsed_seconds"] = checkpoint_elapsed + (datetime.now() - session_start).total_seconds()
                     self._save_checkpoint(step, timer)
 
                 # Collate metrics
@@ -593,27 +539,76 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     summary_metrics[f"{k}/min"] = np.min(v)
                     summary_metrics[f"{k}/max"] = np.max(v)
 
+                # Extract loss and grad_norm from training results
+                loss = train_results["loss"]
+                if isinstance(loss, torch.Tensor):
+                    loss = loss.item()
+
+                grad_norm = train_results.get("grad_norm")
+                if grad_norm is not None:
+                    if isinstance(grad_norm, torch.Tensor):
+                        grad_norm = grad_norm.item()
+                    else:
+                        grad_norm = float(np.mean(grad_norm))
+
+                # Get timing and throughput metrics
+                timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+                train_time_raw = timing_metrics.get("policy_training", 0.0)
+                train_time = float(train_time_raw) if isinstance(train_time_raw, (int, float)) else sum(train_time_raw)
+
+                # Get token counts from microbatch metrics
+                all_mb_metrics = train_results.get("all_mb_metrics", {})
+                total_tokens = int(sum(all_mb_metrics.get("num_unmasked_tokens", [0])))
+                throughput = total_tokens / train_time if train_time > 0 else 0.0
+
+                # Build training metrics
+                train_metrics = {
+                    "loss": loss,
+                    "total_tokens": total_tokens,
+                    "throughput_toks_per_sec": throughput,
+                }
+                if grad_norm is not None:
+                    train_metrics["grad_norm"] = grad_norm
+
+                # Include router statistics if available (MoE models)
+                if "router_statistics" in train_results:
+                    self.logger.log_metrics(train_results["router_statistics"], step, prefix="router")
+
                 self.logger.log_metrics({
                     "env_metrics": summary_metrics,
                     "coordinator_metrics": coordinator_metrics,
                 }, step)
+                self.logger.log_metrics(train_metrics, step, prefix="train")
 
                 mean_staleness = np.mean(step_staleness)
                 mean_reward = np.mean([x["reward"] for x in step_env_metrics])
 
                 consumed_count = len(self.consumed_example_ids) + len(session_consumed_ids)
-                elapsed = (datetime.now() - step_start).total_seconds()
+                step_elapsed = (datetime.now() - step_start).total_seconds()
+
+                # Update EMA and calculate ETA
+                samples_ema.update(num_samples_in_batch, step_elapsed)
+                remaining_count = total_samples - consumed_count
+                total_elapsed = checkpoint_elapsed + (datetime.now() - session_start).total_seconds()
+                eta_seconds = remaining_count / samples_ema.get() if samples_ema.get() > 0 else 0.0
+
                 console.log(
                     f"[bold green]Step {step + 1:4d}[/] | "
                     f"reward=[cyan]{mean_reward:.2f}[/] "
                     f"stale=[yellow]{mean_staleness:.2f}[/] "
                     f"samples=[white]{num_samples_in_batch}[/] "
-                    f"time=[green]{elapsed:.2f}s[/] "
-                    f"fly=[magenta]{in_flight}[/] "
-                    f"left=[blue]{total_samples - consumed_count}[/]"
+                    f"left=[blue]{remaining_count}[/] "
+                    f"elapsed=[green]{format_duration(total_elapsed)}[/] "
+                    f"eta=[yellow]{format_duration(eta_seconds)}[/]"
                 )
 
+                # Log timing metrics (after step_elapsed is calculated)
+                timing_metrics["step_time"] = step_elapsed
+                self.logger.log_metrics(timing_metrics, step, prefix="timing")
+
                 timer.reset()
+                # Start timing for waiting on rollouts for the next step
+                timer.start("waiting_for_rollouts")
                 step_start = datetime.now()
                 step += 1
 
@@ -621,6 +616,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         if self.checkpointing_config.enabled:
             self.save_state["step"] = step + 1
             self.save_state["consumed_example_ids"] = self.consumed_example_ids + list(session_consumed_ids)
+            self.save_state["elapsed_seconds"] = checkpoint_elapsed + (datetime.now() - session_start).total_seconds()
             self._save_checkpoint(step, timer)
 
     async def _run_rollouts(

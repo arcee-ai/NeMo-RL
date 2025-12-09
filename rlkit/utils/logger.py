@@ -1,4 +1,4 @@
-"""Abstraction for logging backends."""
+"""Weights & Biases logging utilities."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +21,6 @@ import re
 import subprocess
 import threading
 import time
-from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from typing import Any, Optional, TypedDict
 
@@ -32,42 +31,344 @@ from matplotlib import pyplot as plt
 from prometheus_client.parser import text_string_to_metric_families
 from prometheus_client.samples import Sample
 
-from rlkit.config.logging import (
-    LoggingConfig,
-    WandbConfig,
-)
+from rlkit.config.logging import LoggingConfig
 
 
-class LoggerInterface(ABC):
-    """Abstract base class for logger backends."""
+class GpuMetricSnapshot(TypedDict):
+    """Snapshot of GPU metrics."""
 
-    @abstractmethod
-    def log_metrics(
+    step: int
+    metrics: dict[str, Any]
+
+
+class RayGpuMonitorLogger:
+    """Monitor GPU utilization across a Ray cluster and log metrics to a parent logger."""
+
+    def __init__(
         self,
-        metrics: dict[str, Any],
-        step: int,
-        prefix: str | None = "",
-        step_metric: str | None = None,
-    ) -> None:
-        """Log a dictionary of metrics."""
-        pass
+        collection_interval: int | float,
+        flush_interval: int | float,
+        metric_prefix: str,
+        step_metric: str,
+        parent_logger: Optional["Logger"] = None,
+    ):
+        """Initialize the GPU monitor.
 
-    @abstractmethod
-    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
-        """Log dictionary of hyperparameters."""
-        pass
+        Args:
+            collection_interval: Interval in seconds to collect GPU metrics
+            flush_interval: Interval in seconds to flush metrics to parent logger
+            metric_prefix: Prefix for the metric names
+            step_metric: Name of the field to use as the step metric
+            parent_logger: Logger to receive the collected metrics
+        """
+        self.collection_interval = collection_interval
+        self.flush_interval = flush_interval
+        self.metric_prefix = metric_prefix
+        self.step_metric = step_metric
+        self.parent_logger = parent_logger
+        self.metrics_buffer: list[GpuMetricSnapshot] = []
+        self.last_flush_time = time.time()
+        self.is_running = False
+        self.collection_thread: threading.Thread | None = None
+        self.lock = threading.Lock()
+        self.start_time: float = float("-inf")
 
-class WandbLogger(LoggerInterface):
-    """Weights & Biases logger backend."""
+    def start(self) -> None:
+        """Start the GPU monitoring thread."""
+        if not ray.is_initialized():  # type: ignore[arg-type] - pyrefly hallucinates a fake param here
+            raise ValueError(
+                "Ray must be initialized with rlkit.distributed.virtual_cluster.init_ray() before the GPU logging can begin."
+            )
 
-    def __init__(self, cfg: WandbConfig, log_dir: str | None = None):
-        """Initialize the Weights & Biases logger."""
-        self.run = wandb.init(project=cfg.project, name=cfg.name, dir=log_dir)
+        if self.is_running:
+            return
+
+        self.start_time = time.time()
+        self.is_running = True
+        self.collection_thread = threading.Thread(
+            target=self._collection_loop,
+            daemon=True,  # Make this a daemon thread so it doesn't block program exit
+        )
+        self.collection_thread.start()
+        print(
+            f"GPU monitoring started with collection interval={self.collection_interval}s, flush interval={self.flush_interval}s"
+        )
+
+    def stop(self) -> None:
+        """Stop the GPU monitoring thread."""
+        self.is_running = False
+        if self.collection_thread:
+            self.collection_thread.join(timeout=self.collection_interval * 2)
+
+        # Final flush
+        self.flush()
+        print("GPU monitoring stopped")
+
+    def _collection_loop(self) -> None:
+        """Main collection loop that runs in a separate thread."""
+        while self.is_running:
+            try:
+                collection_time = time.time()
+                relative_time = collection_time - self.start_time
+
+                # Collect metrics with timing information
+                metrics = self._collect_metrics()
+                if metrics:
+                    with self.lock:
+                        self.metrics_buffer.append(
+                            {
+                                "step": int(relative_time),
+                                "metrics": metrics,
+                            }
+                        )
+
+                # Check if it's time to flush
+                current_time = time.time()
+                if current_time - self.last_flush_time >= self.flush_interval:
+                    self.flush()
+                    self.last_flush_time = current_time
+
+                time.sleep(self.collection_interval)
+            except Exception as e:
+                print(
+                    f"Error in GPU monitoring collection loop or stopped abruptly: {e}"
+                )
+                time.sleep(self.collection_interval)  # Continue despite errors
+
+    def _parse_metric(self, sample: Sample, node_idx: int) -> dict[str, Any]:
+        """Parse a metric sample into a standardized format.
+
+        Args:
+            sample: Prometheus metric sample
+            node_idx: Index of the node
+
+        Returns:
+            Dictionary with metric name and value
+        """
+        metric_name = sample.name
+        labels = sample.labels
+        value = sample.value
+
+        if metric_name == "ray_node_gpus_utilization":
+            index = labels["GpuIndex"]
+            metric_name = f"node.{node_idx}.gpu.{index}.util"
+        elif metric_name == "ray_node_gram_used":
+            index = labels["GpuIndex"]
+            metric_name = f"node.{node_idx}.gpu.{index}.mem_gb"
+            # NOTE: It appears their docs say bytes, but it appears to be MB
+            value /= 1024
+        elif metric_name == "ray_node_mem_used":
+            metric_name = f"node.{node_idx}.mem_gb"
+            value /= 1024 * 1024 * 1024
+        elif metric_name == "ray_node_mem_total":
+            metric_name = f"node.{node_idx}.mem_total_gb"
+            value /= 1024 * 1024 * 1024
+        else:
+            # Skip unexpected metrics
+            return {}
+
+        return {metric_name: value}
+
+    def _parse_gpu_sku(self, sample: Sample, node_idx: int) -> dict[str, str]:
+        """Parse a GPU metric sample into a standardized format.
+
+        Args:
+            sample: Prometheus metric sample
+            node_idx: Index of the node
+
+        Returns:
+            Dictionary with metric name and value
+        """
+        # TODO: Consider plumbing {'GpuDeviceName': 'NVIDIA H100 80GB HBM3'}
+        # Expected labels for GPU metrics
+        expected_labels = ["GpuIndex", "GpuDeviceName"]
+        for label in expected_labels:
+            if label not in sample.labels:
+                # This is probably a CPU node
+                return {}
+
+        metric_name = sample.name
+        # Only return SKU if the metric is one of these which publish these metrics
+        if (
+            metric_name != "ray_node_gpus_utilization"
+            and metric_name != "ray_node_gram_used"
+        ):
+            # Skip unexpected metrics
+            return {}
+
+        labels = sample.labels
+        index = labels["GpuIndex"]
+        value = labels["GpuDeviceName"]
+
+        metric_name = f"node.{node_idx}.gpu.{index}.type"
+        return {metric_name: value}
+
+    def _collect_gpu_sku(self) -> dict[str, str]:
+        """Collect GPU SKU from all Ray nodes.
+
+        Note: This is an internal API and users are not expected to call this.
+
+        Returns:
+            Dictionary of SKU types on all Ray nodes
+        """
+        # TODO: We can re-use the same path for metrics because even though both utilization and memory metrics duplicate
+        #       the GPU metadata information; since the metadata is the same for each node, we can overwrite it and expect them to
+        #       be the same
+        return self._collect(collect_sku=True)
+
+    def _collect_metrics(self) -> dict[str, Any]:
+        """Collect GPU metrics from all Ray nodes.
+
+        Returns:
+            Dictionary of collected metrics
+        """
+        return self._collect(collect_metrics=True)
+
+    def _collect(
+        self, collect_metrics: bool = False, collect_sku: bool = False
+    ) -> dict[str, Any]:
+        """Collect GPU metrics from all Ray nodes.
+
+        Returns:
+            Dictionary of collected metrics
+        """
+        assert collect_metrics ^ collect_sku, (
+            f"Must collect either metrics or sku, not both: {collect_metrics=}, {collect_sku=}"
+        )
+        parser_fn = self._parse_metric if collect_metrics else self._parse_gpu_sku
+
+        if not ray.is_initialized():  # type: ignore[arg-type] - pyrefly hallucinates a fake param here
+            print("Ray is not initialized. Cannot collect GPU metrics.")
+            return {}
+
+        try:
+            nodes = ray.nodes()  # type: ignore[arg-type] - pyrefly hallucinates a fake param here
+            if not nodes:
+                print("No Ray nodes found.")
+                return {}
+
+            # Use a dictionary to keep unique metric endpoints and maintain order
+            unique_metric_addresses = {}
+            for node in nodes:
+                node_ip = node["NodeManagerAddress"]
+                metrics_port = node.get("MetricsExportPort")
+                if not metrics_port:
+                    continue
+                metrics_address = f"{node_ip}:{metrics_port}"
+                unique_metric_addresses[metrics_address] = True
+
+            # Process each node's metrics
+            collected_metrics: dict[str, Any] = {}
+            for node_idx, metric_address in enumerate(unique_metric_addresses):
+                metrics = self._fetch_and_parse_metrics(
+                    node_idx, metric_address, parser_fn
+                )
+                collected_metrics.update(metrics)
+
+            return collected_metrics
+
+        except Exception as e:
+            print(f"Error collecting GPU metrics: {e}")
+            return {}
+
+    def _fetch_and_parse_metrics(
+        self, node_idx: int, metric_address: str, parser_fn: Callable
+    ) -> dict[str, Any]:
+        """Fetch metrics from a node and parse GPU metrics.
+
+        Args:
+            node_idx: Index of the node
+            metric_address: Address of the metrics endpoint
+            parser_fn: Function to parse the metrics
+
+        Returns:
+            Dictionary of GPU metrics
+        """
+        url = f"http://{metric_address}/metrics"
+
+        try:
+            response = requests.get(url, timeout=5.0)
+            if response.status_code != 200:
+                print(f"Error: Status code {response.status_code}")
+                return {}
+
+            metrics_text = response.text
+            gpu_metrics = {}
+
+            # Parse the Prometheus format
+            for family in text_string_to_metric_families(metrics_text):
+                for sample in family.samples:
+                    metrics = parser_fn(sample, node_idx)
+                    gpu_metrics.update(metrics)
+
+            return gpu_metrics
+
+        except Exception as e:
+            print(f"Error fetching metrics from {metric_address}: {e}")
+            return {}
+
+    def flush(self) -> None:
+        """Flush collected metrics to the parent logger."""
+        with self.lock:
+            if not self.metrics_buffer:
+                return
+
+            if self.parent_logger:
+                # Log each set of metrics with its original step
+                for entry in self.metrics_buffer:
+                    step = entry["step"]
+                    metrics = entry["metrics"]
+
+                    # Add the step metric directly to metrics for use as step_metric
+                    metrics[self.step_metric] = step
+
+                    # Pass step_metric as the step_metric to use it as the step value in wandb
+                    self.parent_logger.log_metrics(
+                        metrics,
+                        step=step,
+                        prefix=self.metric_prefix,
+                        step_metric=self.step_metric,
+                    )
+
+            # Clear buffer after logging
+            self.metrics_buffer = []
+
+
+class Logger:
+    """Weights & Biases logger with GPU monitoring."""
+
+    def __init__(self, category: str, name: str, cfg: LoggingConfig):
+        """Initialize the logger.
+
+        Args:
+            category: W&B project name
+            name: W&B run name
+            cfg: Logging configuration
+        """
+        self.base_log_dir = cfg.log_dir
+        os.makedirs(self.base_log_dir, exist_ok=True)
+
+        wandb_log_dir = os.path.join(self.base_log_dir, "wandb")
+        os.makedirs(wandb_log_dir, exist_ok=True)
+
+        self.run = wandb.init(project=category, name=name, dir=wandb_log_dir)
         self._log_code()
         self._log_diffs()
-        print(
-            f"Initialized WandbLogger for project {cfg.project}, run {cfg.name} at {log_dir}"
+
+        # Initialize GPU monitoring
+        metric_prefix = "ray"
+        step_metric = f"{metric_prefix}/ray_step"
+
+        self.define_metric(f"{metric_prefix}/*", step_metric=step_metric)
+
+        self.gpu_monitor = RayGpuMonitorLogger(
+            collection_interval=cfg.gpu_monitoring.collection_interval,
+            flush_interval=cfg.gpu_monitoring.flush_interval,
+            metric_prefix=metric_prefix,
+            step_metric=step_metric,
+            parent_logger=self,
         )
+        self.gpu_monitor.start()
 
     def _log_diffs(self):
         """Log git diffs to wandb.
@@ -214,11 +515,11 @@ class WandbLogger(LoggerInterface):
 
         # Try to find our custom rollout log items in metrics, and if we do log them as HTML instead.
         for k, v in metrics.items():
-            if self.is_rollout_log(v):
+            if self._is_rollout_log(v):
                 # TODO: Temporary fix for https://github.com/wandb/wandb/issues/10369
                 # Inject proper UTF-8 encoding header.
                 metrics[k] = wandb.Html(
-                    f"<head><meta charset=\"utf-8\"><style>pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, Menlo, 'Liberation Mono', Consolas, monospace; font-size: 12px; margin: 0.25em 0; }} table {{ border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 4px; text-align: left; vertical-align: top; }} h2, h3 {{ margin: 8px 0 4px; }} p {{ margin: 4px 0; }}</style></head><body>{self.render_rollout_log(v)}</body>" # noqa: E501
+                    f"<head><meta charset=\"utf-8\"><style>pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, Menlo, 'Liberation Mono', Consolas, monospace; font-size: 12px; margin: 0.25em 0; }} table {{ border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 4px; text-align: left; vertical-align: top; }} h2, h3 {{ margin: 8px 0 4px; }} p {{ margin: 4px 0; }}</style></head><body>{self._render_rollout_log(v)}</body>"  # noqa: E501
                 )
 
         # If step_metric is provided, use the corresponding value from metrics as step
@@ -246,11 +547,16 @@ class WandbLogger(LoggerInterface):
         """
         self.run.log({name: figure}, step=step)
 
-    def is_rollout_log(self, value: Any) -> bool:
+    def _is_rollout_log(self, value: Any) -> bool:
         """Check if a value is a rollout log."""
-        return bool(isinstance(value, list) and len(value) >= 1 and isinstance(value[0], dict) and "grpo_group_id" in value[0])
+        return bool(
+            isinstance(value, list)
+            and len(value) >= 1
+            and isinstance(value[0], dict)
+            and "grpo_group_id" in value[0]
+        )
 
-    def render_html_table(self, data: dict[str, Any]) -> str:
+    def _render_html_table(self, data: dict[str, Any]) -> str:
         """Render a dictionary as an HTML table."""
         header = ""
         row = ""
@@ -263,7 +569,7 @@ class WandbLogger(LoggerInterface):
 
         return f"<table><tr>{header}</tr>{row}</table>"
 
-    def render_rollout_log(self, rollouts: list[dict]) -> str:
+    def _render_rollout_log(self, rollouts: list[dict]) -> str:
         """Render a list of rollout logs as HTML.
 
         Args:
@@ -291,7 +597,9 @@ class WandbLogger(LoggerInterface):
 
                 content += f"<h3>Rollout {i}</h3>"
                 for message in rollout["messages"]:
-                    message_fixed = message["content"].replace("<", "&lt;").replace(">", "&gt;")
+                    message_fixed = (
+                        message["content"].replace("<", "&lt;").replace(">", "&gt;")
+                    )
 
                     if message["role"] == "tool":
                         continue
@@ -306,7 +614,9 @@ class WandbLogger(LoggerInterface):
                             call_id = tool_call.id
                             func_obj = tool_call.function
                             try:
-                                args_formatted = json.dumps(json.loads(func_obj.arguments), indent=2)
+                                args_formatted = json.dumps(
+                                    json.loads(func_obj.arguments), indent=2
+                                )
                             except json.JSONDecodeError:
                                 args_formatted = func_obj.arguments
                             response = tool_results.get(call_id, "[N/A]")
@@ -314,8 +624,12 @@ class WandbLogger(LoggerInterface):
                         content += "</div>"
 
                 content += "<p><b>Metrics:</b></p>"
-                content += self.render_html_table(
-                    {k: v for k, v in rollout.items() if k not in ["messages", "grpo_group_id", "env_metrics"]}
+                content += self._render_html_table(
+                    {
+                        k: v
+                        for k, v in rollout.items()
+                        if k not in ["messages", "grpo_group_id", "env_metrics"]
+                    }
                 )
 
                 # If any group metrics are group-wise, index them here.
@@ -323,387 +637,9 @@ class WandbLogger(LoggerInterface):
                 for k, v in env_metrics.items():
                     if isinstance(v, list) and len(v) == len(group_rollouts):
                         env_metrics[k] = v[i]
-                content += self.render_html_table(env_metrics)
+                content += self._render_html_table(env_metrics)
 
         return content
-
-
-class GpuMetricSnapshot(TypedDict):
-    """Snapshot of GPU metrics."""
-    step: int
-    metrics: dict[str, Any]
-
-
-class RayGpuMonitorLogger:
-    """Monitor GPU utilization across a Ray cluster and log metrics to a parent logger."""
-
-    def __init__(
-        self,
-        collection_interval: int | float,
-        flush_interval: int | float,
-        metric_prefix: str,
-        step_metric: str,
-        parent_logger: Optional["Logger"] = None,
-    ):
-        """Initialize the GPU monitor.
-
-        Args:
-            collection_interval: Interval in seconds to collect GPU metrics
-            flush_interval: Interval in seconds to flush metrics to parent logger
-            metric_prefix: Prefix for the metric names
-            step_metric: Name of the field to use as the step metric
-            parent_logger: Logger to receive the collected metrics
-        """
-        self.collection_interval = collection_interval
-        self.flush_interval = flush_interval
-        self.metric_prefix = metric_prefix
-        self.step_metric = step_metric
-        self.parent_logger = parent_logger
-        self.metrics_buffer: list[
-            GpuMetricSnapshot
-        ] = []  # Store metrics with timestamps
-        self.last_flush_time = time.time()
-        self.is_running = False
-        self.collection_thread: threading.Thread | None = None
-        self.lock = threading.Lock()
-        self.start_time: float = float("-inf")
-
-    def start(self) -> None:
-        """Start the GPU monitoring thread."""
-        if not ray.is_initialized(): # type: ignore[arg-type] - pyrefly hallucinates a fake param here
-            raise ValueError(
-                "Ray must be initialized with rlkit.distributed.virtual_cluster.init_ray() before the GPU logging can begin."
-            )
-
-        if self.is_running:
-            return
-
-        self.start_time = time.time()
-        self.is_running = True
-        self.collection_thread = threading.Thread(
-            target=self._collection_loop,
-            daemon=True,  # Make this a daemon thread so it doesn't block program exit
-        )
-        self.collection_thread.start()
-        print(
-            f"GPU monitoring started with collection interval={self.collection_interval}s, flush interval={self.flush_interval}s"
-        )
-
-    def stop(self) -> None:
-        """Stop the GPU monitoring thread."""
-        self.is_running = False
-        if self.collection_thread:
-            self.collection_thread.join(timeout=self.collection_interval * 2)
-
-        # Final flush
-        self.flush()
-        print("GPU monitoring stopped")
-
-    def _collection_loop(self) -> None:
-        """Main collection loop that runs in a separate thread."""
-        while self.is_running:
-            try:
-                collection_time = time.time()
-                relative_time = collection_time - self.start_time
-
-                # Collect metrics with timing information
-                metrics = self._collect_metrics()
-                if metrics:
-                    with self.lock:
-                        self.metrics_buffer.append(
-                            {
-                                "step": int(
-                                    relative_time
-                                ),  # Store the relative time as step
-                                "metrics": metrics,
-                            }
-                        )
-
-                # Check if it's time to flush
-                current_time = time.time()
-                if current_time - self.last_flush_time >= self.flush_interval:
-                    self.flush()
-                    self.last_flush_time = current_time
-
-                time.sleep(self.collection_interval)
-            except Exception as e:
-                print(
-                    f"Error in GPU monitoring collection loop or stopped abruptly: {e}"
-                )
-                time.sleep(self.collection_interval)  # Continue despite errors
-
-    def _parse_metric(self, sample: Sample, node_idx: int) -> dict[str, Any]:
-        """Parse a metric sample into a standardized format.
-
-        Args:
-            sample: Prometheus metric sample
-            node_idx: Index of the node
-
-        Returns:
-            Dictionary with metric name and value
-        """
-        metric_name = sample.name
-        labels = sample.labels
-        value = sample.value
-
-        if metric_name == "ray_node_gpus_utilization":
-            index = labels["GpuIndex"]
-            metric_name = f"node.{node_idx}.gpu.{index}.util"
-        elif metric_name == "ray_node_gram_used":
-            index = labels["GpuIndex"]
-            metric_name = f"node.{node_idx}.gpu.{index}.mem_gb"
-            # NOTE: It appears their docs say bytes, but it appears to be MB
-            value /= 1024
-        elif metric_name == "ray_node_mem_used":
-            metric_name = f"node.{node_idx}.mem_gb"
-            value /= 1024 * 1024 * 1024
-        elif metric_name == "ray_node_mem_total":
-            metric_name = f"node.{node_idx}.mem_total_gb"
-            value /= 1024 * 1024 * 1024
-        else:
-            # Skip unexpected metrics
-            return {}
-
-        return {metric_name: value}
-
-    def _parse_gpu_sku(self, sample: Sample, node_idx: int) -> dict[str, str]:
-        """Parse a GPU metric sample into a standardized format.
-
-        Args:
-            sample: Prometheus metric sample
-            node_idx: Index of the node
-
-        Returns:
-            Dictionary with metric name and value
-        """
-        # TODO: Consider plumbing {'GpuDeviceName': 'NVIDIA H100 80GB HBM3'}
-        # Expected labels for GPU metrics
-        expected_labels = ["GpuIndex", "GpuDeviceName"]
-        for label in expected_labels:
-            if label not in sample.labels:
-                # This is probably a CPU node
-                return {}
-
-        metric_name = sample.name
-        # Only return SKU if the metric is one of these which publish these metrics
-        if (
-            metric_name != "ray_node_gpus_utilization"
-            and metric_name != "ray_node_gram_used"
-        ):
-            # Skip unexpected metrics
-            return {}
-
-        labels = sample.labels
-        index = labels["GpuIndex"]
-        value = labels["GpuDeviceName"]
-
-        metric_name = f"node.{node_idx}.gpu.{index}.type"
-        return {metric_name: value}
-
-    def _collect_gpu_sku(self) -> dict[str, str]:
-        """Collect GPU SKU from all Ray nodes.
-
-        Note: This is an internal API and users are not expected to call this.
-
-        Returns:
-            Dictionary of SKU types on all Ray nodes
-        """
-        # TODO: We can re-use the same path for metrics because even though both utilization and memory metrics duplicate
-        #       the GPU metadata information; since the metadata is the same for each node, we can overwrite it and expect them to
-        #       be the same
-        return self._collect(collect_sku=True)
-
-    def _collect_metrics(self) -> dict[str, Any]:
-        """Collect GPU metrics from all Ray nodes.
-
-        Returns:
-            Dictionary of collected metrics
-        """
-        return self._collect(collect_metrics=True)
-
-    def _collect(self, collect_metrics: bool = False, collect_sku: bool = False) -> dict[str, Any]:
-        """Collect GPU metrics from all Ray nodes.
-
-        Returns:
-            Dictionary of collected metrics
-        """
-        assert collect_metrics ^ collect_sku, (
-            f"Must collect either metrics or sku, not both: {collect_metrics=}, {collect_sku=}"
-        )
-        parser_fn = self._parse_metric if collect_metrics else self._parse_gpu_sku
-
-        if not ray.is_initialized(): # type: ignore[arg-type] - pyrefly hallucinates a fake param here
-            print("Ray is not initialized. Cannot collect GPU metrics.")
-            return {}
-
-        try:
-            nodes = ray.nodes() # type: ignore[arg-type] - pyrefly hallucinates a fake param here
-            if not nodes:
-                print("No Ray nodes found.")
-                return {}
-
-            # Use a dictionary to keep unique metric endpoints and maintain order
-            unique_metric_addresses = {}
-            for node in nodes:
-                node_ip = node["NodeManagerAddress"]
-                metrics_port = node.get("MetricsExportPort")
-                if not metrics_port:
-                    continue
-                metrics_address = f"{node_ip}:{metrics_port}"
-                unique_metric_addresses[metrics_address] = True
-
-            # Process each node's metrics
-            collected_metrics: dict[str, Any] = {}
-            for node_idx, metric_address in enumerate(unique_metric_addresses):
-                metrics = self._fetch_and_parse_metrics(
-                    node_idx, metric_address, parser_fn
-                )
-                collected_metrics.update(metrics)
-
-            return collected_metrics
-
-        except Exception as e:
-            print(f"Error collecting GPU metrics: {e}")
-            return {}
-
-    def _fetch_and_parse_metrics(
-        self, node_idx: int, metric_address: str, parser_fn: Callable
-    ) -> dict[str, Any]:
-        """Fetch metrics from a node and parse GPU metrics.
-
-        Args:
-            node_idx: Index of the node
-            metric_address: Address of the metrics endpoint
-            parser_fn: Function to parse the metrics
-
-        Returns:
-            Dictionary of GPU metrics
-        """
-        url = f"http://{metric_address}/metrics"
-
-        try:
-            response = requests.get(url, timeout=5.0)
-            if response.status_code != 200:
-                print(f"Error: Status code {response.status_code}")
-                return {}
-
-            metrics_text = response.text
-            gpu_metrics = {}
-
-            # Parse the Prometheus format
-            for family in text_string_to_metric_families(metrics_text):
-                for sample in family.samples:
-                    metrics = parser_fn(sample, node_idx)
-                    gpu_metrics.update(metrics)
-
-            return gpu_metrics
-
-        except Exception as e:
-            print(f"Error fetching metrics from {metric_address}: {e}")
-            return {}
-
-    def flush(self) -> None:
-        """Flush collected metrics to the parent logger."""
-        with self.lock:
-            if not self.metrics_buffer:
-                return
-
-            if self.parent_logger:
-                # Log each set of metrics with its original step
-                for entry in self.metrics_buffer:
-                    step = entry["step"]
-                    metrics = entry["metrics"]
-
-                    # Add the step metric directly to metrics for use as step_metric
-                    metrics[self.step_metric] = step
-
-                    # Pass step_metric as the step_metric to use it as the step value in wandb
-                    self.parent_logger.log_metrics(
-                        metrics,
-                        step=step,
-                        prefix=self.metric_prefix,
-                        step_metric=self.step_metric,
-                    )
-
-            # Clear buffer after logging
-            self.metrics_buffer = []
-
-
-class Logger(LoggerInterface):
-    """Main logger class that delegates to multiple backend loggers."""
-
-    def __init__(self, cfg: LoggingConfig):
-        """Initialize the logger.
-
-        Args:
-            cfg: Config dict with the following keys:
-                - wandb_enabled
-                - mlflow_enabled
-                - wandb
-                - monitor_gpus
-                - gpu_collection_interval
-                - gpu_flush_interval
-        """
-        self.loggers: list[LoggerInterface] = []
-        self.wandb_logger = None
-
-        self.base_log_dir = cfg.log_dir
-        os.makedirs(self.base_log_dir, exist_ok=True)
-
-        wandb_log_dir = os.path.join(self.base_log_dir, "wandb")
-        os.makedirs(wandb_log_dir, exist_ok=True)
-        self.wandb_logger = WandbLogger(cfg.wandb, log_dir=wandb_log_dir)
-        self.loggers.append(self.wandb_logger)
-
-        # Initialize GPU monitoring if requested
-        self.gpu_monitor = None
-
-        metric_prefix = "ray"
-        step_metric = f"{metric_prefix}/ray_step"
-
-        self.wandb_logger.define_metric(
-            f"{metric_prefix}/*", step_metric=step_metric
-        )
-
-        self.gpu_monitor = RayGpuMonitorLogger(
-            collection_interval=cfg.gpu_monitoring.collection_interval,
-            flush_interval=cfg.gpu_monitoring.flush_interval,
-            metric_prefix=metric_prefix,
-            step_metric=step_metric,
-            parent_logger=self,
-        )
-        self.gpu_monitor.start()
-
-        if not self.loggers:
-            print("No loggers initialized")
-
-    def log_metrics(
-        self,
-        metrics: dict[str, Any],
-        step: int,
-        prefix: str | None = "",
-        step_metric: str | None = None,
-    ) -> None:
-        """Log metrics to all enabled backends.
-
-        Args:
-            metrics: Dict of metrics to log
-            step: Global step value
-            prefix: Optional prefix for metric names
-            step_metric: Optional name of a field in metrics to use as step instead
-                         of the provided step value (currently only needed for wandb)
-        """
-        for logger in self.loggers:
-            logger.log_metrics(metrics, step, prefix, step_metric)
-
-    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
-        """Log hyperparameters to all enabled backends.
-
-        Args:
-            params: Dict of hyperparameters to log
-        """
-        for logger in self.loggers:
-            logger.log_hyperparams(params)
 
     def __del__(self) -> None:
         """Clean up resources when the logger is destroyed."""

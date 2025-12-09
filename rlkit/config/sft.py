@@ -4,9 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .checkpointing import CheckpointingConfig
-from .logging import LoggingConfig
-from .policy import PolicyConfig
+from rlkit.config.base import BaseConfig
 
 
 class SFTTrainerConfig(BaseModel):
@@ -17,11 +15,8 @@ class SFTTrainerConfig(BaseModel):
 
     # Validation settings
     val_period: int = 0  # Steps between validation runs (0 = no validation)
-    val_batches: int = 0  # Number of batches per validation (0 = full validation set)
+    val_num_bins: int = 0  # Number of batches per validation (0 = full validation set)
     val_at_start: bool = False  # Run validation before training starts
-
-    # Random seed for reproducibility
-    seed: int = 42
 
 
 DatasetType = Literal["axolotl", "openai_prompt_completion", "openai", "sharegpt", "native"]
@@ -34,6 +29,10 @@ class DataConfig(BaseModel):
     train_dataset: str
     val_dataset: str | None = None
 
+    # Dataset splits to use
+    train_split: str = "train"
+    val_split: str = "validation"
+
     # Format of the dataset
     dataset_type: DatasetType = "native"
 
@@ -44,11 +43,8 @@ class DataConfig(BaseModel):
     shuffle: bool = True
 
 
-class SFTConfig(BaseModel):
+class SFTConfig(BaseConfig):
     """Root configuration for SFT runs."""
 
     sft: SFTTrainerConfig
-    policy: PolicyConfig
     data: DataConfig
-    logging: LoggingConfig
-    checkpointing: CheckpointingConfig

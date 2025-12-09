@@ -2,7 +2,6 @@
 
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import numpy as np
@@ -10,14 +9,12 @@ import torch
 from datasets import Dataset, load_dataset, load_from_disk
 from rich.console import Console
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from rlkit.algorithms.base_trainer import BaseTrainer
+from rlkit.algorithms.base_trainer import BaseTrainer, SamplesPerSecondEMA, format_duration
 from rlkit.algorithms.loss_functions import NLLLoss
-from rlkit.algorithms.utils import set_seed
 from rlkit.config.sft import DataConfig, SFTConfig
 from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
-from rlkit.data.sft_datasets import transform_dataset
+from rlkit.data.sft_datasets import transform_sample
 from rlkit.utils.timer import Timer
 
 
@@ -26,13 +23,7 @@ class SFTSaveState(TypedDict):
 
     step: int
     consumed_samples: int
-
-
-def _default_sft_save_state() -> SFTSaveState:
-    return {
-        "step": 0,
-        "consumed_samples": 0,
-    }
+    elapsed_seconds: float
 
 
 class SFTTrainer(BaseTrainer[SFTSaveState]):
@@ -51,29 +42,17 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         Args:
             config: Full SFT configuration.
         """
+        super().__init__(config)
         self.config = config
+
         self.policy_config = config.policy
         self.training_config = config.policy.training
         self.sft_config = config.sft
         self.data_config = config.data
 
-        set_seed(self.sft_config.seed)
-
-        # Set up logging
-        self.logger = self._setup_logger(config.logging)
-
-        # Set up checkpointing
-        self.checkpointer, self.save_state, last_checkpoint_path = self._setup_checkpointing(
-            config.checkpointing
-        )
-
-        # Load tokenizer
-        self.tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(
-            self.policy_config.model_name
-        )
-
         # Load and prepare datasets
         logging.info("Loading datasets...")
+        self.dataset_type = self.data_config.dataset_type
         self.train_dataset, self.val_dataset = self._load_datasets(self.data_config)
 
         # Set up dataloader
@@ -89,80 +68,28 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                 shuffle=False,
             )
 
-        # Set up compute cluster
-        logging.info("\n▶ Setting up compute cluster...")
-        train_resources = self.training_config.resources
-        self.cluster = self._setup_train_cluster(
-            num_nodes=train_resources.num_nodes,
-            gpus_per_node=train_resources.gpus_per_node,
-            name="sft_train_cluster",
-        )
-
-        # Determine checkpoint paths for resumption
-        weights_path = None
-        optimizer_path = None
-        if last_checkpoint_path:
-            weights_path = Path(last_checkpoint_path) / "policy" / "weights"
-            optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
-
-        # Check if using cut cross entropy (kernel-level optimization)
-        use_cce = self.training_config.loss.loss_fn == "cut_cross_entropy"
-        if use_cce:
-            logging.info("Using cut cross-entropy loss kernel")
-
-        # Initialize policy
-        self.policy = self._initialize_policy(
-            cluster=self.cluster,
-            policy_config=self.policy_config,
-            tokenizer=self.tokenizer,
-            weights_path=weights_path,
-            optimizer_path=optimizer_path,
-            use_cut_cross_entropy=use_cce,
-        )
-
         # Loss function (always NLL for SFT - cut_cross_entropy is unique and special-cased)
         self.loss_fn = NLLLoss()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Abstract method implementations
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _get_default_save_state(self) -> SFTSaveState:
-        return _default_sft_save_state()
-
-    def _get_pad_values(self) -> dict[str, int | float | bool]:
         return {
-            "token_ids": self.tokenizer.pad_token_id or 0,
-            "token_mask": False,
+            "step": 0,
+            "consumed_samples": 0,
+            "elapsed_seconds": 0.0,
         }
 
-    def _get_config_for_logging(self) -> dict[str, Any]:
-        return self.config.model_dump()
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Dataset handling
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _load_datasets(self, data_config: DataConfig) -> tuple[Dataset, Dataset | None]:
-        """Load and transform train/validation datasets."""
+        """Load train/validation datasets."""
         train_dataset: Dataset
         if data_config.from_disk:
             train_dataset = cast(Dataset, load_from_disk(data_config.train_dataset))
         else:
             loaded = load_dataset(data_config.train_dataset)
             if isinstance(loaded, dict):
-                train_dataset = cast(Dataset, loaded.get("train", loaded))
+                train_dataset = cast(Dataset, loaded.get(data_config.train_split, loaded))
             else:
                 train_dataset = cast(Dataset, loaded)
-
-        # Transform if not native format
-        if data_config.dataset_type != "native":
-            logging.info(f"Transforming dataset from '{data_config.dataset_type}' format...")
-            train_dataset = transform_dataset(
-                train_dataset,
-                data_config.dataset_type,
-                self.tokenizer,
-            )
 
         logging.info(f"  ✓ Training dataset loaded with {len(train_dataset)} samples")
 
@@ -174,16 +101,9 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             else:
                 loaded = load_dataset(data_config.val_dataset)
                 if isinstance(loaded, dict):
-                    val_dataset = cast(Dataset, loaded.get("validation", loaded.get("test", loaded)))
+                    val_dataset = cast(Dataset, loaded.get(data_config.val_split, loaded))
                 else:
                     val_dataset = cast(Dataset, loaded)
-
-            if data_config.dataset_type != "native":
-                val_dataset = transform_dataset(
-                    val_dataset,
-                    data_config.dataset_type,
-                    self.tokenizer,
-                )
 
             logging.info(f"  ✓ Validation dataset loaded with {len(val_dataset)} samples")
 
@@ -206,12 +126,18 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
     def _sample_to_document(self, sample: dict[str, Any]) -> dict[str, list] | None:
         """Convert a dataset sample to document format for packing.
 
+        Applies lazy transformation (e.g., tokenization) if the dataset is not
+        already in native format, then converts to the packing format.
+
         Args:
-            sample: Dictionary with 'input_ids' and 'token_mask' keys.
+            sample: Raw sample dict from the dataset.
 
         Returns:
             Document dict or None if sample is invalid/too long.
         """
+        # Lazily transform the sample (e.g., tokenize) if needed
+        sample = transform_sample(sample, self.dataset_type, self.tokenizer)
+
         max_seq_len = self.policy_config.max_total_sequence_length
 
         input_ids = sample["input_ids"]
@@ -237,10 +163,6 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             "token_mask": [bool(m) for m in token_mask],
         }
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Training
-    # ─────────────────────────────────────────────────────────────────────────
-
     async def train(self) -> None:
         """Run the SFT training loop."""
         timer = Timer()
@@ -256,6 +178,12 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         pad_values = self._get_pad_values()
         global_batch_size = self.training_config.global_num_bins
 
+        # Elapsed time tracking (restored from checkpoint + session time)
+        checkpoint_elapsed = self.save_state.get("elapsed_seconds", 0.0)
+        session_start = datetime.now()
+        samples_ema = SamplesPerSecondEMA(alpha=0.1)
+        total_samples = len(self.train_dataset)
+
         # Run initial validation if requested
         if self.sft_config.val_at_start and step == 0 and self.val_dataloader is not None:
             console.log("[cyan]Running initial validation...[/]")
@@ -269,6 +197,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         packing_pool: list[dict[str, list]] = []
         out_of_samples = False
         step_start = datetime.now()
+        step_consumed_start = consumed_samples
 
         # Initialize bins/remainder for the loop
         bins: list[dict[str, list]] = []
@@ -367,13 +296,34 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                     status.update(f"[bold]Saving checkpoint for step {step + 1}...[/]")
                     self.save_state["step"] = step + 1
                     self.save_state["consumed_samples"] = consumed_samples
+                    self.save_state["elapsed_seconds"] = checkpoint_elapsed + (datetime.now() - session_start).total_seconds()
                     self._save_checkpoint(step, timer)
 
+                # Calculate samples processed this step and update EMA
+                samples_this_step = consumed_samples - step_consumed_start
+                step_elapsed = (datetime.now() - step_start).total_seconds()
+                samples_ema.update(samples_this_step, step_elapsed)
+                total_elapsed = checkpoint_elapsed + (datetime.now() - session_start).total_seconds()
+                remaining_samples = total_samples - consumed_samples
+                eta_seconds = remaining_samples / samples_ema.get() if samples_ema.get() > 0 else 0.0
+
                 # Log metrics
-                self._log_step(step, train_results, timer, bin_stats, console)
+                self._log_step(
+                    step,
+                    train_results,
+                    timer,
+                    bin_stats,
+                    console,
+                    samples_ema.get(),
+                    total_elapsed,
+                    eta_seconds,
+                    remaining_samples,
+                    step_elapsed,
+                )
 
                 timer.reset()
                 step_start = datetime.now()
+                step_consumed_start = consumed_samples
                 step += 1
 
                 # Check if we hit max steps or ran out of data with empty pool
@@ -386,6 +336,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         if self.config.checkpointing.enabled:
             self.save_state["step"] = step + 1
             self.save_state["consumed_samples"] = consumed_samples
+            self.save_state["elapsed_seconds"] = checkpoint_elapsed + (datetime.now() - session_start).total_seconds()
             self._save_checkpoint(step, timer)
 
     async def _validate(self, step: int) -> dict[str, float] | None:
@@ -402,7 +353,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
 
         pad_values = self._get_pad_values()
         val_gbs = self.training_config.global_num_bins
-        val_batches = self.sft_config.val_batches
+        val_batches = self.sft_config.val_num_bins
 
         self.policy.prepare_for_training()
 
@@ -414,7 +365,9 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         bins: list[dict[str, list]] = []
         remainder: list[dict[str, list]] = []
 
-        total_loss = 0.0
+        # Track weighted loss for proper averaging across variable-length batches
+        total_weighted_loss = 0.0
+        total_tokens = 0
         num_batches = 0
 
         while val_batches == 0 or num_batches < val_batches:
@@ -455,20 +408,27 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                 eval_mode=True,
             )
 
-            loss = val_results["loss"]
-            if isinstance(loss, torch.Tensor):
-                total_loss += loss.sum().item()
-            else:
-                total_loss += float(loss)
+            # Loss is already properly normalized in lm_policy
+            # But we need to weight by tokens to get correct average across batches
+            all_mb_metrics = val_results.get("all_mb_metrics", {})
+            batch_tokens = sum(all_mb_metrics.get("num_unmasked_tokens", [0]))
+            batch_loss = val_results["loss"]
+            if isinstance(batch_loss, torch.Tensor):
+                batch_loss = batch_loss.item()
+
+            if batch_tokens > 0:
+                total_weighted_loss += batch_loss * batch_tokens
+                total_tokens += batch_tokens
             num_batches += 1
 
-        if num_batches == 0:
+        if num_batches == 0 or total_tokens == 0:
             logging.warning("No validation batches completed")
             return None
 
         return {
-            "val_loss": total_loss / num_batches,
+            "val_loss": total_weighted_loss / total_tokens,
             "val_batches": num_batches,
+            "val_tokens": total_tokens,
         }
 
     def _log_step(
@@ -478,14 +438,17 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         timer: Timer,
         bin_stats: dict[str, float],
         console: Console,
+        samples_per_sec: float,
+        total_elapsed: float,
+        eta_seconds: float,
+        remaining_samples: int,
+        step_elapsed: float,
     ) -> None:
         """Log training metrics for a step."""
-        # Extract metrics
+        # Loss is already properly normalized as weighted average in lm_policy
         loss = train_results["loss"]
         if isinstance(loss, torch.Tensor):
-            loss = loss.sum().item()
-        else:
-            loss = float(np.sum(loss))
+            loss = loss.item()
 
         grad_norm = train_results.get("grad_norm")
         if grad_norm is not None:
@@ -501,7 +464,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
 
         # Get token counts from microbatch metrics
         all_mb_metrics = train_results.get("all_mb_metrics", {})
-        total_tokens = int(sum(all_mb_metrics.get("global_valid_toks", [0])))
+        total_tokens = int(sum(all_mb_metrics.get("num_unmasked_tokens", [0])))
 
         # Log to console
         throughput = total_tokens / train_time if train_time > 0 else 0.0
@@ -510,7 +473,10 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             f"loss=[cyan]{loss:.4f}[/] "
             f"toks=[white]{total_tokens}[/] "
             f"time=[green]{train_time:.2f}s[/] "
-            f"toks/s=[magenta]{throughput:.0f}[/]"
+            f"tps=[magenta]{throughput:.0f}[/] "
+            f"left=[blue]{remaining_samples}[/] "
+            f"elapsed=[green]{format_duration(total_elapsed)}[/] "
+            f"eta=[yellow]{format_duration(eta_seconds)}[/]"
         )
 
         # Log to wandb
@@ -518,10 +484,18 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             "loss": loss,
             "total_tokens": total_tokens,
             "throughput_toks_per_sec": throughput,
+            "samples_per_sec": samples_per_sec,
             **bin_stats,
         }
         if grad_norm is not None:
             metrics["grad_norm"] = grad_norm
 
+        # Include router statistics if available (MoE models)
+        if "router_statistics" in train_results:
+            self.logger.log_metrics(train_results["router_statistics"], step + 1, prefix="router")
+
         self.logger.log_metrics(metrics, step + 1, prefix="train")
-        self.logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
+
+        # Add step time to timing metrics
+        timing_metrics["step_time"] = step_elapsed
+        self.logger.log_metrics(timing_metrics, step + 1, prefix="timing")

@@ -1,0 +1,78 @@
+category: "rlkit-sft-debug"
+name: "trinity-nano-ultrachat-2gpu"
+
+sft:
+  max_steps: null
+  val_period: 100
+  val_num_bins: 8
+  val_at_start: true
+
+policy:
+  model_name: "arcee-ai/Trinity-Nano-Base"
+  max_total_sequence_length: 4096
+
+  training:
+    global_num_bins: 128
+    micro_batch_size: 1
+    dtype: "bfloat16"
+    activation_checkpointing: true
+    max_grad_norm: 1.0
+
+    parallelism:
+      tp_size: 1
+      ep_size: 2
+      dp_replicate: 1
+
+    optimizer:
+      name: "torchao.optim.AdamW8bit"
+      kwargs:
+        lr: 3.0e-6
+        weight_decay: 0.01
+        betas: [0.9, 0.999]
+        eps: 1.0e-8
+      scheduler:
+        phases:
+          - name: "torch.optim.lr_scheduler.LinearLR"
+            kwargs:
+              start_factor: 1.0e-6
+              end_factor: 1.0
+              total_iters: 100
+          - name: "torch.optim.lr_scheduler.LinearLR"
+            kwargs:
+              start_factor: 1.0
+              end_factor: 0.7
+              total_iters: 700
+          - name: "torch.optim.lr_scheduler.LinearLR"
+            kwargs:
+              start_factor: 0.7
+              end_factor: 1.0e-6
+              total_iters: 633
+        milestones: [100, 800]
+
+    loss:
+      loss_fn: cut_cross_entropy
+
+    resources:
+      gpus_per_node: 2
+      num_nodes: 1
+
+data:
+  train_dataset: "HuggingFaceH4/ultrachat_200k"
+  train_split: "train_sft"
+  val_dataset: null  # When not set, it uses a split from the train dataset instead.
+  val_split: "test_sft"
+  dataset_type: "openai"
+  from_disk: false
+  shuffle: false
+
+logging:
+  log_dir: "logs"
+  gpu_monitoring:
+    collection_interval: 10
+    flush_interval: 10
+
+checkpointing:
+  enabled: true
+  checkpoint_dir: "results/sft"
+  save_period: 200
+  keep_top_k: 3

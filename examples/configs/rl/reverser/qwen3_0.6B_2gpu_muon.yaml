@@ -1,4 +1,6 @@
-# GRPO RL Configuration (New Format)
+category: "rlkit-rl-debug"
+name: "reverser-qwen3-0.6B-2gpu-muon"
+
 rollouts:
   group_size: 16
   max_concurrent_rollouts: null
@@ -68,9 +70,6 @@ env:
 
 logging:
   log_dir: "logs"
-  wandb:
-    project: "nemo-grpo-dev"
-    name: "grpo-vf-reverser-0.6B"
   gpu_monitoring:
     collection_interval: 10
     flush_interval: 10

@@ -4,9 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .checkpointing import CheckpointingConfig
-from .logging import LoggingConfig
-from .policy import PolicyConfig
+from rlkit.config.base import BaseConfig
 
 
 class RolloutsConfig(BaseModel):
@@ -36,11 +34,8 @@ class EnvironmentConfig(BaseModel):
     shuffle: bool = False
 
 
-class RLConfig(BaseModel):
+class RLConfig(BaseConfig):
     """Root configuration for RL runs."""
 
     rollouts: RolloutsConfig
-    policy: PolicyConfig
     env: EnvironmentConfig
-    logging: LoggingConfig
-    checkpointing: CheckpointingConfig

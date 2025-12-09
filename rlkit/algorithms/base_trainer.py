@@ -6,12 +6,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
-from transformers import PreTrainedTokenizerBase
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
+from rlkit.algorithms.utils import set_seed
+from rlkit.config.base import BaseConfig
 from rlkit.config.checkpointing import CheckpointingConfig
-from rlkit.config.logging import LoggingConfig
 from rlkit.config.policy import PolicyConfig
-from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.training.lm_policy import Policy
 from rlkit.utils.checkpoint import CheckpointManager
@@ -20,6 +20,71 @@ from rlkit.utils.timer import Timer
 
 # Generic type for save state - each trainer defines its own TypedDict
 SaveStateT = TypeVar("SaveStateT")
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds as 'Xd Yh Zm' or shorter if less than a day/hour.
+
+    Args:
+        seconds: Duration in seconds.
+
+    Returns:
+        Human-readable duration string like '7d 12h 45m' or '2h 30m' or '15m'.
+    """
+    if seconds < 0:
+        return "0m"
+
+    total_minutes = int(seconds / 60)
+    minutes = total_minutes % 60
+    total_hours = total_minutes // 60
+    hours = total_hours % 24
+    days = total_hours // 24
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0 or days > 0:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+
+    return " ".join(parts)
+
+
+class SamplesPerSecondEMA:
+    """Exponential moving average tracker for samples per second."""
+
+    def __init__(self, alpha: float = 0.1):
+        """Initialize the EMA tracker.
+
+        Args:
+            alpha: Smoothing factor (0 < alpha <= 1). Higher values give more weight to recent samples.
+        """
+        self.alpha = alpha
+        self.ema: float | None = None
+
+    def update(self, samples: int, elapsed_seconds: float) -> float:
+        """Update the EMA with a new measurement.
+
+        Args:
+            samples: Number of samples processed.
+            elapsed_seconds: Time taken to process the samples.
+
+        Returns:
+            The updated EMA value.
+        """
+        if elapsed_seconds <= 0:
+            return self.ema or 0.0
+
+        current_rate = samples / elapsed_seconds
+        if self.ema is None:
+            self.ema = current_rate
+        else:
+            self.ema = self.alpha * current_rate + (1 - self.alpha) * self.ema
+        return self.ema
+
+    def get(self) -> float:
+        """Get the current EMA value."""
+        return self.ema or 0.0
 
 
 class BaseTrainer[SaveStateT](ABC):
@@ -40,9 +105,6 @@ class BaseTrainer[SaveStateT](ABC):
     tokenizer: PreTrainedTokenizerBase
     save_state: SaveStateT
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # ABSTRACT: Must be implemented by subclasses
-    # ─────────────────────────────────────────────────────────────────────────
 
     @abstractmethod
     def _get_default_save_state(self) -> SaveStateT:
@@ -50,29 +112,51 @@ class BaseTrainer[SaveStateT](ABC):
         ...
 
     @abstractmethod
+    async def train(self) -> None:
+        """Main training loop."""
+        ...
+
+    def __init__(self, config: BaseConfig) -> None:
+        """Initialize the base trainer."""
+        self.config = config
+        self.policy_config = config.policy
+        self.logging_config = config.logging
+        self.checkpointing_config = config.checkpointing
+
+        self.logger = Logger(config.category, config.name, self.logging_config)
+        self.logger.log_hyperparams(self.config.model_dump())
+
+        self.checkpointer, self.save_state, last_checkpoint_path = self._setup_checkpointing(self.checkpointing_config)
+        self.train_cluster = self._setup_train_cluster(self.policy_config)
+
+        self.tokenizer = AutoTokenizer.from_pretrained(self.policy_config.model_name)
+
+        if last_checkpoint_path:
+            weights_path = Path(last_checkpoint_path) / "policy" / "weights"
+            optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
+        else:
+            weights_path = None
+            optimizer_path = None
+
+        self.policy = Policy(
+            cluster=self.train_cluster,
+            config=self.policy_config,
+            tokenizer=self.tokenizer,
+            weights_path=weights_path,
+            optimizer_path=optimizer_path,
+            init_optimizer=True,
+        )
+
+        set_seed(self.config.seed)
+
     def _get_pad_values(self) -> dict[str, int | float | bool]:
         """Return pad values for sequence packing."""
-        ...
-
-    @abstractmethod
-    def _get_config_for_logging(self) -> dict[str, Any]:
-        """Return config dict for logging hyperparameters."""
-        ...
-
-    @abstractmethod
-    async def train(self) -> None:
-        """Main training loop - implemented differently for SFT vs RL."""
-        ...
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # SHARED: Reusable implementations
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _setup_logger(self, logging_config: LoggingConfig) -> Logger:
-        """Set up the logger - identical for all trainers."""
-        logger = Logger(logging_config)
-        logger.log_hyperparams(self._get_config_for_logging())
-        return logger
+        return {
+            "token_ids": self.tokenizer.pad_token_id,
+            "token_mask": False,
+            "advantages": 0.0,
+            "generation_logprobs": -9999.0,
+        }
 
     def _setup_checkpointing(
         self, checkpointing_config: CheckpointingConfig
@@ -88,45 +172,21 @@ class BaseTrainer[SaveStateT](ABC):
             save_state = self._get_default_save_state()
         return checkpointer, save_state, last_checkpoint_path
 
-    def _setup_train_cluster(
-        self,
-        num_nodes: int,
-        gpus_per_node: int,
-        name: str = "train_cluster",
-    ) -> RayVirtualCluster:
+    def _setup_train_cluster(self, policy_config: PolicyConfig) -> RayVirtualCluster:
         """Create a Ray virtual cluster for training."""
+        train_resources = policy_config.training.resources
+        gpus_per_node = train_resources.gpus_per_node
+        num_nodes = train_resources.num_nodes
+
         cluster = RayVirtualCluster(
-            name=name,
+            name="train_cluster",
             bundle_ct_per_node_list=[gpus_per_node] * num_nodes,
             use_gpus=True,
             num_gpus_per_node=gpus_per_node,
             max_colocated_worker_groups=1,
         )
-        logging.info(
-            f"Ray cluster '{name}' initialized with {num_nodes} nodes, "
-            f"{gpus_per_node} GPUs per node"
-        )
+        logging.info(f"Training cluster initialized with {num_nodes} nodes and {gpus_per_node} GPUs per node.")
         return cluster
-
-    def _initialize_policy(
-        self,
-        cluster: RayVirtualCluster,
-        policy_config: PolicyConfig,
-        tokenizer: PreTrainedTokenizerBase,
-        weights_path: Path | str | None = None,
-        optimizer_path: Path | str | None = None,
-        use_cut_cross_entropy: bool = False,
-    ) -> Policy:
-        """Initialize the policy - common pattern with optional extras."""
-        return Policy(
-            cluster=cluster,
-            config=policy_config,
-            tokenizer=tokenizer,
-            weights_path=weights_path,
-            optimizer_path=optimizer_path,
-            init_optimizer=True,
-            use_cut_cross_entropy=use_cut_cross_entropy,
-        )
 
     def _save_checkpoint(self, step: int, timer: Timer) -> None:
         """Save a training checkpoint.
@@ -144,7 +204,7 @@ class BaseTrainer[SaveStateT](ABC):
             checkpoint_path = self.checkpointer.init_tmp_checkpoint(
                 step + 1,
                 cast(dict[str, Any], self.save_state),
-                self._get_config_for_logging(),
+                self.config.model_dump(),
             )
             self.policy.save_checkpoint(
                 weights_path=os.path.join(checkpoint_path, "policy", "weights"),

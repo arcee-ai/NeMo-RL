@@ -26,7 +26,7 @@ SFTDataTransformFn = Callable[[PreTrainedTokenizerBase | None, dict], dict]
 
 def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
     assert tokenizer is not None, "Tokenizer is required for OpenAI dataset transformation"
-    conversation = x["conversations"]
+    conversation = x["conversations"] if "conversations" in x else x["messages"]
     sample_mask = x.get("sample_mask", 1.0)
 
     if isinstance(conversation, str):
@@ -92,6 +92,14 @@ transformations: dict[str, SFTDataTransformFn] = {
     ),
     "openai": _transform_oai,
 }
+
+def transform_sample(sample: dict, dataset_type: DatasetType, tokenizer: PreTrainedTokenizerBase | None) -> dict:
+    """Transform a single sample into the RLKit native format."""
+    if dataset_type != "native":
+        if dataset_type not in transformations:
+            raise ValueError(f"Unsupported dataset type: {dataset_type}")
+        return transformations[dataset_type](tokenizer, sample)
+    return sample
 
 def transform_dataset(dataset: Dataset, dataset_type: DatasetType, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
     """Transform a dataset into the RLKit native format."""

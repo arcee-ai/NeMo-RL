@@ -6,18 +6,29 @@ import torch.nn.functional as F
 from accelerate import init_empty_weights
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
+from rlkit.algorithms.utils import set_seed
 from rlkit.models.convert import get_model_config
+
+set_seed(42)
+
+# Enable deterministic algorithms for reproducibility
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+torch.use_deterministic_algorithms(True, warn_only=True)
 
 model_name = sys.argv[1]
 
 device = "cuda"
 if device == "cuda":
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.set_float32_matmul_precision("high")
+    # Disable TF32 for exact reproducibility (TF32 can cause numeric variations)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.set_float32_matmul_precision("highest")
 
 config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
 
 model_class, model_args, state_dict_adapter_class = get_model_config(config)
+
 
 print("create tt model")
 with init_empty_weights():
@@ -139,10 +150,9 @@ with torch.no_grad():
             logits_hf = model_hf(input_ids.cpu()).logits
     print("run tt model")
     with torch.inference_mode():
-
         if device == "cuda":
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits_tt = model_tt(input_ids, attention_masks=model_tt.get_attention_masks(input_ids, tokenizer))
+                logits_tt = model_tt(input_ids, attention_masks=model_tt.get_attention_masks(input_ids, tokenizer.pad_token_id))
         else:
             logits_tt = model_tt(input_ids)
 

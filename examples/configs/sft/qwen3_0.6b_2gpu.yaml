@@ -1,13 +1,15 @@
+category: "rlkit-sft-debug"
+name: "qwen3-0.6b-ultrachat-2gpu"
+
 sft:
-  max_steps: 9999999  # Train until data exhausted or this limit
+  max_steps: 30
   val_period: 100
-  val_batches: 8
+  val_num_bins: 8
   val_at_start: true
-  seed: 42
 
 policy:
-  model_name: "arcee-train/hf-converted-afmoe-nano-ctxext-v4"
-  max_total_sequence_length: 4096
+  model_name: "aurelium/Qwen3-0.6B-Base-genmask"
+  max_total_sequence_length: 1024
 
   training:
     global_num_bins: 128
@@ -48,24 +50,23 @@ policy:
         milestones: [100, 800]
 
     loss:
-      loss_fn: cut_cross_entropy
+      loss_fn: nll
 
     resources:
       gpus_per_node: 2
       num_nodes: 1
 
 data:
-  train_dataset: "arcee-train/AFMoE-SFT-v0.1.9-64k-RLKit-Fixed"
-  val_dataset: null
-  dataset_type: "native"
+  train_dataset: "HuggingFaceH4/ultrachat_200k"
+  train_split: "train_sft"
+  val_dataset: null  # When not set, it uses a split from the train dataset instead.
+  val_split: "test_sft"
+  dataset_type: "openai"
   from_disk: false
   shuffle: false
 
 logging:
   log_dir: "logs"
-  wandb:
-    project: "AFMoE-6b-SFT-Debug"
-    name: "afmoe-nano-sft"
   gpu_monitoring:
     collection_interval: 10
     flush_interval: 10

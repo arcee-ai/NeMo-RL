@@ -92,15 +92,12 @@ class DTensorV2PolicyWorker:
         tokenizer: PreTrainedTokenizerBase,
         weights_path: str | None = None,
         optimizer_path: str | None = None,
-        use_cut_cross_entropy: bool = False,
         **kwargs: Any,
     ):
         """Set up the training worker.
 
         Loads and parallelizes the model, sets up the optimizer and scheduler, and loads checkpoint if provided.
         """
-        self.use_cut_cross_entropy = use_cut_cross_entropy
-
         # Explicitly set NCCL_CUMEM_ENABLE to 1 to avoid the P2P initialization error for PyNCCLCommunicator.
         # See https://github.com/NVIDIA-NeMo/RL/issues/564 for more details.
         os.environ["NCCL_CUMEM_ENABLE"] = "1"
@@ -168,6 +165,7 @@ class DTensorV2PolicyWorker:
             del model
 
         print("Initializing custom model on meta device...")
+        self.use_cut_cross_entropy = self.cfg.training.loss.loss_fn == "cut_cross_entropy"
         with init_empty_weights():
             self.model = custom_model_class(model_args=self.custom_model_args, skip_logits=self.use_cut_cross_entropy)
 
@@ -505,6 +503,7 @@ class DTensorV2PolicyWorker:
                     # Depending on how the model is configured, this is either output logits or the final hidden state
                     output: torch.Tensor = self.model(**forward_kwargs)
 
+                # CCE requires a special case because it uses hidden states and accepts the lm head weight as an argument
                 if self.use_cut_cross_entropy:
                     assert data_type == "sft", "Liger's cross-entropy loss kernel is only supported for SFT data"
 
@@ -546,6 +545,10 @@ class DTensorV2PolicyWorker:
 
                 del output
 
+                # Record loss BEFORE scaling for correct metrics
+                mb_losses.append(loss.item())
+                all_mb_metrics.append(loss_metrics)
+
                 # Backward pass
                 if not eval_mode:
                     ## NOTE: invalid samples should be multiplied
@@ -556,9 +559,6 @@ class DTensorV2PolicyWorker:
                     # but we want to sum them so we cancel out the average here
                     loss *= self.dp_size * self.cp_size
                     loss.backward()
-
-                mb_losses.append(loss.item())
-                all_mb_metrics.append(loss_metrics)
 
             # Full batch finished, compute and maybe clip grad norm.
             grad_norm: float | torch.Tensor | None = None

@@ -3,13 +3,6 @@
 from pydantic import BaseModel
 
 
-class WandbConfig(BaseModel):
-    """Configuration for Weights & Biases logging."""
-
-    project: str
-    name: str
-
-
 class GPUMonitoringConfig(BaseModel):
     """Configuration for GPU monitoring."""
 
@@ -21,5 +14,4 @@ class LoggingConfig(BaseModel):
     """Configuration for all logging."""
 
     log_dir: str
-    wandb: WandbConfig
     gpu_monitoring: GPUMonitoringConfig
