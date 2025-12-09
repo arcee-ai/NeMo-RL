@@ -19,6 +19,7 @@ own checkpoint saving function (called by the algorithm loop).
 
 import glob
 import json
+import logging
 import os
 import shutil
 from collections.abc import Mapping
@@ -30,6 +31,8 @@ import torch
 import yaml
 
 from rlkit.config.checkpointing import CheckpointingConfig
+
+logger = logging.getLogger(__name__)
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
@@ -164,7 +167,7 @@ class CheckpointManager:
         for checkpoint in checkpoint_history[self.keep_top_k :]:
             if exclude_latest and checkpoint[0] == latest_step:
                 continue
-            print(
+            logger.info(
                 f"Removing checkpoint {checkpoint[1]} due to being outside top-{self.keep_top_k}"
             )
             shutil.rmtree(checkpoint[1])

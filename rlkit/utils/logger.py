@@ -16,6 +16,7 @@
 
 import glob
 import json
+import logging
 import os
 import re
 import subprocess
@@ -32,6 +33,8 @@ from prometheus_client.parser import text_string_to_metric_families
 from prometheus_client.samples import Sample
 
 from rlkit.config.logging import LoggingConfig
+
+logger = logging.getLogger(__name__)
 
 
 class GpuMetricSnapshot(TypedDict):
@@ -90,7 +93,7 @@ class RayGpuMonitorLogger:
             daemon=True,  # Make this a daemon thread so it doesn't block program exit
         )
         self.collection_thread.start()
-        print(
+        logger.info(
             f"GPU monitoring started with collection interval={self.collection_interval}s, flush interval={self.flush_interval}s"
         )
 
@@ -102,7 +105,7 @@ class RayGpuMonitorLogger:
 
         # Final flush
         self.flush()
-        print("GPU monitoring stopped")
+        logger.info("GPU monitoring stopped")
 
     def _collection_loop(self) -> None:
         """Main collection loop that runs in a separate thread."""
@@ -130,7 +133,7 @@ class RayGpuMonitorLogger:
 
                 time.sleep(self.collection_interval)
             except Exception as e:
-                print(
+                logger.warning(
                     f"Error in GPU monitoring collection loop or stopped abruptly: {e}"
                 )
                 time.sleep(self.collection_interval)  # Continue despite errors
@@ -238,13 +241,13 @@ class RayGpuMonitorLogger:
         parser_fn = self._parse_metric if collect_metrics else self._parse_gpu_sku
 
         if not ray.is_initialized():  # type: ignore[arg-type] - pyrefly hallucinates a fake param here
-            print("Ray is not initialized. Cannot collect GPU metrics.")
+            logger.warning("Ray is not initialized. Cannot collect GPU metrics.")
             return {}
 
         try:
             nodes = ray.nodes()  # type: ignore[arg-type] - pyrefly hallucinates a fake param here
             if not nodes:
-                print("No Ray nodes found.")
+                logger.warning("No Ray nodes found.")
                 return {}
 
             # Use a dictionary to keep unique metric endpoints and maintain order
@@ -268,7 +271,7 @@ class RayGpuMonitorLogger:
             return collected_metrics
 
         except Exception as e:
-            print(f"Error collecting GPU metrics: {e}")
+            logger.error(f"Error collecting GPU metrics: {e}")
             return {}
 
     def _fetch_and_parse_metrics(
@@ -289,7 +292,7 @@ class RayGpuMonitorLogger:
         try:
             response = requests.get(url, timeout=5.0)
             if response.status_code != 200:
-                print(f"Error: Status code {response.status_code}")
+                logger.error(f"Error: Status code {response.status_code}")
                 return {}
 
             metrics_text = response.text
@@ -304,7 +307,7 @@ class RayGpuMonitorLogger:
             return gpu_metrics
 
         except Exception as e:
-            print(f"Error fetching metrics from {metric_address}: {e}")
+            logger.error(f"Error fetching metrics from {metric_address}: {e}")
             return {}
 
     def flush(self) -> None:
@@ -407,9 +410,9 @@ class Logger:
 
                 # Add file to artifact
                 diff_artifact.add_file(diff_path, name="uncommitted_changes_diff.txt")
-                print("Logged uncommitted changes diff to wandb")
+                logger.info("Logged uncommitted changes diff to wandb")
             else:
-                print("No uncommitted changes found")
+                logger.info("No uncommitted changes found")
 
             # 2. Log diff against main branch (if current branch is not main)
             if current_branch != "main":
@@ -429,16 +432,16 @@ class Logger:
 
                     # Add file to artifact
                     diff_artifact.add_file(diff_path, name="main_diff.txt")
-                    print("Logged diff against main branch")
+                    logger.info("Logged diff against main branch")
                 else:
-                    print("No differences found between main and working tree")
+                    logger.info("No differences found between main and working tree")
 
             self.run.log_artifact(diff_artifact)
 
         except subprocess.CalledProcessError as e:
-            print(f"Error during git operations: {e}")
+            logger.error(f"Error during git operations: {e}")
         except Exception as e:
-            print(f"Unexpected error during git diff logging: {e}")
+            logger.error(f"Unexpected error during git diff logging: {e}")
 
     def _log_code(self):
         """Log code that is tracked by git to wandb.
@@ -454,8 +457,8 @@ class Logger:
             tracked_files = result.stdout.strip().split("\n")
 
             if not tracked_files:
-                print(
-                    "Warning: No git repository found. Wandb logs will not track code changes for reproducibility."
+                logger.warning(
+                    "No git repository found. Wandb logs will not track code changes for reproducibility."
                 )
                 return
 
@@ -468,15 +471,15 @@ class Logger:
                     try:
                         code_artifact.add_file(file_path, name=file_path)
                     except Exception as e:
-                        print(f"Error adding file {file_path}: {e}")
+                        logger.error(f"Error adding file {file_path}: {e}")
 
             self.run.log_artifact(code_artifact)
-            print(f"Logged {len(tracked_files)} git-tracked files to wandb")
+            logger.info(f"Logged {len(tracked_files)} git-tracked files to wandb")
 
         except subprocess.CalledProcessError as e:
-            print(f"Error getting git-tracked files: {e}")
+            logger.error(f"Error getting git-tracked files: {e}")
         except Exception as e:
-            print(f"Unexpected error during git code logging: {e}")
+            logger.error(f"Unexpected error during git code logging: {e}")
 
     def define_metric(
         self,

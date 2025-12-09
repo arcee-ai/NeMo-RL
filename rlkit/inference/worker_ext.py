@@ -2,11 +2,14 @@
 """vLLM worker extension."""
 
 import asyncio
+import logging
 from collections import defaultdict
 from typing import Any
 
 import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
+
+logger = logging.getLogger(__name__)
 
 
 class VllmHttpWorkerExtension:
@@ -22,7 +25,10 @@ class VllmHttpWorkerExtension:
         local_rank = torch.distributed.get_rank()
         rank = rank_prefix + local_rank + 1  # 1 is the head node of the train cluster
 
-        print(f"vLLM worker ext @ init_collective: {rank_prefix=}, {ip=}, {port=}, {world_size=} on device {self.device} and rank {rank}")
+        logger.info(
+            f"vLLM worker ext @ init_collective: {rank_prefix=}, {ip=}, {port=}, {world_size=} "
+            f"on device {self.device} and rank {rank}"
+        )
 
         pg = StatelessProcessGroup.create(
             host=ip, port=port, rank=rank, world_size=world_size
@@ -131,7 +137,7 @@ class VllmHttpWorkerExtension:
             self.model_runner.model.load_weights(weights=weights)
             return True
         except Exception as e:
-            print(
+            logger.error(
                 f"Error in VllmInternalWorkerExtension.update_weights_from_ipc_handles: {e}"
             )
             return False
@@ -186,7 +192,7 @@ class VllmHttpWorkerExtension:
 
                 self.model_runner.model.load_weights(weights=weights_to_load)
         except Exception as e:
-            print(
+            logger.error(
                 f"Error in VllmInternalWorkerExtension.update_weights_from_collective: {e}"
             )
             return False

@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 import os
 from collections import defaultdict
 from typing import Any, Union
@@ -27,6 +28,8 @@ from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 from rlkit.training.utils import get_device_mesh_info
+
+logger = logging.getLogger(__name__)
 
 PathLike = Union[str, "os.PathLike[Any]"]
 
@@ -317,7 +320,7 @@ class Policy:
             # Use the worker group's shutdown method with the worker's cleanup method
             return self.worker_group.shutdown(cleanup_method="shutdown")
         except Exception as e:
-            print(f"Error during policy shutdown: {e}")
+            logger.error(f"Error during policy shutdown: {e}")
             return False
 
     def __del__(self) -> None:

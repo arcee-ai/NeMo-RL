@@ -18,6 +18,8 @@ from rlkit.utils.checkpoint import CheckpointManager
 from rlkit.utils.logger import Logger
 from rlkit.utils.timer import Timer
 
+logger = logging.getLogger(__name__)
+
 # Generic type for save state - each trainer defines its own TypedDict
 SaveStateT = TypeVar("SaveStateT")
 
@@ -185,7 +187,7 @@ class BaseTrainer[SaveStateT](ABC):
             num_gpus_per_node=gpus_per_node,
             max_colocated_worker_groups=1,
         )
-        logging.info(f"Training cluster initialized with {num_nodes} nodes and {gpus_per_node} GPUs per node.")
+        logger.info(f"Training cluster initialized with {num_nodes} nodes and {gpus_per_node} GPUs per node.")
         return cluster
 
     def _save_checkpoint(self, step: int, timer: Timer) -> None:

@@ -35,6 +35,8 @@ from .expert_parallel import (
 )
 from .utils import NoParallel, PrepareModuleInputOutput
 
+logger = logging.getLogger(__name__)
+
 
 def is_moe_enabled(module: nn.Module) -> bool:
     """Check if the module is a MoE layer."""
@@ -102,7 +104,7 @@ def _apply_ac_to_transformer_block(
                     )
                 out_f, in_f = submod.weight.shape
                 mm_recompute_shapes.add((in_f, out_f))
-            logging.debug(
+            logger.debug(
                 f"Selective op AC force recomputing mms with rhs shapes {mm_recompute_shapes}"
             )
 
@@ -166,7 +168,7 @@ def apply_ac(
         )
         model.layers.register_module(layer_id, transformer_block_ac)
 
-    logging.info(f"Applied {ac_mode} activation checkpointing to the model")
+    logger.info(f"Applied {ac_mode} activation checkpointing to the model")
 
 def apply_ddp(
     model: nn.Module,
@@ -185,7 +187,7 @@ def apply_ddp(
 
     replicate(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
-    logging.info("Applied DDP to the model")
+    logger.info("Applied DDP to the model")
 
 def parallelize_model(
     model: nn.Module,
@@ -284,15 +286,15 @@ def parallelize_model(
         )
 
         if dp_replicate > 1:
-            logging.info("Applied HSDP to the model")
+            logger.info("Applied HSDP to the model")
         else:
-            logging.info("Applied FSDP to the model")
+            logger.info("Applied FSDP to the model")
 
         if cp_size > 1:
-            logging.info("Applied Context Parallel to the model")
+            logger.info("Applied Context Parallel to the model")
 
         if enable_cpu_offload:
-            logging.info("Applied CPU Offloading to the model")
+            logger.info("Applied CPU Offloading to the model")
     elif dp_replicate > 1:
         if world_mesh.ndim > 1:
             raise RuntimeError("DDP has not supported > 1D parallelism")
@@ -390,7 +392,7 @@ def apply_non_moe_tp(
             parallelize_plan=layer_plan,
         )
 
-    logging.info(
+    logger.info(
         f"Applied {'Float8 tensorwise ' if enable_float8_tensorwise_tp else ''}"
         "Tensor Parallelism to the model"
     )
@@ -642,4 +644,4 @@ def apply_compile(model: nn.Module):
         transformer_block_compiled = torch.compile(transformer_block, fullgraph=fullgraph)
         model.layers.register_module(layer_id, transformer_block_compiled)
 
-    logging.info("Compiling each TransformerBlock with torch.compile")
+    logger.info("Compiling each TransformerBlock with torch.compile")

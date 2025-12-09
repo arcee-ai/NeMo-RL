@@ -2,6 +2,8 @@
 
 import os
 
+from rich.logging import RichHandler
+
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
 
@@ -17,6 +19,13 @@ from rlkit.algorithms.sft import SFTTrainer
 from rlkit.config.sft import SFTConfig
 from rlkit.distributed.virtual_cluster import init_ray
 from rlkit.utils.logger import get_next_experiment_dir
+
+logging.basicConfig(
+    level="NOTSET",
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)]
+)
 
 # Cope with asyncio spamming console on certain crashes
 logging.getLogger("asyncio").setLevel(logging.ERROR)

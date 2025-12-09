@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import importlib
+import logging
 import os
 from collections.abc import Iterable
 from typing import Any
@@ -21,6 +22,8 @@ from typing import Any
 import torch
 from torch.distributed.tensor import DTensor
 from transformers import AutoConfig
+
+logger = logging.getLogger(__name__)
 
 
 def get_gpu_info(model: torch.nn.Module) -> dict[str, Any]:
@@ -111,7 +114,7 @@ def sliding_window_overwrite(model_name: str) -> dict[str, Any]:
         overwrite_dict = {
             "sliding_window": None,
         }
-        print(
+        logger.info(
             f"use_sliding_window=False in config - overriding sliding_window parameter to None: {overwrite_dict}"
         )
 
@@ -131,7 +134,7 @@ def configure_expandable_segments() -> None:
 
         # Check if expandable_segments is already configured
         if "expandable_segments" in existing_conf:
-            print(f"expandable_segments already configured: {existing_conf}")
+            logger.info(f"expandable_segments already configured: {existing_conf}")
             # Already configured, don't override
             return
 
@@ -143,7 +146,7 @@ def configure_expandable_segments() -> None:
             # Set new configuration
             new_conf = "expandable_segments:True"
 
-        print(f"Setting PYTORCH_CUDA_ALLOC_CONF to {new_conf}")
+        logger.info(f"Setting PYTORCH_CUDA_ALLOC_CONF to {new_conf}")
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = new_conf
 
     else:

@@ -1,4 +1,5 @@
 """vLLM server coordinator."""
+import logging
 import os
 import sys
 import time
@@ -11,6 +12,8 @@ from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 from rlkit.config.policy import PolicyConfig
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http import VLLMOpenAIServe
+
+logger = logging.getLogger(__name__)
 
 
 class VllmHttpGeneration:
@@ -54,7 +57,7 @@ class VllmHttpGeneration:
 
         # Get node IDs for scheduling
         node_ids = [n["NodeID"] for n in available_nodes[:self.num_nodes]]
-        print(f"Scheduling {self.num_nodes} vLLM actors across nodes: {node_ids}")
+        logger.info(f"Scheduling {self.num_nodes} vLLM actors across nodes: {node_ids}")
 
         # Create all actors in parallel - each is on a different node so no GPU competition
         server_timeout = config.inference.server_timeout
@@ -80,7 +83,7 @@ class VllmHttpGeneration:
             )
             self.actors.append(actor)
 
-        print(f"Created {self.num_nodes} vLLM actors, waiting for engines to initialize...")
+        logger.info(f"Created {self.num_nodes} vLLM actors, waiting for engines to initialize...")
 
         # Wait for all actors to finish initializing in parallel
         polling_start = time.time()
@@ -95,7 +98,7 @@ class VllmHttpGeneration:
                     engine_ready = ray.get(actor.admin_engine_ready.remote(), timeout=2.0)
                     if engine_ready:
                         initialized[i] = True
-                        print(f"vLLM actor {i+1}/{self.num_nodes} initialized")
+                        logger.info(f"vLLM actor {i+1}/{self.num_nodes} initialized")
                 except Exception:
                     pass
 
@@ -107,7 +110,7 @@ class VllmHttpGeneration:
             failed = [i+1 for i, ok in enumerate(initialized) if not ok]
             raise RuntimeError(f"vLLM actors {failed} did not initialize in time (waited {server_timeout} seconds)")
 
-        print(f"All {self.num_nodes} vLLM actors initialized successfully")
+        logger.info(f"All {self.num_nodes} vLLM actors initialized successfully")
 
         self.client = openai.OpenAI(api_key="n/a", base_url="http://127.0.0.1:8000/v1")
         # The served model name from VLLMOpenAIServe defaults to "policy"

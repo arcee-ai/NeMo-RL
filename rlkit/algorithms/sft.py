@@ -17,6 +17,8 @@ from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.data.sft_datasets import transform_sample
 from rlkit.utils.timer import Timer
 
+logger = logging.getLogger(__name__)
+
 
 class SFTSaveState(TypedDict):
     """Saved state for SFT training."""
@@ -51,7 +53,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         self.data_config = config.data
 
         # Load and prepare datasets
-        logging.info("Loading datasets...")
+        logger.info("Loading datasets...")
         self.dataset_type = self.data_config.dataset_type
         self.train_dataset, self.val_dataset = self._load_datasets(self.data_config)
 
@@ -91,7 +93,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             else:
                 train_dataset = cast(Dataset, loaded)
 
-        logging.info(f"  ✓ Training dataset loaded with {len(train_dataset)} samples")
+        logger.info(f"Training dataset loaded with {len(train_dataset)} samples")
 
         # Load validation dataset
         val_dataset: Dataset | None = None
@@ -105,7 +107,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                 else:
                     val_dataset = cast(Dataset, loaded)
 
-            logging.info(f"  ✓ Validation dataset loaded with {len(val_dataset)} samples")
+            logger.info(f"Validation dataset loaded with {len(val_dataset)} samples")
 
         return train_dataset, val_dataset
 
@@ -156,7 +158,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             # Truncate if too long
             input_ids = input_ids[:max_seq_len]
             token_mask = token_mask[:max_seq_len]
-            logging.debug(f"Truncated sample from {len(sample['input_ids'])} to {max_seq_len} tokens")
+            logger.debug(f"Truncated sample from {len(sample['input_ids'])} to {max_seq_len} tokens")
 
         return {
             "token_ids": list(input_ids),
@@ -262,7 +264,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
 
                 # Log bin statistics
                 bin_stats = self._get_bin_stats(bins)
-                logging.debug(
+                logger.debug(
                     f"Step {step + 1}: Packed {bin_stats['num_bins']} bins "
                     f"(lengths: {bin_stats['min_bin_length']}-{bin_stats['max_bin_length']}, "
                     f"mean={bin_stats['mean_bin_length']:.1f})"
@@ -422,7 +424,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             num_batches += 1
 
         if num_batches == 0 or total_tokens == 0:
-            logging.warning("No validation batches completed")
+            logger.warning("No validation batches completed")
             return None
 
         return {

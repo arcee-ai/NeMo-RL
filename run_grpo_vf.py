@@ -4,6 +4,8 @@ import os
 
 # Prevent Ray from dumping a full copy of all of our venvs into /tmp every time this runs.
 os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
+# Alternates colors for each pid.
+os.environ["RAY_COLOR_PREFIX"] = "1"
 
 import argparse
 import asyncio
@@ -12,11 +14,25 @@ import pprint
 
 import torch
 import yaml
+from rich.logging import RichHandler
 
 from rlkit.algorithms.grpo import GRPOTrainer
 from rlkit.config.rl import RLConfig
 from rlkit.distributed.virtual_cluster import init_ray
 from rlkit.utils.logger import get_next_experiment_dir
+
+logging.basicConfig(
+    level="INFO",
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(
+        rich_tracebacks=True,
+        show_time=True,
+        show_level=False,
+        show_path=True,
+        markup=True,
+    )]
+)
 
 # Cope with asyncio spamming console on certain crashes
 logging.getLogger("asyncio").setLevel(logging.ERROR)

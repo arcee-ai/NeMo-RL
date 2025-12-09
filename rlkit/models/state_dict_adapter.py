@@ -11,7 +11,7 @@ from typing import Any
 
 from . import BaseModelArgs
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 class BaseStateDictAdapter(ABC):
     """Abstract base class for state dict transformations.

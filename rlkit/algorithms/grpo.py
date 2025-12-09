@@ -28,6 +28,8 @@ from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http_generation import VllmHttpGeneration
 from rlkit.utils.timer import Timer
 
+logger = logging.getLogger(__name__)
+
 
 class GRPOSaveState(TypedDict):
     """Saved state for GRPO."""
@@ -96,7 +98,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         self.consumed_example_ids: list[int] = self.save_state["consumed_example_ids"]
 
         # Load verifiers environment.
-        logging.info(f"Loading verifiers environment '{self.env_config.env_name}'.")
+        logger.info(f"Loading verifiers environment '{self.env_config.env_name}'.")
         self.vf_env = vf.load_environment(self.env_config.env_name, **self.env_config.env_kwargs)
 
         assert self.vf_env.dataset is not None, "vf_env.dataset must be set"
@@ -162,7 +164,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 lambda x: x["example_id"] not in consumed_set,
                 num_proc=os.cpu_count() or 1,
             ))
-            logging.info(f"  ✓ Filtered out {original_len - len(dataset)} consumed samples, {len(dataset)} remaining")
+            logger.info(f"  ✓ Filtered out {original_len - len(dataset)} consumed samples, {len(dataset)} remaining")
 
         dataloader = DataLoader(
             dataset,  # type: ignore[arg-type]
@@ -173,7 +175,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
             collate_fn=lambda x: x,
         )
 
-        logging.info(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
+        logger.info(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
 
         return dataloader
 
@@ -240,7 +242,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
             num_gpus_per_node=inference_gpus_per_node,
             max_colocated_worker_groups=1,
         )
-        logging.info(
+        logger.info(
             f"Ray inference cluster initialized with {inference_nodes} nodes with {inference_gpus_per_node} GPUs per node"
         )
 
@@ -256,7 +258,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         inference_cluster: RayVirtualCluster,
     ) -> VllmHttpGeneration:
         policy_generation = VllmHttpGeneration(inference_cluster, policy_config)
-        logging.info(f"Starting vLLM with model '{policy_config.model_name}'")
+        logger.info(f"Starting vLLM with model '{policy_config.model_name}'")
         return policy_generation
 
     def _initialize_collective_communication(
@@ -277,23 +279,23 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
             * self.inference.num_nodes
             + 1
         )
-        logging.info(
+        logger.info(
             f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})"
         )
         futures_train = self.policy.init_collective(ip, port, world_size)
         futures_inference = self.inference.init_collective(ip, port, world_size)
 
-        logging.info(
+        logger.info(
             f"Waiting for {len(futures_train)} training workers to init communication..."
         )
         for fut in futures_train:
             ray.get(fut)
-        logging.info(
+        logger.info(
             f"Waiting for {len(futures_inference)} inference workers to init communication..."
         )
         for fut in futures_inference:
             ray.get(fut)
-        logging.info("All workers initialized collective communication!")
+        logger.info("All workers initialized collective communication!")
 
     async def train(self) -> None:
         """Run training loop until finished."""
@@ -344,7 +346,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 if num_failed_attempts > max_failed_attempts:
                     raise RuntimeError(f"Failed to run rollout after {max_failed_attempts} attempts.") from e
 
-                logging.error(f"Error running rollout (attempt {num_failed_attempts}/{max_failed_attempts}): {e}")
+                logger.error(f"Error running rollout (attempt {num_failed_attempts}/{max_failed_attempts}): {e}")
                 await enqueue_rollout(example, step, num_failed_attempts + 1)
                 return
 
@@ -354,7 +356,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     await awaiting_packing.put(QueuedRollout(example, output, cur_metrics, step))
             else:
                 # TODO: Add a retry mechanism for invalid rollouts.
-                logging.warning("Ignoring an invalid rollout.")
+                logger.warning("Ignoring an invalid rollout.")
 
         target_in_flight = self.rollout_config.max_concurrent_rollouts or self.training_config.global_num_bins
         assert target_in_flight % self.rollout_config.group_size == 0, "max_concurrent_rollouts must be divisible by group_size"

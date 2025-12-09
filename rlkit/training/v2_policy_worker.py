@@ -57,6 +57,8 @@ from rlkit.utils.native_checkpoint import (
 
 from .utils import get_device_mesh_info
 
+logger = logging.getLogger(__name__)
+
 # Disable dynamo autotune_local_cache to avoid crash when there's already a cache with different order of node_bundles.
 # This must be set at module level to avoid Ray serialization issues with ConfigModuleInstance.
 torch._inductor.config.autotune_local_cache = False  # type: ignore[attr-defined]
@@ -124,7 +126,7 @@ class DTensorV2PolicyWorker:
         else:
             raise ValueError(f"Unknown dtype: {self.cfg.training.dtype}")
 
-        print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
+        logger.info(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
 
         self.model_name = model_name
 
@@ -140,7 +142,7 @@ class DTensorV2PolicyWorker:
         )
 
         full_state_dict = None
-        logging.info(f"Using custom model implementation for {model_name}")
+        logger.info(f"Using custom model implementation for {model_name}")
         custom_model_class, self.custom_model_args, adapter_class = get_model_config(self.model_config)
 
         self.adapter: BaseStateDictAdapter = adapter_class(
@@ -148,7 +150,7 @@ class DTensorV2PolicyWorker:
         )
 
         if self.rank == 0:
-            print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
+            logger.info(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
             model = AutoModelForCausalLM.from_pretrained(
                 # Either load from the original model name or from the weights path if available
                 hf_model_name,
@@ -164,7 +166,7 @@ class DTensorV2PolicyWorker:
             ), "Failed to convert HF state dict to custom state dict"
             del model
 
-        print("Initializing custom model on meta device...")
+        logger.info("Initializing custom model on meta device...")
         self.use_cut_cross_entropy = self.cfg.training.loss.loss_fn == "cut_cross_entropy"
         with init_empty_weights():
             self.model = custom_model_class(model_args=self.custom_model_args, skip_logits=self.use_cut_cross_entropy)
@@ -254,7 +256,7 @@ class DTensorV2PolicyWorker:
             activation_checkpointing=activation_checkpointing,
         )
 
-        logging.info(f"[Rank {self.rank}] Loading state dict from rank 0...")
+        logger.info(f"[Rank {self.rank}] Loading state dict from rank 0...")
         # This will broadcast the state dict from rank 0 to all other ranks
         # and load it into the FSDP model.
         set_model_state_dict(
@@ -357,7 +359,7 @@ class DTensorV2PolicyWorker:
 
         # Load DCP checkpoint if provided
         if weights_path and optimizer_path:
-            logging.info(f"Loading DCP checkpoint from {weights_path}")
+            logger.info(f"Loading DCP checkpoint from {weights_path}")
             self.load_dcp_checkpoint(weights_path, optimizer_path)
 
         self.refit_param_info = None
@@ -403,15 +405,15 @@ class DTensorV2PolicyWorker:
         from vllm.distributed.utils import StatelessProcessGroup
 
         if self.rank == 0:
-            logging.info(f"Initializing collective communication on trainer using PyNCCL (rank {self.rank}, world_size {world_size})")
+            logger.info(f"Initializing collective communication on trainer using PyNCCL (rank {self.rank}, world_size {world_size})")
             pg = StatelessProcessGroup.create(
                 host=ip, port=port, rank=0, world_size=world_size
             )
-            logging.info(f"Created StatelessProcessGroup (rank {self.rank}, world_size {world_size})")
+            logger.info(f"Created StatelessProcessGroup (rank {self.rank}, world_size {world_size})")
 
             device = torch.cuda.current_device()
             self.model_update_group = PyNcclCommunicator(pg, device=device)
-            logging.info(f"Initialized PyNcclCommunicator (rank {self.rank}, world_size {world_size})")
+            logger.info(f"Initialized PyNcclCommunicator (rank {self.rank}, world_size {world_size})")
 
     def is_alive(self) -> Literal[True]:
         """Check if the policy worker is working."""

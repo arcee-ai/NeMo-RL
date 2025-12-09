@@ -14,6 +14,7 @@
 
 """Checkpoint management utilities for HF models."""
 
+import logging
 import os
 from typing import Any
 
@@ -31,6 +32,8 @@ from torch.distributed.checkpoint.state_dict import (
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.optim import Optimizer
 from transformers import AutoConfig, AutoTokenizer
+
+logger = logging.getLogger(__name__)
 
 
 ## modified from pytorch tutorial https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html
@@ -195,7 +198,7 @@ def load_checkpoint(
         scheduler: Optional scheduler to load state into
         optimizer_path: Path to load optimizer state from (required if optimizer provided)
     """
-    print(f"Loading weights from {weights_path}")
+    logger.info(f"Loading weights from {weights_path}")
     model_state_dict = {"model": ModelState(model)}
     dcp.load(state_dict=model_state_dict, checkpoint_id=weights_path)
 
@@ -204,7 +207,7 @@ def load_checkpoint(
             raise ValueError(
                 "optimizer_path must be provided when loading optimizer state"
             )
-        print(f"Loading optimizer from {optimizer_path}")
+        logger.info(f"Loading optimizer from {optimizer_path}")
         optimizer_state_dict = {"optim": OptimizerState(model, optimizer, scheduler)}
         dcp.load(state_dict=optimizer_state_dict, checkpoint_id=optimizer_path)
 

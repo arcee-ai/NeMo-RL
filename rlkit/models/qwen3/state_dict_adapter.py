@@ -13,6 +13,8 @@ from rlkit.models.state_dict_adapter import BaseStateDictAdapter
 
 from .args import Qwen3ModelArgs
 
+logger = logging.getLogger(__name__)
+
 
 class Qwen3StateDictAdapter(BaseStateDictAdapter):
     """State dict adapter for Qwen3 model."""
@@ -62,14 +64,14 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
                 layer_num = layer_num_search.group(0)
                 new_key = to_hf_map.get(abstract_key)
                 if new_key is None:
-                    logging.warning(f"Key {key} not found in to_hf_map. Skipping.")
+                    logger.warning(f"Key {key} not found in to_hf_map. Skipping.")
                     hf_state_dict[key] = value
                     continue
                 new_key = new_key.format(layer_num)
             else:
                 new_key = to_hf_map.get(key)
                 if new_key is None:
-                    logging.warning(f"Key {key} not found in to_hf_map. Skipping.")
+                    logger.warning(f"Key {key} not found in to_hf_map. Skipping.")
                     continue
             hf_state_dict[new_key] = value
         return hf_state_dict
@@ -92,13 +94,13 @@ class Qwen3StateDictAdapter(BaseStateDictAdapter):
                 layer_num = layer_num_search.group(0)
                 new_key = self.from_hf_map.get(abstract_key)
                 if new_key is None:
-                    logging.warning(f"Key {key} not found in from_hf_map. Skipping.")
+                    logger.warning(f"Key {key} not found in from_hf_map. Skipping.")
                     continue
                 new_key = new_key.format(layer_num)
             else:
                 new_key = self.from_hf_map.get(key)
                 if new_key is None:
-                    logging.warning(f"Key {key} not found in from_hf_map. Skipping.")
+                    logger.warning(f"Key {key} not found in from_hf_map. Skipping.")
                     continue
             state_dict[new_key] = value
         return state_dict

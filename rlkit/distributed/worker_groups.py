@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -24,6 +25,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -168,7 +171,7 @@ class RayWorkerGroup:
         base_env = {k: v for k, v in os.environ.items() if k not in env_vars}
         base_env.update(env_vars)
 
-        print(f"Creating {world_size} workers...")
+        logger.info(f"Creating {world_size} workers...")
 
         for global_rank, (pg_idx, bundle_idx) in enumerate(worker_placements):
             pg = placement_groups[0] if len(placement_groups) == 1 else placement_groups[pg_idx]
@@ -214,7 +217,7 @@ class RayWorkerGroup:
             })
 
         # Wait for all workers to be ready
-        print(f"Waiting for {world_size} workers to initialize...")
+        logger.info(f"Waiting for {world_size} workers to initialize...")
         ray.get([w.__ray_ready__.remote() for w in self._workers])
 
     def _is_dp_leader(self, worker_idx: int) -> bool:
@@ -373,7 +376,7 @@ class RayWorkerGroup:
                 futures = self.run_all(cleanup_method)
                 ray.get(futures, timeout=timeout)
             except (ray.exceptions.RayTaskError, ray.exceptions.GetTimeoutError) as e:
-                print(f"Graceful shutdown failed: {e}. Force killing...")
+                logger.warning(f"Graceful shutdown failed: {e}. Force killing...")
                 force = True
                 success = False
 
@@ -383,7 +386,7 @@ class RayWorkerGroup:
                 try:
                     ray.kill(worker)
                 except Exception as e:
-                    print(f"Error killing worker: {e}")
+                    logger.error(f"Error killing worker: {e}")
                     success = False
 
         self._workers = []

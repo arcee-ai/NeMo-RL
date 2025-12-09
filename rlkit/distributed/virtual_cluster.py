@@ -25,7 +25,6 @@ from ray.util.placement_group import (
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Get the directory path of the current module and the root of the package
@@ -218,8 +217,8 @@ class RayVirtualCluster:
                 )
                 return self._node_placement_groups
             except ResourceInsufficientError as e:
-                print(e)
-                print(
+                logger.warning(str(e))
+                logger.warning(
                     f"Retrying placement group creation... {i + 1}/{max_retries}. Next retry in {2**i} seconds."
                 )
                 time.sleep(2**i)
@@ -369,7 +368,7 @@ class RayVirtualCluster:
                     remove_placement_group(pg)
                 except Exception as e:
                     # Log but continue if a placement group can't be removed
-                    print(f"Error removing placement group {pg.id}: {e}")
+                    logger.error(f"Error removing placement group {pg.id}: {e}")
 
             # Reset internal state
             self._node_placement_groups = None
