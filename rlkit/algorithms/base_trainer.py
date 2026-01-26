@@ -2,13 +2,16 @@
 
 import logging
 import os
+import random
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
+import numpy as np
+import torch
+import torch.cuda
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from rlkit.algorithms.utils import set_seed
 from rlkit.config.base import BaseConfig
 from rlkit.config.checkpointing import CheckpointingConfig
 from rlkit.config.policy import PolicyConfig
@@ -22,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 # Generic type for save state - each trainer defines its own TypedDict
 SaveStateT = TypeVar("SaveStateT")
+
+
+def set_seed(seed: int) -> None:
+    """Sets the seed for python, numpy, and pytorch."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def format_duration(seconds: float) -> str:

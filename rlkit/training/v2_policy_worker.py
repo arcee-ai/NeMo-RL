@@ -37,13 +37,16 @@ from transformers import (
     PreTrainedTokenizerBase,
 )
 
-from rlkit.algorithms.loss_functions import LossFunction
-from rlkit.algorithms.utils import _pad_tensor, masked_mean
 from rlkit.config.policy import PolicyConfig
+from rlkit.config.policy.loss import LossConfig
 from rlkit.models import BaseModel
 from rlkit.models.convert import get_model_config
 from rlkit.models.parallelize import parallelize_model
 from rlkit.models.state_dict_adapter import BaseStateDictAdapter
+from rlkit.training.loss_functions import (
+    create_loss_function,
+    masked_mean,
+)
 from rlkit.training.utils import (
     clip_grad_by_total_norm_,
     configure_expandable_segments,
@@ -62,6 +65,38 @@ logger = logging.getLogger(__name__)
 # Disable dynamo autotune_local_cache to avoid crash when there's already a cache with different order of node_bundles.
 # This must be set at module level to avoid Ray serialization issues with ConfigModuleInstance.
 torch._inductor.config.autotune_local_cache = False  # type: ignore[attr-defined]
+
+
+def _pad_tensor(
+    tensor: torch.Tensor,
+    max_len: int,
+    pad_side: str,
+    pad_value: int | float = 0,
+) -> torch.Tensor:
+    """Pad a tensor to the specified length.
+
+    Args:
+        tensor: Tensor to pad
+        max_len: Length to pad to
+        pad_side: Whether to pad on the 'left' or 'right'
+        pad_value: Value to use for padding
+
+    Returns:
+        torch.Tensor: Padded tensor
+    """
+    pad_len = max_len - tensor.size(0)
+    if pad_len <= 0:
+        return tensor
+
+    padding = torch.full(
+        (pad_len, *tensor.shape[1:]),
+        pad_value,
+        dtype=tensor.dtype,
+        device=tensor.device,
+    )
+    return torch.cat(
+        [padding, tensor] if pad_side == "left" else [tensor, padding], dim=0
+    )
 
 
 class PackedSample(TypedDict):
@@ -422,7 +457,7 @@ class DTensorV2PolicyWorker:
     def train(
         self,
         data: list[PackedSample],
-        loss_fn: LossFunction,
+        loss_config: LossConfig,
         pad_values: dict[str, int | float | bool],
         gbs: int | None = None,
         eval_mode: bool = False,
@@ -431,7 +466,7 @@ class DTensorV2PolicyWorker:
 
         Args:
             data: A list of PackedSample objects, each representing a packed sequence of at most seq_len tokens.
-            loss_fn: A LossFunction object.
+            loss_config: A LossConfig object that will be used to construct the loss function.
             pad_values: A dictionary mapping keys in data to the correct placeholder value to use when padding tensors.
             gbs: The global batch size to use for training. If not provided, the global batch size from the config will be used.
             eval_mode: A boolean indicating whether to run in evaluation mode.
@@ -439,6 +474,8 @@ class DTensorV2PolicyWorker:
         Returns:
             dict[str, Any]: Metrics from the training step.
         """
+        # Construct the loss function from the config
+        loss_fn = create_loss_function(loss_config)
         gbs = self.cfg.training.global_num_bins if gbs is None else gbs
         mbs = self.cfg.training.micro_batch_size
 

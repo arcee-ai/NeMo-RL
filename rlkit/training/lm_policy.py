@@ -22,8 +22,8 @@ import ray
 from ray.util.queue import Queue as RayQueue
 from transformers import PreTrainedTokenizerBase
 
-from rlkit.algorithms.loss_functions import LossFunction
 from rlkit.config.policy import PolicyConfig
+from rlkit.config.policy.loss import LossConfig
 from rlkit.distributed.named_sharding import NamedSharding
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
@@ -142,7 +142,7 @@ class Policy:
     async def train(
         self,
         sharded_data: list[list[dict[str, list[int | float]]]],
-        loss_fn: LossFunction,
+        loss_config: LossConfig,
         pad_values: dict[str, int | float | bool],
         gbs: int | None = None,
         eval_mode: bool = False,
@@ -152,7 +152,7 @@ class Policy:
         Args:
             sharded_data: List of shards (one per DP rank), where each shard is a list
                 of packed samples (dicts with token_ids, token_mask, etc.).
-            loss_fn: Loss function to use for training.
+            loss_config: Loss configuration used to construct the loss function on training workers.
             pad_values: Dictionary mapping field names to the placeholder value to use when padding tensors.
             gbs: The global batch size to use for training. If not provided, the global batch size from the config will be used.
             eval_mode: Whether to run in evaluation mode (no gradient updates).
@@ -170,7 +170,7 @@ class Policy:
             replicate_axes=["context_parallel", "tensor_parallel", "pipeline_parallel"],
             output_replicated_axes=["context_parallel", "tensor_parallel", "pipeline_parallel"],
             common_kwargs={
-                "loss_fn": loss_fn,
+                "loss_config": loss_config,
                 "eval_mode": eval_mode,
                 "pad_values": pad_values,
                 "gbs": gbs,

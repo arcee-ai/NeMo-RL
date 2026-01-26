@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from accelerate import init_empty_weights
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from rlkit.algorithms.utils import set_seed
+from rlkit.algorithms.base_trainer import set_seed
 from rlkit.models.convert import get_model_config
 
 set_seed(42)

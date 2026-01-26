@@ -1,4 +1,4 @@
-"""Loss functions."""
+"""Loss functions for training."""
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,13 +17,39 @@ from typing import Any, Protocol, TypedDict, TypeVar
 
 import torch
 
-from rlkit.algorithms.utils import (
-    calculate_kl_penalty_joschu2020,
-    masked_mean,
-)
-from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig
+from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig, LossConfig
 
 Tensor = TypeVar("Tensor", bound=torch.Tensor)
+
+
+def _calculate_kl_penalty_joschu2020(
+    logprobs_policy: torch.Tensor, logprobs_reference: torch.Tensor
+) -> torch.Tensor:
+    """Calculates a per-token estimate of the KL Divergence between two log_probs.
+
+    From Schulman 2020, always positive.
+
+    logprobs_policy:    torch.Tensor (b, s)
+    logprobs_reference: torch.Tensor (b, s)
+    """
+    r = logprobs_reference - logprobs_policy
+    return torch.exp(r) - r - 1
+
+
+def masked_mean(
+    values: torch.Tensor,
+    mask: torch.Tensor,
+    dim: int | None = None,
+    global_normalization_factor: torch.Tensor | float | None = None,
+):
+    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
+    normalization_factor = (
+        torch.sum(mask, dim=dim)
+        if global_normalization_factor is None
+        else global_normalization_factor
+    )
+    return torch.sum(values * mask, dim=dim) / (normalization_factor + 1e-8)
+
 
 class LossFunction(Protocol):
     """Signature for loss functions used in reinforcement learning algorithms.
@@ -67,6 +93,7 @@ class LossFunction(Protocol):
                   component losses, statistics about gradients/rewards, and other diagnostic information
         """
         ...
+
 
 class ClippedPGLossDataDict(TypedDict):
     """Required keys for the Clipped Policy Gradient loss function."""
@@ -189,7 +216,7 @@ class ClippedPGLossFn(LossFunction):
             kl = (
                 kl_importance_weights
                 * self.reference_policy_kl_penalty
-                * calculate_kl_penalty_joschu2020(
+                * _calculate_kl_penalty_joschu2020(
                     logprobs_policy=curr_logprobs,
                     logprobs_reference=reference_policy_logprobs,
                 )
@@ -412,7 +439,7 @@ class CISPOLossFn(LossFunction):
             kl = (
                 kl_importance_weights
                 * self.reference_policy_kl_penalty
-                * calculate_kl_penalty_joschu2020(
+                * _calculate_kl_penalty_joschu2020(
                     logprobs_policy=curr_logprobs,
                     logprobs_reference=reference_policy_logprobs,
                 )
@@ -554,3 +581,25 @@ class NLLLoss(LossFunction):
             "loss": loss.item() if loss.ndim == 0 else loss,
             "num_unmasked_tokens": mask.sum().item()
         }
+
+
+def create_loss_function(config: LossConfig) -> LossFunction:
+    """Create a loss function from a configuration.
+
+    Args:
+        config: Loss configuration object (discriminated union).
+
+    Returns:
+        LossFunction: An instantiated loss function.
+
+    Raises:
+        ValueError: If the loss function type is not supported.
+    """
+    if isinstance(config, ClippedPGLossConfig):
+        return ClippedPGLossFn(config)
+    elif isinstance(config, CISPOLossConfig):
+        return CISPOLossFn(config)
+    else:
+        # NLLLossConfig and CutCrossEntropyLossConfig don't need config
+        return NLLLoss()
+

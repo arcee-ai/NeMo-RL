@@ -11,10 +11,10 @@ from rich.console import Console
 from torch.utils.data import DataLoader
 
 from rlkit.algorithms.base_trainer import BaseTrainer, SamplesPerSecondEMA, format_duration
-from rlkit.algorithms.loss_functions import NLLLoss
+from rlkit.algorithms.sequence_packing import distribute_bins_for_dp, pack_sequences
+from rlkit.algorithms.sft_datasets import transform_sample
+from rlkit.config.policy.loss import NLLLossConfig
 from rlkit.config.sft import DataConfig, SFTConfig
-from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
-from rlkit.data.sft_datasets import transform_sample
 from rlkit.utils.timer import Timer
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,8 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                 shuffle=False,
             )
 
-        # Loss function (always NLL for SFT - cut_cross_entropy is unique and special-cased)
-        self.loss_fn = NLLLoss()
+        # Loss config (always NLL for SFT - cut_cross_entropy is unique and special-cased)
+        self.loss_config = NLLLossConfig()
 
 
     def _get_default_save_state(self) -> SFTSaveState:
@@ -281,7 +281,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
                 with timer.time("policy_training"):
                     train_results = await self.policy.train(
                         dist_bins,
-                        self.loss_fn,
+                        self.loss_config,
                         pad_values,
                         gbs=len(bins),
                     )
@@ -405,7 +405,7 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
 
             val_results = await self.policy.train(
                 dist_bins,
-                self.loss_fn,
+                self.loss_config,
                 pad_values,
                 eval_mode=True,
             )

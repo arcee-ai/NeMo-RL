@@ -5,7 +5,7 @@ import torch
 from datasets import Dataset
 from transformers import AutoTokenizer
 
-from rlkit.data.sft_datasets import transform_dataset, transform_sample
+from rlkit.algorithms.sft_datasets import transform_dataset, transform_sample
 
 
 def test_oai():

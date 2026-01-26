@@ -6,8 +6,8 @@ import logging
 from datasets import Dataset, get_dataset_config_names, load_dataset
 from transformers import AutoTokenizer
 
+from rlkit.algorithms.sft_datasets import transform_dataset
 from rlkit.config.sft import DatasetType
-from rlkit.data.sft_datasets import transform_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

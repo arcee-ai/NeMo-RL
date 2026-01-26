@@ -16,14 +16,9 @@ from rich.console import Console
 from torch.utils.data import DataLoader
 
 from rlkit.algorithms.base_trainer import BaseTrainer, SamplesPerSecondEMA, format_duration
-from rlkit.algorithms.loss_functions import (
-    CISPOLossFn,
-    ClippedPGLossFn,
-)
+from rlkit.algorithms.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.config.policy import PolicyConfig
-from rlkit.config.policy.loss import CISPOLossConfig, ClippedPGLossConfig
 from rlkit.config.rl import EnvironmentConfig, RLConfig
-from rlkit.data.sequence_packing import distribute_bins_for_dp, pack_sequences
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
 from rlkit.inference.vllm_http_generation import VllmHttpGeneration
 from rlkit.utils.timer import Timer
@@ -137,15 +132,8 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         state_dict_info = self.policy.prepare_refit_info()
         self.inference.prepare_refit_info(state_dict_info)
 
-        # Instantiate the appropriate loss function based on loss_fn discriminator
-        loss_cfg = self.training_config.loss
-        self.loss_fn: CISPOLossFn | ClippedPGLossFn
-        if isinstance(loss_cfg, CISPOLossConfig):
-            self.loss_fn = CISPOLossFn(loss_cfg)
-        elif isinstance(loss_cfg, ClippedPGLossConfig):
-            self.loss_fn = ClippedPGLossFn(loss_cfg)
-        else:
-            raise ValueError(f"Unsupported loss function: {loss_cfg.loss_fn}")
+        # Store the loss config to pass to training workers
+        self.loss_config = self.training_config.loss
 
         self.rollout_clients = []
         self.next_rollout_client = 0
@@ -499,7 +487,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 with timer.time("policy_training"):
                     train_results = await self.policy.train(
                         dist_bins,
-                        self.loss_fn,
+                        self.loss_config,
                         {
                             "token_ids": self.tokenizer.pad_token_id,
                             "token_mask": False,
