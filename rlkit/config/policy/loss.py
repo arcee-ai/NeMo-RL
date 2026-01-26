@@ -24,6 +24,10 @@ class CISPOLossConfig(BaseModel):
 
     epsilon_max: float
 
+    enable_icepop: bool = False
+    icepop_alpha: float = 0.5
+    icepop_beta: float = 2.0
+
 
 class NLLLossConfig(BaseModel):
     """Configuration for the NLL loss function."""

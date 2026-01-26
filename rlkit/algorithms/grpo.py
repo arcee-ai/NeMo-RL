@@ -173,40 +173,33 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         env_config: EnvironmentConfig,
         policy_config: PolicyConfig,
     ) -> Dataset:
-        # 1.0 is equivalent to doing nothing, so do nothing.
-        if env_config.max_prompt_length_ratio == 1.0:
-            return dataset
-
         max_prompt_tokens = int(policy_config.max_total_sequence_length * env_config.max_prompt_length_ratio)
 
-        def keep_batch(batch):
-            texts = batch.get("prompt")
-            if texts is None:
+        # Separate tokenizer variable to avoid capturing `self` in the closure.
+        tokenizer = self.tokenizer
+        def keep_sample(sample):
+            prompt = sample.get("prompt")
+            if prompt is None:
                 # Try "question" as a fallback.
-                questions = batch.get("question")
+                question = sample.get("question")
 
-                if questions is None:
+                if question is None:
                     # If both are none, raise an error.
                     raise KeyError("Dataset is missing both 'prompt' and 'question' fields, when one is required.")
 
                 # Convert to OpenAI message log
-                texts = [[{"role": "user", "content": question}] for question in questions]
+                prompt = [[{"role": "user", "content": question}] for question in question]
 
-            assert all(isinstance(text, list) for text in texts), "Each prompt must be a list of OpenAI messages."
-
-            enc = cast(list[dict[str, Any]], self.tokenizer.apply_chat_template(
-                texts,
+            enc = cast(list[int], tokenizer.apply_chat_template(
+                prompt,
                 tokenize=True,
                 add_special_tokens=True,
             ))
 
-            return [sample for i, sample in enumerate(batch) if len(enc[i]["input_ids"]) <= max_prompt_tokens]
+            return len(enc) <= max_prompt_tokens
 
         return cast(Dataset, dataset.filter(
-            keep_batch,
-            batched=True,
-            batch_size=16,
-            writer_batch_size=16,
+            keep_sample,
             num_proc=os.cpu_count() or 1,
         ))
 
@@ -326,8 +319,15 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         # List of rollouts that are waiting to be packed into a batch and trained on.
         packing_pool: list[QueuedRollout] = []
 
+        target_in_flight = self.rollout_config.max_concurrent_rollouts or self.training_config.global_num_bins
+        assert target_in_flight % self.rollout_config.group_size == 0, "max_concurrent_rollouts must be divisible by group_size"
+        max_staleness = self.rollout_config.max_staleness
+        in_flight = 0
+        invalid_rollouts = 0
+
         # Closure to asynchronously populate finished queue when a rollout is finished.
         async def enqueue_rollout(example: vf.RolloutInput, step: int, num_failed_attempts: int = 0, max_failed_attempts: int = 3) -> None:
+            nonlocal in_flight, invalid_rollouts
             try:
                 outputs, metrics, is_valid = await self._run_rollouts(example)
             except Exception as e:
@@ -344,12 +344,8 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     await awaiting_packing.put(QueuedRollout(example, output, cur_metrics, step))
             else:
                 # TODO: Add a retry mechanism for invalid rollouts.
-                logger.warning("Ignoring an invalid rollout.")
-
-        target_in_flight = self.rollout_config.max_concurrent_rollouts or self.training_config.global_num_bins
-        assert target_in_flight % self.rollout_config.group_size == 0, "max_concurrent_rollouts must be divisible by group_size"
-        max_staleness = self.rollout_config.max_staleness
-        in_flight = 0
+                invalid_rollouts += 1
+                in_flight -= self.rollout_config.group_size
 
         mean_bin_length = 0.0
         step_start = datetime.now()
@@ -362,6 +358,8 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 f"Waiting for rollouts... | "
                 f"pool=[yellow]{len(packing_pool)}[/] "
                 f"bin=[white]{mean_bin_length:.1f}[/] "
+                f"in_flight=[white]{in_flight}[/] "
+                f"invalid=[red]{invalid_rollouts}[/] "
                 f"time=[green]{elapsed:.2f}s[/] "
                 f"left=[blue]{total_samples - consumed_count}[/] "
             )
@@ -473,6 +471,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 num_samples_in_batch = len(trained_example_ids)
 
                 packing_pool = [x for x in packing_pool if x.output in remainder]
+                invalid_rollouts = 0
 
                 dist_bins = distribute_bins_for_dp(
                     bins=bins,
@@ -551,6 +550,40 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 total_tokens = int(sum(all_mb_metrics.get("num_unmasked_tokens", [0])))
                 throughput = total_tokens / train_time if train_time > 0 else 0.0
 
+                # Summarize and log loss-function metrics captured per-microbatch.
+                # The policy worker returns these under `all_mb_metrics` as lists; WandB needs scalars.
+                mb_summary_metrics: dict[str, float] = {}
+                for k, vals in all_mb_metrics.items():
+                    if not isinstance(vals, (list, tuple)) or len(vals) == 0:
+                        continue
+
+                    numeric: list[float] = []
+                    for val in vals:
+                        x = val
+                        if x is None:
+                            continue
+                        if isinstance(x, torch.Tensor):
+                            # Only log scalar tensors; skip vectors/matrices.
+                            if x.numel() != 1:
+                                continue
+                            x = x.item()
+                        try:
+                            numeric.append(float(x))
+                        except (TypeError, ValueError):
+                            continue
+
+                    if not numeric:
+                        continue
+
+                    # Include sum for "count-like" fields (e.g., token counts).
+                    if k.startswith("num_") or "token" in k:
+                        mb_summary_metrics[f"{k}/sum"] = float(np.sum(numeric))
+
+                    mb_summary_metrics[f"{k}/mean"] = float(np.mean(numeric))
+                    mb_summary_metrics[f"{k}/std"] = float(np.std(numeric))
+                    mb_summary_metrics[f"{k}/min"] = float(np.min(numeric))
+                    mb_summary_metrics[f"{k}/max"] = float(np.max(numeric))
+
                 # Build training metrics
                 train_metrics = {
                     "loss": loss,
@@ -564,11 +597,12 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 if "router_statistics" in train_results:
                     self.logger.log_metrics(train_results["router_statistics"], step, prefix="router")
 
-                self.logger.log_metrics({
-                    "env_metrics": summary_metrics,
-                    "coordinator_metrics": coordinator_metrics,
-                }, step)
+                # Log as flat scalar metrics (avoid nested dict values).
+                self.logger.log_metrics(summary_metrics, step, prefix="env")
+                self.logger.log_metrics(coordinator_metrics, step, prefix="coordinator")
                 self.logger.log_metrics(train_metrics, step, prefix="train")
+                if mb_summary_metrics:
+                    self.logger.log_metrics(mb_summary_metrics, step, prefix="train_mb")
 
                 mean_staleness = np.mean(step_staleness)
                 mean_reward = np.mean([x["reward"] for x in step_env_metrics])
@@ -588,6 +622,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                     f"stale=[yellow]{mean_staleness:.2f}[/] "
                     f"samples=[white]{num_samples_in_batch}[/] "
                     f"left=[blue]{remaining_count}[/] "
+                    f"time=[white]{step_elapsed:.2f}s[/] "
                     f"elapsed=[green]{format_duration(total_elapsed)}[/] "
                     f"eta=[yellow]{format_duration(eta_seconds)}[/]"
                 )

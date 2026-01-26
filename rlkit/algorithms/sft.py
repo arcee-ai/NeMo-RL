@@ -468,6 +468,38 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
         all_mb_metrics = train_results.get("all_mb_metrics", {})
         total_tokens = int(sum(all_mb_metrics.get("num_unmasked_tokens", [0])))
 
+        # Summarize and log loss-function metrics captured per-microbatch.
+        # These are returned as lists under `all_mb_metrics`; WandB needs scalars.
+        mb_summary_metrics: dict[str, float] = {}
+        for k, vals in all_mb_metrics.items():
+            if not isinstance(vals, (list, tuple)) or len(vals) == 0:
+                continue
+
+            numeric: list[float] = []
+            for val in vals:
+                x = val
+                if x is None:
+                    continue
+                if isinstance(x, torch.Tensor):
+                    if x.numel() != 1:
+                        continue
+                    x = x.item()
+                try:
+                    numeric.append(float(x))
+                except (TypeError, ValueError):
+                    continue
+
+            if not numeric:
+                continue
+
+            if k.startswith("num_") or "token" in k:
+                mb_summary_metrics[f"{k}/sum"] = float(np.sum(numeric))
+
+            mb_summary_metrics[f"{k}/mean"] = float(np.mean(numeric))
+            mb_summary_metrics[f"{k}/std"] = float(np.std(numeric))
+            mb_summary_metrics[f"{k}/min"] = float(np.min(numeric))
+            mb_summary_metrics[f"{k}/max"] = float(np.max(numeric))
+
         # Log to console
         throughput = total_tokens / train_time if train_time > 0 else 0.0
         console.log(
@@ -497,6 +529,8 @@ class SFTTrainer(BaseTrainer[SFTSaveState]):
             self.logger.log_metrics(train_results["router_statistics"], step + 1, prefix="router")
 
         self.logger.log_metrics(metrics, step + 1, prefix="train")
+        if mb_summary_metrics:
+            self.logger.log_metrics(mb_summary_metrics, step + 1, prefix="train_mb")
 
         # Add step time to timing metrics
         timing_metrics["step_time"] = step_elapsed
