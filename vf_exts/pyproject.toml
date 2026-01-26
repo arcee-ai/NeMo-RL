@@ -17,6 +17,6 @@ description = "RLKit vf_exts - verifiers environment stdlib for RLKit"
 requires-python = ">=3.13"
 license = {text = "Apache 2.0"}
 dependencies = [
-    "verifiers==0.1.8.post1",
+    "verifiers==0.1.9.post3",
     "ray[default]==2.52.1",
 ]
