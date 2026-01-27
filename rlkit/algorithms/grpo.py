@@ -3,15 +3,13 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
 
 import numpy as np
-import openai
 import ray
 import torch
 import verifiers as vf
 from datasets import Dataset
-from openai.types.chat.chat_completion import ChatCompletion
 from rich.console import Console
 from torch.utils.data import DataLoader
 
@@ -20,7 +18,8 @@ from rlkit.algorithms.sequence_packing import distribute_bins_for_dp, pack_seque
 from rlkit.config.policy import PolicyConfig
 from rlkit.config.rl import EnvironmentConfig, RLConfig
 from rlkit.distributed.virtual_cluster import RayVirtualCluster
-from rlkit.inference.vllm_http_generation import VllmHttpGeneration
+from rlkit.inference.verifiers_rollout_driver import VerifiersRolloutDriver
+from rlkit.inference.vllm_ray_backend import VllmRayBackend
 from rlkit.utils.timer import Timer
 
 logger = logging.getLogger(__name__)
@@ -117,9 +116,8 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
             inference_gpus_per_node,
         ) = self._setup_inference_cluster(self.policy_config)
 
-        self.inference: VllmHttpGeneration = self._initialize_generation_interface(
+        self.inference: VllmRayBackend = self._initialize_generation_interface(
             self.policy_config,
-            inference_cluster,
         )
 
         self._initialize_collective_communication(
@@ -135,8 +133,13 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         # Store the loss config to pass to training workers
         self.loss_config = self.training_config.loss
 
-        self.rollout_clients = []
-        self.next_rollout_client = 0
+        self.rollout_driver = VerifiersRolloutDriver(
+            env=self.vf_env,
+            backend=self.inference,
+            tokenizer=self.tokenizer,
+            inference_config=self.inference_config,
+            max_seq_len=self.policy_config.max_total_sequence_length,
+        )
 
     def _setup_dataloader(
         self,
@@ -207,7 +210,7 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         self,
         policy_config: PolicyConfig
     ) -> tuple[
-        RayVirtualCluster,
+        RayVirtualCluster | None,
         int,
         int,
     ]:
@@ -216,19 +219,12 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         inference_gpus_per_node = inference_resources.gpus_per_node
         inference_nodes = inference_resources.num_nodes
 
-        inference_cluster = RayVirtualCluster(
-            name="grpo_inference_cluster",
-            bundle_ct_per_node_list=[inference_gpus_per_node] * inference_nodes,
-            use_gpus=True,
-            num_gpus_per_node=inference_gpus_per_node,
-            max_colocated_worker_groups=1,
-        )
         logger.info(
-            f"Ray inference cluster initialized with {inference_nodes} nodes with {inference_gpus_per_node} GPUs per node"
+            f"Inference resources: {inference_nodes} nodes with {inference_gpus_per_node} GPUs per node"
         )
 
         return (
-            inference_cluster,
+            None,
             inference_nodes,
             inference_gpus_per_node,
         )
@@ -236,16 +232,18 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
     def _initialize_generation_interface(
         self,
         policy_config: PolicyConfig,
-        inference_cluster: RayVirtualCluster,
-    ) -> VllmHttpGeneration:
-        policy_generation = VllmHttpGeneration(inference_cluster, policy_config)
-        logger.info(f"Starting vLLM with model '{policy_config.model_name}'")
-        return policy_generation
+    ) -> VllmRayBackend:
+        logger.info(f"Starting vLLM (Ray backend) with model '{policy_config.model_name}'")
+        return VllmRayBackend(
+            model=policy_config.model_name,
+            max_model_len=policy_config.max_total_sequence_length,
+            inference_config=policy_config.inference,
+        )
 
     def _initialize_collective_communication(
         self,
         train_cluster: RayVirtualCluster,
-        inference_cluster: RayVirtualCluster,
+        inference_cluster: RayVirtualCluster | None,
         inference_nodes: int,
         inference_gpus_per_node: int,
     ) -> None:
@@ -254,12 +252,6 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         )
         ip, port = train_cluster.get_master_address_and_port()
         world_size = inference_nodes * inference_gpus_per_node + 1
-        world_size = (
-            self.inference.tp_size
-            * self.inference.dp_size
-            * self.inference.num_nodes
-            + 1
-        )
         logger.info(
             f"Using ip: {ip}, port: {port} for collective communication (world_size: {world_size})"
         )
@@ -656,45 +648,27 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
         Returns:
             Tuple of (rollout outputs, rollout metrics, is_valid) where is_valid is True if group has non-zero variance.
         """
-        # Lazy-initialize rollout clients on first call.
-        if len(self.rollout_clients) == 0:
-            self.rollout_clients = [openai.AsyncOpenAI(api_key="n/a", base_url=f"http://{ip}:8000/v1") for ip in self.inference.get_ips()]
+        sampling_args = dict(self.inference_config.sampling_args)
+        sampling_args["logprobs"] = sampling_args.get("logprobs", 1)
 
-        # Mandatory sampling args for vLLM, plus user-specified ones
-        sampling_args = {
-            "logprobs": 1,
-            "extra_body": {
-                "return_token_ids": True,
-            },
-            **self.inference_config.sampling_args,
-        }
-
-        # Call out to verifiers to generate and grade responses.
-        results: vf.GenerateOutputs = await self.vf_env.generate(
+        states = await self.rollout_driver.generate_group(
             inputs=[example] * self.rollout_config.group_size,
-            client=self.rollout_clients[self.next_rollout_client],
-            model="policy",
             sampling_args=sampling_args,
-            use_tqdm=False
         )
 
-        # Increment to next client for round-robin load balancing.
-        self.next_rollout_client = (self.next_rollout_client + 1) % len(self.rollout_clients)
-
-        # Reset prefix cache on vLLM actors now that this rollout step is done
         await self.inference.finish_generation()
 
-        output = []
+        rewards = [state.get("reward", 0.0) for state in states]
 
         # Calculate response-level advantages.
         advantages, is_valid = self._compute_advantages(
-            results["reward"],
+            rewards,
             self.rollout_config.use_leave_one_out_baseline,
             self.rollout_config.use_std_normalization,
         )
 
-        # Stich returned trajectories into full tokenized responses.
-        for i, state in enumerate(results["state"]):
+        output = []
+        for i, state in enumerate(states):
             token_ids, generation_logprobs, completion_mask = self._stitch_trajectory_steps(state["trajectory"])
             output.append({
                 "token_ids": token_ids,
@@ -703,12 +677,13 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
                 "advantages": [advantages[i]] * len(token_ids),
             })
 
-        metrics = {
-            "reward": results["reward"],
-            **results["metrics"],
-        }
+        metrics: dict[str, list[float]] = {}
+        for state in states:
+            if state.get("metrics"):
+                for k, v in state["metrics"].items():
+                    metrics.setdefault(k, []).append(v)
 
-        return output, metrics, is_valid
+        return output, {"reward": rewards, **metrics}, is_valid
 
     def _stitch_trajectory_steps(self, steps: list[vf.TrajectoryStep]) -> tuple[list[int], list[float], list[bool]]:
         """Stitch trajectory steps into token IDs and generation logprobs.
@@ -725,15 +700,11 @@ class GRPOTrainer(BaseTrainer[GRPOSaveState]):
 
         # Go over backwards, overwriting parts of the mask and logprobs as we go to get the full sequence.
         for step in reversed(steps):
-            assert isinstance(step["response"], ChatCompletion), f"Expected ChatCompletion, got {type(step['response'])}"
-            response: ChatCompletion = step["response"]
-            prompt_token_ids: list[int] = response.prompt_token_ids # type: ignore[attr-defined]
-            completion_token_ids: list[int] = response.choices[0].token_ids # type: ignore[attr-defined]
-
-            assert hasattr(response.choices[0].logprobs, "content"), "Expected logprobs in response"
-            assert response.choices[0].logprobs.content is not None, "Expected logprobs in response"
-
-            completion_logprobs = [x.logprob for x in response.choices[0].logprobs.content]
+            tokens = step["tokens"]
+            assert tokens is not None, "Trajectory step is missing tokens"
+            prompt_token_ids = list(tokens["prompt_ids"])
+            completion_token_ids = list(tokens["completion_ids"])
+            completion_logprobs = list(tokens["completion_logprobs"])
 
             # Last response, which should have the full sequence.
             if len(token_ids) == 0:

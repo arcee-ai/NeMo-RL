@@ -55,8 +55,13 @@ policy:
       num_nodes: 1
 
   inference:
+    tp_size: 1
+    pp_size: 1
+    enable_expert_parallel: false
     dtype: "bfloat16"
-    server_timeout: 6000
+    max_num_seqs: 2048
+    enable_chunked_prefill: true
+    tool_call_parser: null
     sampling_args:
       temperature: 1.0
       top_p: 1.0
