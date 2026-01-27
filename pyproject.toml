@@ -53,6 +53,10 @@ dependencies = [
     "pydantic>=2.12.5",
 ]
 
+[project.scripts]
+rl = "rlkit.cli:rl"
+sft = "rlkit.cli:sft"
+
 [tool.uv.sources]
 vf_exts = { path = "vf_exts", editable = true }
 
