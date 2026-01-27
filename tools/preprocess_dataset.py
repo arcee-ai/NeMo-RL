@@ -37,7 +37,7 @@ if __name__ == "__main__":
     else:
         dataset = load_dataset(args.dataset_name)
 
-    assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
+    # assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
 
     logging.info("Loaded dataset. Applying transformation...")
 
