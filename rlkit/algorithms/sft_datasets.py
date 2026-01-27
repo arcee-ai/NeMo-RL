@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from datasets import DatasetDict
 import json
 from collections.abc import Callable
 from typing import Any, cast
@@ -121,7 +122,7 @@ def transform_sample(sample: dict, dataset_type: DatasetType, tokenizer: PreTrai
         return transformations[dataset_type](tokenizer, sample)
     return sample
 
-def transform_dataset(dataset: Dataset, dataset_type: DatasetType, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
+def transform_dataset(dataset: Dataset | DatasetDict, dataset_type: DatasetType, tokenizer: PreTrainedTokenizerBase | None, num_proc: int = 8) -> Dataset:
     """Transform a dataset into the RLKit native format."""
     if dataset_type != "native":
         if dataset_type not in transformations:
