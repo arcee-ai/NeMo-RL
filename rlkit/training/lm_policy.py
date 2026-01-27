@@ -249,10 +249,13 @@ class Policy:
                 )
 
         # Convert to fractions per layer and calculate expert balance
+        max_vio_global: float | None = None
         for layer_key, expert_counts in layer_stats.items():
             total_counts = sum(expert_counts.values())
             layer_id = layer_key.replace("layer_", "")
             expert_fractions = []
+            num_experts = len(expert_counts)
+            expected_fraction = 1.0 / num_experts if num_experts > 0 else 0.0
 
             if total_counts > 0:
                 for expert_idx, count in expert_counts.items():
@@ -276,6 +279,15 @@ class Policy:
                 # Single expert case - perfect balance by definition
                 expert_balance = 0.0
             aggregated_router_stats[f"expert_balance_{layer_id}"] = expert_balance
+
+            max_fraction = max(expert_fractions) if expert_fractions else 0.0
+            max_vio = max(0.0, max_fraction - expected_fraction)
+            aggregated_router_stats[f"max_vio_{layer_id}"] = max_vio
+            if max_vio_global is None or max_vio > max_vio_global:
+                max_vio_global = max_vio
+
+        if max_vio_global is not None:
+            aggregated_router_stats["max_vio"] = max_vio_global
 
         return aggregated_router_stats
 
