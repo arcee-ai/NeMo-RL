@@ -15,6 +15,7 @@ if __name__ == "__main__":
     parser.add_argument("output_path", type=str)
     parser.add_argument("--tokenizer-name", type=str, required=False, default=None)
     parser.add_argument("--ds-config", type=str, required=False, default=None)
+    parser.add_argument("--ds-split", type=str, required=False, default=None)
     parser.add_argument("--num-proc", type=int, default=8)
     parser.add_argument("--push-to-hub", action="store_true")
     parser.add_argument("--hf-private", action="store_true")
@@ -29,13 +30,14 @@ if __name__ == "__main__":
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
 
     ds_configs = get_dataset_config_names(args.dataset_name)
+    split = args.ds_split if args.ds_split is not None else "train"
     if len(ds_configs) > 1:
         if args.ds_config is None:
             raise ValueError(f"Dataset has configs {ds_configs}, but --ds-config was not provided.")
         else:
-            dataset = load_dataset(args.dataset_name, args.ds_config)
+            dataset = load_dataset(args.dataset_name, args.ds_config, split=split)
     else:
-        dataset = load_dataset(args.dataset_name)
+        dataset = load_dataset(args.dataset_name, split=split)
 
     # assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
 
