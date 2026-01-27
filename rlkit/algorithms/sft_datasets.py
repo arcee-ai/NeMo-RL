@@ -24,6 +24,25 @@ from rlkit.config.sft import DatasetType
 
 SFTDataTransformFn = Callable[[PreTrainedTokenizerBase | None, dict], dict]
 
+def _normalize_tool_calls(conversation: list[dict[str, Any]]) -> None:
+    for message in conversation:
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            func = tool_call.get("function")
+            if not isinstance(func, dict):
+                continue
+            args = func.get("arguments")
+            if not isinstance(args, str):
+                continue
+            try:
+                func["arguments"] = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+
 def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
     assert tokenizer is not None, "Tokenizer is required for OpenAI dataset transformation"
     conversation = x["conversations"] if "conversations" in x else x["messages"]
@@ -40,6 +59,7 @@ def _transform_oai(tokenizer: PreTrainedTokenizerBase | None, x: dict) -> dict:
     if isinstance(oai_tools, str):
         oai_tools = json.loads(oai_tools)
 
+    _normalize_tool_calls(conversation)
     tokenized = cast(dict[str, Any], tokenizer.apply_chat_template(
         conversation,
         tokenize=True,
@@ -115,7 +135,6 @@ def transform_dataset(dataset: Dataset, dataset_type: DatasetType, tokenizer: Pr
         transform_fn = transformations[dataset_type]
         dataset = cast(Dataset, dataset.map(lambda x: transform_fn(tokenizer, x), num_proc=num_proc, remove_columns=drop_cols))
     return dataset
-
 
 
 

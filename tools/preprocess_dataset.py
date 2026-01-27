@@ -7,12 +7,11 @@ from datasets import Dataset, get_dataset_config_names, load_dataset
 from transformers import AutoTokenizer
 
 from rlkit.algorithms.sft_datasets import transform_dataset
-from rlkit.config.sft import DatasetType
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset_name", type=str)
-    parser.add_argument("dataset_type", type=DatasetType)
+    parser.add_argument("dataset_type", type=str)
     parser.add_argument("output_path", type=str)
     parser.add_argument("--tokenizer-name", type=str, required=False, default=None)
     parser.add_argument("--ds-config", type=str, required=False, default=None)
