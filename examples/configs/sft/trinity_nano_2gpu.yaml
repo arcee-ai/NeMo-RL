@@ -2,7 +2,7 @@ category: "rlkit-sft-debug"
 name: "trinity-nano-ultrachat-2gpu"
 
 sft:
-  max_steps: null
+  max_steps: 10000
   val_period: 100
   val_num_bins: 8
   val_at_start: true
