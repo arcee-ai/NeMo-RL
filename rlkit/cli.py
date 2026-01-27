@@ -128,7 +128,7 @@ def sft() -> None:
         config_path=config_path,
         config_cls=SFTConfig,
         trainer_cls=SFTTrainer,
-        log_level="NOTSET",
+        log_level="INFO",
         rich_kwargs={"rich_tracebacks": True},
         enable_color_prefix=False,
     )
